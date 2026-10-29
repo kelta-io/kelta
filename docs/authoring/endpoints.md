@@ -49,7 +49,7 @@ it before routing.
 `internal` marks an endpoint only the platform's own admin UI or services call; it is reachable, but
 not a supported integration surface and may change without notice.
 
-**404** public endpoints: **312** linked to docs, **29** internal,
+**405** public endpoints: **313** linked to docs, **29** internal,
 **63** not yet documented.
 
 ## Endpoints
@@ -58,6 +58,7 @@ not a supported integration surface and may change without notice.
 | --- | --- | --- | --- | --- |
 | GET | `/api/_search` | worker | API_ACCESS | [api/querying](/docs/api/querying/#full-text-and-semantic-search) |
 | POST | `/api/admin/authorization/test` | worker | API_ACCESS; handler checks MANAGE_USERS | internal — Backs the admin console's authorization tester, which asks Cerbos whether a user/resource/action would be allowed; it changes nothing. |
+| POST | `/api/admin/availability/synthetic-events` | worker | API_ACCESS; handler checks MANAGE_DATA | [platform/messaging](/docs/platform/messaging/#synthetic-events) |
 | GET | `/api/admin/campaigns` | worker | API_ACCESS; handler checks MANAGE_CAMPAIGNS | [platform/messaging](/docs/platform/messaging/#campaigns) |
 | POST | `/api/admin/campaigns` | worker | API_ACCESS; handler checks MANAGE_CAMPAIGNS | [platform/messaging](/docs/platform/messaging/#campaigns) |
 | GET | `/api/admin/campaigns/suppressions` | worker | API_ACCESS; handler checks MANAGE_CAMPAIGNS | [platform/messaging](/docs/platform/messaging/#campaigns) |

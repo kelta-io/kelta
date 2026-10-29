@@ -21,7 +21,7 @@ public class WatchTargetRepository {
 
     private static final String COLUMNS = """
             id, tenant_id, source, external_id, name, category,
-            metadata::text AS metadata, active
+            metadata::text AS metadata, active, synthetic
             """;
 
     private static final RowMapper<WatchTarget> MAPPER = (rs, rowNum) -> new WatchTarget(
@@ -32,7 +32,8 @@ public class WatchTargetRepository {
             rs.getString("name"),
             rs.getString("category"),
             rs.getString("metadata"),
-            rs.getBoolean("active"));
+            rs.getBoolean("active"),
+            rs.getBoolean("synthetic"));
 
     private final JdbcTemplate jdbc;
 
@@ -61,10 +62,14 @@ public class WatchTargetRepository {
                 .stream().findFirst();
     }
 
-    /** Active targets for a source — what a poller asks for to know its work list. */
+    /**
+     * Active targets for a source — what a poller asks for to know its work list. Synthetic
+     * targets are excluded: only the admin injector drives them, so no poller is ever asked to
+     * poll one.
+     */
     public List<WatchTarget> findActiveBySource(String tenantId, String source) {
         return jdbc.query("SELECT " + COLUMNS + " FROM watch_target "
-                + "WHERE tenant_id = ? AND source = ? AND active ORDER BY name",
+                + "WHERE tenant_id = ? AND source = ? AND active AND NOT synthetic ORDER BY name",
                 MAPPER, tenantId, source);
     }
 }

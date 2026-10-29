@@ -134,3 +134,55 @@ The URL is checked by the same outbound guard as other tenant-supplied URLs: it 
 A receiver on a private network (an in-cluster service, an RFC 1918 host) is refused — recorded `FAILED` with
 `webhook URL refused: the host resolves to a non-public address` — unless the operator lists its range in
 `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` on the worker (comma-separated CIDRs).
+
+### Synthetic events
+
+To test the alert path end to end (an E2E suite, a scheduled canary) without a provider poll, mark a watch target
+`synthetic` and inject an observation for it. The injected observation goes through the same matcher and delivery
+code as a polled one, so it creates the same alert and delivery rows, records the same latency metric, and sends
+the same `availability` flow trigger. That trigger's summary carries `"synthetic": true`, so flows can ignore it.
+
+**The `synthetic` flag.** `synthetic` is a boolean field on `watch-targets` (default `false`). A synthetic target
+can only be driven by the injector:
+
+- the poller work list (active targets for a source) leaves synthetic targets out;
+- an event a poller publishes on `kelta.availability.event.<tenantId>.<source>` for a synthetic target is dropped
+  before anything is recorded;
+- the injector refuses a target that is not synthetic.
+
+A poller that lists its targets over JSON:API should add `filter[synthetic][eq]=false` so it never polls a
+synthetic target.
+
+**The endpoint.** `POST /api/admin/availability/synthetic-events` requires an internal user whose profile holds
+`MANAGE_DATA`. The body:
+
+```json
+{
+  "targetId": "…",
+  "slotKey": "2026-08-14",
+  "window": { "start": "2026-08-14T00:00:00Z", "end": "2026-08-16T00:00:00Z" },
+  "quantity": 2
+}
+```
+
+Only `targetId` is required. The endpoint records one `OPEN` observation and answers `201`:
+
+```json
+{ "data": { "targetId": "…", "slotKey": "synthetic-…", "status": "OPEN", "alerts": 2, "alertIds": ["…", "…"] } }
+```
+
+`alerts` is the number of watches alerted. Each one was delivered over its channels before the response returned.
+
+**Repeat injections.** An alert is sent once per opening of a slot. Without a `slotKey`, each injection uses a new
+`synthetic-<uuid>` slot, so every call is a new opening and alerts each matching `ACTIVE` watch again. This is the
+mode for a canary. With an explicit `slotKey`, the slot follows the normal rules: injecting again while it is still
+`OPEN` alerts no one (`alerts: 0`). Each fresh slot leaves one `availability_state` row behind.
+
+Refusals use the JSON:API error envelope:
+
+| Status | `code` | When |
+|---|---|---|
+| `403` | `FORBIDDEN` | the caller is a portal user, or an internal user without `MANAGE_DATA`. The gateway also refuses portal users on every `/api/admin/**` path. |
+| `400` | `INVALID_PAYLOAD` | `targetId` is missing, `window.start`/`window.end` is not an ISO-8601 instant, or `quantity` is not an integer |
+| `404` | `TARGET_NOT_FOUND` | no watch target with that id in the tenant |
+| `422` | `TARGET_NOT_SYNTHETIC` | the target is a real, polled target |

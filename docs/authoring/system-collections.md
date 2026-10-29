@@ -112,6 +112,6 @@ Each is served like a user collection at its API path (JSON:API, see
 | `users` | Users | — | `/api/users` | yes | no | display `email`; required `userType`, `status` |
 | `validation-rules` | Validation Rules | — | `/api/validation-rules` | yes | no | display `name`; required `collectionId`, `errorConditionFormula`, `errorMessage`, `evaluateOn`, `severity` |
 | `video-sessions` | Video Sessions | — | `/api/video-sessions` | yes | no | display `id`; required `roomName`, `status` |
-| `watch-targets` | Watch Targets | — | `/api/watch-targets` | yes | no | display `name`; required `source`, `externalId`, `active` |
+| `watch-targets` | Watch Targets | — | `/api/watch-targets` | yes | no | display `name`; required `source`, `externalId`, `active`, `synthetic` |
 | `watches` | Watches | — | `/api/watches` | yes | no | display `id`; required `status` |
 | `wins` | Wins | — | `/api/wins` | yes | no | display `summary`; required `isPublic` |

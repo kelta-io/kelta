@@ -926,6 +926,21 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `OutboundUrlGuard` bean (3 s connect / 5 s deadline, no redirects, no retries); non-2xx, timeout
   or guard refusal ⇒ FAILED with the reason, 2xx ⇒ SENT and timed under `channel=webhook`. Not in
   `BILLABLE_CHANNELS`; a tenant gating channels must list `webhook` in its `channels` entitlement.
+- **Synthetic watch targets + injector**: `watch_target.synthetic` (V219, default false) marks a
+  test target that only `POST /api/admin/availability/synthetic-events` drives
+  (`SyntheticAvailabilityController` → `SyntheticAvailabilityService`; internal `MANAGE_DATA` via
+  `SupportPermissions.internalHoldsAny`, PORTAL refused). The injector builds an OPEN
+  `AvailabilityEvent` and calls `AvailabilityEventListener.process(tenant, event, INJECTOR)`, the
+  same match → dispatch → flow-bridge body the NATS handler runs with `POLLER`. The trigger summary
+  carries `synthetic`. `AvailabilityMatchService.process(…, Origin)` drops an observation whose
+  target does not belong to its origin before `availability_state` is touched: a poller cannot
+  drive a synthetic target, and the injector cannot drive a real one.
+  `WatchTargetRepository.findActiveBySource` (the poller work list) excludes synthetic targets.
+  External pollers that list targets over JSON:API must filter `synthetic = false` themselves.
+  Episodes: with no `slotKey` each call uses a fresh `synthetic-<uuid>` slot, so every call is a
+  new opening and alerts again. An explicit `slotKey` that is still OPEN keeps its episode and
+  re-alerts no one. Refusals: 403 `FORBIDDEN`, 400 `INVALID_PAYLOAD`, 404 `TARGET_NOT_FOUND`,
+  422 `TARGET_NOT_SYNTHETIC`.
 - **Member win API + ticker** (consumer-alerting slices 9, K-8): `/api/wins/**` is a static route
   (`API_ACCESS` only; scoping in `WinController`). `POST /api/wins`, `GET /api/wins` and
   `GET /api/wins/{id}` are self-only (owner from `X-User-Id`) with the same

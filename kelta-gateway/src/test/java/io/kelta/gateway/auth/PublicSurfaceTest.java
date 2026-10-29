@@ -121,6 +121,7 @@ class PublicSurfaceTest {
             // to be open, and anything open here is scrapeable.
             for (String path : List.of(
                     "/api/watches", "/api/watch-targets", "/api/alerts",
+                    "/api/admin/availability/synthetic-events",
                     "/api/modules/kelta-billing/x/plans", "/api/modules/kelta-billing/x/me",
                     "/api/modules/kelta-billing/x/checkout-sessions",
                     "/api/collections", "/api/records", "/api/analytics", "/api/reports",

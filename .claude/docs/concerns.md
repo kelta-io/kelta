@@ -327,6 +327,7 @@ request logs and audit, register custom domains, and push a notification to ever
 | `DelegatedAdminScopeController` | `/api/admin/delegated-admin-scopes/**` | `MANAGE_DELEGATED_ADMINS` |
 | `DelegatedUserAdminController` | `/api/admin/delegated/**` | the caller's delegated-admin scope (`DelegatedAdminService.effectiveScope`, re-read per request); `GET /me` answers any caller with its own summary |
 | `CampaignAdminController` | `/api/admin/campaigns/**` | `MANAGE_CAMPAIGNS` |
+| `SyntheticAvailabilityController` | `POST /api/admin/availability/synthetic-events` | `MANAGE_DATA`, via `SupportPermissions.internalHoldsAny` (a PORTAL caller is refused before the profile lookup). It sends **real** alerts to every ACTIVE watch on the synthetic target, so a canary should own the only watches on its target |
 
 Residuals: the permission is read from the caller's **profile** system permissions
 (`BootstrapRepository.findProfileSystemPermissions`), as every older admin controller already
@@ -604,6 +605,11 @@ between history rows and an under-privileged caller; treat changes to either as 
   cycle. Per-run volume is bounded by `kelta.flow.step-log.max-snapshot-bytes` (64 KiB; larger
   snapshots are stored as a `_truncated` marker — `flow_execution.state_data` is never capped) and
   the flow's `stepLogging` (`FULL|ERRORS_ONLY|NONE`, V211).
+- **`availability_state` — one row per synthetic injection without a `slotKey`.** The admin
+  injector (`SyntheticAvailabilityService`) mints a fresh `synthetic-<uuid>` slot each call so a
+  canary alerts every time. Nothing prunes `availability_state` or `alert`, so a daily canary adds
+  a state row, plus an alert and delivery row per watch, each day. Synthetic alerts also count in
+  `kelta_alert_delivery_latency_seconds` and `GET /api/alerts/latency`; nothing excludes them yet.
 - **`analytics_event` — `AnalyticsRetentionSweep` is DRY-RUN by default**
   (`kelta.analytics.retention.dry-run`, 90 days). Same posture as the flow sweep. Batch ingest /
   partition by `occurred_at` only when volume justifies it. `member_id` erasure on account close is
