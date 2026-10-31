@@ -2,6 +2,9 @@ package io.kelta.auth.controller;
 
 import io.kelta.auth.config.AuthProperties;
 import io.kelta.auth.model.KeltaUserDetails;
+import io.kelta.auth.service.LoginMfaPolicy;
+import io.kelta.auth.service.PasswordPolicyService;
+import io.kelta.auth.service.TotpService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import jakarta.servlet.http.HttpServletRequest;
@@ -40,6 +43,12 @@ import java.util.UUID;
  * because Spring AOT (GraalVM native image) resolves bean conditions at build
  * time, where the runtime env var {@code DIRECT_LOGIN_ENABLED} is unset and
  * the bean would otherwise be pruned from the binary.
+ * <p>
+ * Same password checks as the browser sign-in: the request goes through the shared
+ * {@link AuthenticationManager}, so a lockout refuses it and a wrong password counts towards one
+ * ({@code AuthenticationEventListener}). There is no second step here, so an account the browser
+ * sign-in would send to an MFA step ({@link LoginMfaPolicy}: an enrolled TOTP, or a tenant password
+ * policy that requires MFA) is refused with {@code 401 mfa_required} and gets no token.
  */
 @RestController
 @RequestMapping("/auth/direct-login")
@@ -53,13 +62,17 @@ public class DirectLoginController {
     private final AuthenticationManager authenticationManager;
     private final JwtEncoder jwtEncoder;
     private final AuthProperties authProperties;
+    private final LoginMfaPolicy mfaPolicy;
 
     public DirectLoginController(AuthenticationManager authenticationManager,
                                  JwtEncoder jwtEncoder,
-                                 AuthProperties authProperties) {
+                                 AuthProperties authProperties,
+                                 TotpService totpService,
+                                 PasswordPolicyService passwordPolicyService) {
         this.authenticationManager = authenticationManager;
         this.jwtEncoder = jwtEncoder;
         this.authProperties = authProperties;
+        this.mfaPolicy = new LoginMfaPolicy(totpService, passwordPolicyService);
     }
 
     @PostMapping
@@ -106,6 +119,18 @@ public class DirectLoginController {
         if (!(authentication.getPrincipal() instanceof KeltaUserDetails userDetails)) {
             return ResponseEntity.status(500)
                     .body(Map.of("error", "server_error", "error_description", "Unexpected principal type"));
+        }
+
+        // The browser sign-in would continue with an MFA step here; this endpoint has none.
+        LoginMfaPolicy.Step mfaStep = mfaPolicy.requiredStep(userDetails.getId(), userDetails.getTenantId());
+        if (mfaStep != LoginMfaPolicy.Step.NONE) {
+            log.info("Direct login refused for user {} (tenant: {}): the account requires MFA ({})",
+                    userDetails.getEmail(), userDetails.getTenantId(), mfaStep);
+            return ResponseEntity.status(401)
+                    .body(Map.of(
+                            "error", "mfa_required",
+                            "error_description", "This account requires multi-factor authentication; "
+                                    + "use the browser sign-in"));
         }
 
         Instant now = Instant.now();

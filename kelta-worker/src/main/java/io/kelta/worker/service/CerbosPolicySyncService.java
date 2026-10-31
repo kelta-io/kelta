@@ -17,6 +17,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
 import java.util.Base64;
@@ -32,6 +33,13 @@ import java.util.regex.Pattern;
  *   <li>Generates Cerbos policy JSON via {@link CerbosPolicyGenerator}</li>
  *   <li>Pushes policies to Cerbos Admin API</li>
  * </ol>
+ *
+ * <p>The Admin API's basic-auth credential is {@code kelta.worker.cerbos.admin-username} /
+ * {@code kelta.worker.cerbos.admin-password} ({@code KELTA_WORKER_CERBOS_ADMIN_USERNAME} /
+ * {@code KELTA_WORKER_CERBOS_ADMIN_PASSWORD}). The password has no built-in default: when it is
+ * blank the service logs one ERROR at startup and refuses every push (policies, base policies and
+ * the startup seed) with {@link #ADMIN_PASSWORD_MISSING}, so permission changes stop reaching
+ * Cerbos until it is set. Authorization checks are unaffected — they go to the PDP over gRPC.
  */
 @Service
 public class CerbosPolicySyncService {
@@ -41,6 +49,11 @@ public class CerbosPolicySyncService {
     static final String BASE_COLLECTION_POLICY_ID = "resource.collection.vdefault";
 
     private static final String SUBJECT_PREFIX = "kelta.cerbos.policies.changed.";
+
+    /** Why a push is refused when no Admin API password is configured. */
+    static final String ADMIN_PASSWORD_MISSING = "the Cerbos Admin API password is not configured "
+            + "(kelta.worker.cerbos.admin-password / KELTA_WORKER_CERBOS_ADMIN_PASSWORD); "
+            + "Cerbos policies are not pushed";
 
     /** The caller's {@code platform_user.id} UUID on every Cerbos principal (gateway and worker). */
     static final String PRINCIPAL_USER_ID = "P.attr.userId";
@@ -59,6 +72,7 @@ public class CerbosPolicySyncService {
     private final PlatformEventPublisher eventPublisher;
     private final WorkerCacheManager cacheManager;
     private final String cerbosAdminUrl;
+    /** The Basic credential for the Admin API, or null when no password is configured. */
     private final String cerbosAdminAuth;
 
     public CerbosPolicySyncService(
@@ -71,7 +85,7 @@ public class CerbosPolicySyncService {
             @Value("${kelta.worker.cerbos.host:cerbos.emf.svc.cluster.local}") String cerbosHost,
             @Value("${kelta.worker.cerbos.http-port:3592}") int cerbosHttpPort,
             @Value("${kelta.worker.cerbos.admin-username:cerbos}") String adminUsername,
-            @Value("${kelta.worker.cerbos.admin-password:cerbosAdmin2026}") String adminPassword) {
+            @Value("${kelta.worker.cerbos.admin-password:}") String adminPassword) {
         this.jdbcTemplate = jdbcTemplate;
         this.bootstrapRepository = bootstrapRepository;
         this.policyGenerator = policyGenerator;
@@ -82,8 +96,20 @@ public class CerbosPolicySyncService {
                 .connectTimeout(java.time.Duration.ofSeconds(5))
                 .build();
         this.cerbosAdminUrl = "http://" + cerbosHost + ":" + cerbosHttpPort;
-        this.cerbosAdminAuth = "Basic " + Base64.getEncoder()
-                .encodeToString((adminUsername + ":" + adminPassword).getBytes());
+        if (adminPassword == null || adminPassword.isBlank()) {
+            this.cerbosAdminAuth = null;
+            log.error("Cerbos policy sync is disabled: {}. Set it to the Admin API password of the "
+                    + "Cerbos at {}; permission changes will not take effect until then.",
+                    ADMIN_PASSWORD_MISSING, cerbosAdminUrl);
+        } else {
+            this.cerbosAdminAuth = "Basic " + Base64.getEncoder().encodeToString(
+                    (adminUsername + ":" + adminPassword).getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    /** True when an Admin API password is configured, so policies can be pushed. */
+    public boolean isAdminApiConfigured() {
+        return cerbosAdminAuth != null;
     }
 
     /**
@@ -93,6 +119,10 @@ public class CerbosPolicySyncService {
         if (tenantId == null || tenantId.isBlank()) {
             // Never bind an empty tenant: that is the RLS bypass setting.
             log.warn("Skipping Cerbos policy sync: no tenant id");
+            return;
+        }
+        if (!isAdminApiConfigured()) {
+            log.error("Cerbos policies for tenant {} not synced: {}", tenantId, ADMIN_PASSWORD_MISSING);
             return;
         }
         // Every caller hands in the tenant to act for; on a request path that is the tenant
@@ -157,6 +187,10 @@ public class CerbosPolicySyncService {
      * for scoped per-tenant policies. Without these, scoped policies fail to compile.
      */
     public void seedBasePolicies() {
+        if (!isAdminApiConfigured()) {
+            log.error("Base Cerbos policies not seeded: {}", ADMIN_PASSWORD_MISSING);
+            return;
+        }
         try {
             log.info("Seeding base (ancestor) Cerbos policies for resource kinds");
             for (String resource : List.of("system_feature", "collection", "field", "record")) {
@@ -173,6 +207,10 @@ public class CerbosPolicySyncService {
      * Syncs policies for all active tenants.
      */
     public void syncAllTenants() {
+        if (!isAdminApiConfigured()) {
+            log.error("Cerbos policies not synced for any tenant: {}", ADMIN_PASSWORD_MISSING);
+            return;
+        }
         List<Map<String, Object>> tenants = bootstrapRepository.findRoutableTenants();
         log.info("Syncing Cerbos policies for {} tenants", tenants.size());
 
@@ -190,6 +228,9 @@ public class CerbosPolicySyncService {
      * empty (fresh/restored Cerbos) or unreachable — either way the caller should seed.
      */
     public boolean basePoliciesPresent() {
+        if (!isAdminApiConfigured()) {
+            return false;
+        }
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(cerbosAdminUrl + "/admin/policies"))
@@ -215,6 +256,9 @@ public class CerbosPolicySyncService {
     }
 
     private void pushPolicy(Map<String, Object> policy) throws Exception {
+        if (!isAdminApiConfigured()) {
+            throw new IllegalStateException(ADMIN_PASSWORD_MISSING);
+        }
         // Cerbos Admin API expects {"policies": [...]} wrapper
         Map<String, Object> wrapper = new LinkedHashMap<>();
         wrapper.put("policies", List.of(policy));

@@ -61,7 +61,8 @@ look like the ingress. Setting trusted proxies fixes both.
 
 ## Auth server
 
-- `DIRECT_LOGIN_ENABLED=false`.
+- `DIRECT_LOGIN_ENABLED=false`. Where it is on (test environments), accounts that require MFA are refused and
+  must use the browser sign-in.
 - Sign in as the platform admin (`admin@kelta.local`, tenant `default`) and change the first-boot password before
   the deployment takes traffic. kelta-auth replaces the database's seeded password on first boot — with
   `KELTA_BOOTSTRAP_ADMIN_PASSWORD`, or a generated one printed once in its log — and forces a change at first
@@ -114,6 +115,7 @@ ingress. Actuator endpoints beyond health should not be public.
 - [ ] `DIRECT_LOGIN_ENABLED=false`
 - [ ] `KELTA_SECURITY_TRUSTED_PROXIES` set to the ingress pod CIDR on the gateway and the auth server
 - [ ] `KELTA_MODULES_SIGNING_REQUIRED=true`
+- [ ] `KELTA_WORKER_CERBOS_ADMIN_PASSWORD` set on the worker (no built-in default; without it no policy is pushed)
 - [ ] Only the gateway, auth and ui are reachable from the internet
 - [ ] Secrets in a secret manager; `KELTA_ENCRYPTION_KEY` backed up
 - [ ] Database role without `BYPASSRLS`

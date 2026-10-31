@@ -25,7 +25,7 @@ class ReservedCollectionNameHookTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"track", "webhooks", "reports", "files", "users", "admin"})
+    @ValueSource(strings = {"track", "webhooks", "reports", "files", "users", "admin", "ai"})
     @DisplayName("a name the gateway serves as a static route is rejected on create")
     void staticSegmentNameIsRejected(String name) {
         BeforeSaveResult result = hook.beforeCreate(record("name", name), "t1");

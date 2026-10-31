@@ -4,6 +4,7 @@ import com.zaxxer.hikari.HikariDataSource;
 import io.kelta.auth.config.AuthProperties;
 import io.kelta.auth.config.AuthorizationServerConfig;
 import io.kelta.auth.config.TenantContextFilter;
+import io.kelta.auth.controller.DirectLoginController;
 import io.kelta.runtime.context.TenantAwareDataSource;
 import jakarta.servlet.FilterChain;
 import org.junit.jupiter.api.AfterAll;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -27,6 +29,9 @@ import org.springframework.security.authentication.event.AuthenticationSuccessEv
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import org.testcontainers.junit.jupiter.Container;
@@ -34,11 +39,13 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -55,6 +62,11 @@ import static org.mockito.Mockito.when;
  * <p>kelta-auth owns no migrations, so the tables it authenticates against are recreated here
  * with the columns these classes read and the RLS policy shapes kelta-worker gives them (as in
  * {@code TenantBindingIntegrationTest}).
+ *
+ * <p>{@code POST /auth/direct-login} goes through the same {@link ProviderManager}, so it is
+ * driven here too: its failures count and a lockout refuses it, and an account the browser
+ * sign-in would send to an MFA step (a verified TOTP row, read through RLS like the credential,
+ * or a tenant policy requiring MFA) gets {@code 401 mfa_required} instead of tokens.
  *
  * <p>Runs only where Docker is available (Testcontainers).
  */
@@ -81,6 +93,7 @@ class FailedSignInLockoutIntegrationTest {
     static HikariDataSource pool;
     static TenantContextFilter filter;
     static ProviderManager authenticationManager;
+    static DirectLoginController directLogin;
 
     @BeforeAll
     static void createSchemaAndRole() {
@@ -136,6 +149,17 @@ class FailedSignInLockoutIntegrationTest {
                     max_age_days             integer,
                     mfa_required             boolean NOT NULL DEFAULT false
                 )""");
+        admin.execute("""
+                CREATE TABLE user_totp_secret (
+                    id                  varchar(36) PRIMARY KEY,
+                    user_id             varchar(36) NOT NULL UNIQUE REFERENCES platform_user(id) ON DELETE CASCADE,
+                    secret              varchar(500) NOT NULL,
+                    verified            boolean NOT NULL DEFAULT false,
+                    last_used_at        bigint,
+                    mfa_failed_attempts integer NOT NULL DEFAULT 0,
+                    mfa_locked_until    timestamp with time zone,
+                    updated_at          timestamp with time zone
+                )""");
 
         admin.execute("ALTER TABLE platform_user ENABLE ROW LEVEL SECURITY");
         admin.execute("ALTER TABLE ONLY platform_user FORCE ROW LEVEL SECURITY");
@@ -155,9 +179,21 @@ class FailedSignInLockoutIntegrationTest {
         admin.execute("""
                 CREATE POLICY admin_bypass ON user_credential
                     USING (current_setting('app.current_tenant_id', true) = '')""");
+        admin.execute("ALTER TABLE user_totp_secret ENABLE ROW LEVEL SECURITY");
+        admin.execute("ALTER TABLE ONLY user_totp_secret FORCE ROW LEVEL SECURITY");
+        admin.execute("""
+                CREATE POLICY tenant_isolation ON user_totp_secret
+                    USING (EXISTS (SELECT 1 FROM platform_user p
+                                   WHERE p.id = user_totp_secret.user_id
+                                     AND (p.tenant_id)::text = current_setting('app.current_tenant_id', true)))""");
+        admin.execute("""
+                CREATE POLICY admin_bypass ON user_totp_secret
+                    USING (current_setting('app.current_tenant_id', true) = '')""");
 
         admin.update("INSERT INTO tenant (id, slug, name) VALUES (?, 'tenant-a', 'Tenant A')", TENANT_A);
         admin.update("INSERT INTO tenant (id, slug, name) VALUES (?, 'tenant-b', 'Tenant B')", TENANT_B);
+        // Direct login puts the profile in the token, so every test user has one.
+        admin.update("INSERT INTO profile (id, name) VALUES ('p-test', 'Test Profile')");
         insertUser("u-a", TENANT_A, SHARED_EMAIL, "ACTIVE", PASSWORD_A);
         insertUser("u-b", TENANT_B, SHARED_EMAIL, "ACTIVE", PASSWORD_B);
         insertUser("u-a-former", TENANT_A, INACTIVE_EMAIL, "INACTIVE", PASSWORD_A);
@@ -197,6 +233,17 @@ class FailedSignInLockoutIntegrationTest {
                 listener.onSuccess(success);
             }
         }));
+
+        JwtEncoder jwtEncoder = mock(JwtEncoder.class);
+        Jwt jwt = Jwt.withTokenValue("token-value").header("alg", "RS256").claim("sub", "user")
+                .issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(3600)).build();
+        when(jwtEncoder.encode(any(JwtEncoderParameters.class))).thenReturn(jwt);
+        AuthProperties props = new AuthProperties();
+        props.getDirectLogin().setEnabled(true);
+        props.setIssuerUri("https://auth.example.com");
+        TotpService totpService = new TotpService(app, ENCODER, null, mock(WorkerClient.class));
+        directLogin = new DirectLoginController(authenticationManager, jwtEncoder, props,
+                totpService, policyService);
     }
 
     @AfterAll
@@ -209,11 +256,13 @@ class FailedSignInLockoutIntegrationTest {
     @BeforeEach
     void clearCounters() {
         admin.update("UPDATE user_credential SET failed_attempts = 0, locked_until = NULL");
+        admin.update("DELETE FROM user_totp_secret");
+        admin.update("DELETE FROM password_policy");
     }
 
     private static void insertUser(String id, String tenantId, String email, String status, String password) {
-        admin.update("INSERT INTO platform_user (id, tenant_id, email, first_name, last_name, status) "
-                + "VALUES (?, ?, ?, 'Test', 'User', ?)", id, tenantId, email, status);
+        admin.update("INSERT INTO platform_user (id, tenant_id, email, first_name, last_name, profile_id, status) "
+                + "VALUES (?, ?, ?, 'Test', 'User', 'p-test', ?)", id, tenantId, email, status);
         admin.update("INSERT INTO user_credential (id, user_id, password_hash) VALUES (?, ?, ?)",
                 "c-" + id, id, ENCODER.encode(password));
     }
@@ -244,6 +293,31 @@ class FailedSignInLockoutIntegrationTest {
         };
         filter.doFilter(request, new MockHttpServletResponse(), chain);
         return outcome.get();
+    }
+
+    /**
+     * POSTs /auth/direct-login the way a script does: no session yet (the controller creates it
+     * and records the tenant slug), through {@link TenantContextFilter}. Returns the status and
+     * the JSON body.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map.Entry<Integer, Map<String, Object>> directSignIn(String tenantSlug, String email,
+                                                                       String password) throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/auth/direct-login");
+        AtomicReference<ResponseEntity<?>> outcome = new AtomicReference<>();
+        FilterChain chain = (req, res) -> {
+            RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+            try {
+                outcome.set(directLogin.login(
+                        new DirectLoginController.DirectLoginRequest(email, password, tenantSlug),
+                        request.getSession(true), request));
+            } finally {
+                RequestContextHolder.resetRequestAttributes();
+            }
+        };
+        filter.doFilter(request, new MockHttpServletResponse(), chain);
+        ResponseEntity<?> response = outcome.get();
+        return Map.entry(response.getStatusCode().value(), (Map<String, Object>) response.getBody());
     }
 
     private static Map<String, Object> credential(String userId) {
@@ -327,5 +401,58 @@ class FailedSignInLockoutIntegrationTest {
 
         assertThat(credential("u-a").get("failed_attempts")).isEqualTo(THRESHOLD);
         assertThat(credential("u-a").get("locked_until")).isNotNull();
+    }
+
+    @Test
+    @DisplayName("direct login: wrong passwords count against the sign-in tenant's account and a lockout refuses it")
+    void directLoginFailuresCountAndLockoutApplies() throws Exception {
+        for (int i = 0; i < THRESHOLD; i++) {
+            var refused = directSignIn("tenant-a", SHARED_EMAIL, "wrong");
+            assertThat(refused.getKey()).isEqualTo(401);
+            assertThat(refused.getValue()).containsEntry("error", "invalid_credentials");
+        }
+
+        assertThat(credential("u-a").get("failed_attempts")).isEqualTo(THRESHOLD);
+        assertThat(credential("u-a").get("locked_until")).isNotNull();
+        var locked = directSignIn("tenant-a", SHARED_EMAIL, PASSWORD_A);
+        assertThat(locked.getKey()).isEqualTo(401);
+        assertThat(locked.getValue()).containsEntry("error", "invalid_credentials");
+
+        assertThat(credential("u-b").get("failed_attempts")).isEqualTo(0);
+        var other = directSignIn("tenant-b", SHARED_EMAIL, PASSWORD_B);
+        assertThat(other.getKey()).isEqualTo(200);
+        assertThat(other.getValue()).containsKey("access_token");
+    }
+
+    @Test
+    @DisplayName("direct login refuses an account with a verified TOTP enrollment")
+    void directLoginRefusesEnrolledAccount() throws Exception {
+        admin.update("INSERT INTO user_totp_secret (id, user_id, secret, verified) VALUES ('t-a', 'u-a', 'x', true)");
+
+        var refused = directSignIn("tenant-a", SHARED_EMAIL, PASSWORD_A);
+
+        assertThat(refused.getKey()).isEqualTo(401);
+        assertThat(refused.getValue()).containsEntry("error", "mfa_required").doesNotContainKey("access_token");
+        // The password was right: the attempt is not counted as a failure.
+        assertThat(credential("u-a").get("failed_attempts")).isEqualTo(0);
+        // An unverified (abandoned) enrollment is not an MFA requirement.
+        admin.update("UPDATE user_totp_secret SET verified = false WHERE id = 't-a'");
+        assertThat(directSignIn("tenant-a", SHARED_EMAIL, PASSWORD_A).getKey()).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("direct login refuses an unenrolled account when its tenant's policy requires MFA — only in that tenant")
+    void directLoginRefusesWhenTenantRequiresMfa() throws Exception {
+        admin.update("""
+                INSERT INTO password_policy (tenant_id, min_length, max_length, require_uppercase,
+                    require_lowercase, require_digit, require_special, history_count, dictionary_check,
+                    personal_data_check, lockout_threshold, lockout_duration_minutes, mfa_required)
+                VALUES (?, 8, 128, false, false, false, false, 0, false, false, 5, 30, true)""", TENANT_B);
+
+        var refused = directSignIn("tenant-b", SHARED_EMAIL, PASSWORD_B);
+        assertThat(refused.getKey()).isEqualTo(401);
+        assertThat(refused.getValue()).containsEntry("error", "mfa_required");
+
+        assertThat(directSignIn("tenant-a", SHARED_EMAIL, PASSWORD_A).getKey()).isEqualTo(200);
     }
 }

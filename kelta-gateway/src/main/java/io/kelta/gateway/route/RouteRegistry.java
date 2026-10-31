@@ -64,7 +64,11 @@ public class RouteRegistry {
             // for every tenant, since the registry is keyed by path alone. Module HTTP routes,
             // signed-JAR upload, file serving, image transforms and the alert latency
             // summary all hang off these.
-            "/api/modules/**", "/api/files/**", "/api/images/**", "/api/alerts/**");
+            "/api/modules/**", "/api/files/**", "/api/images/**", "/api/alerts/**",
+            // kelta-ai. Forwarding picks the static route for every caller, so a tenant
+            // collection named "ai" would only change the authorization: its own Cerbos object
+            // check would replace the static-ai rule (AI config writes need MANAGE_TENANTS).
+            "/api/ai/**");
 
     /** Key under a path for routes that belong to no tenant (static / platform-wide). */
     static final String GLOBAL = "*";
