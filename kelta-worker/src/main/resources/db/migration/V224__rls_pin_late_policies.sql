@@ -1,7 +1,8 @@
 -- V201 pinned per-tenant database logins (tenant_db_role, kelta_pinned_tenant()) by rewriting
--- every policy that existed at the time; it could not reach tables created later. Two policies
--- created after V201 kept the pre-V201 shape — notification (V214) and module_event_dead_letter
--- (V222) key tenant_isolation and admin_bypass on app.current_tenant_id alone, without the pin.
+-- every policy that existed at the time; it could not reach tables created later. Three tables
+-- created after V201 kept the pre-V201 shape — notification (V214), module_event_dead_letter
+-- (V222) and module_async_task (V223) key tenant_isolation and admin_bypass on
+-- app.current_tenant_id alone, without the pin.
 --
 -- Re-run the V201 rewrite, with V201's exact expressions, for every policy whose USING or WITH
 -- CHECK expression keys on the GUC without consulting kelta_pinned_tenant() — whichever tables

@@ -174,7 +174,7 @@ out. Every kelta-worker migration that creates a policy writes it with the pinne
 above, copied verbatim — never the plain `current_setting(...)` shape of an older migration;
 fall back to the GUC alone only where the function may not exist (`kelta-ai`'s own
 migrations). V201 rewrote the policies that existed when it ran, so a table created later in
-the old shape is open to a pinned login that sets the GUC to `''` (two were, V223 re-pinned
+the old shape is open to a pinned login that sets the GUC to `''` (three were, V224 re-pinned
 them). `RowLevelSecurityIntegrationTest.everyGucPolicyIsPinned` fails the build on any
 `public` policy whose `USING` or `WITH CHECK` reads `app.current_tenant_id` without
 `kelta_pinned_tenant()`.

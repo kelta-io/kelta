@@ -1,1 +1,1 @@
-- 2026-10-31 fix(worker): re-pin RLS policies created after V201 in the pre-pin shape (V223), and fail RowLevelSecurityIntegrationTest on any unpinned policy (rls-pin-late-policies)
+- 2026-10-31 fix(worker): re-pin RLS policies created after V201 in the pre-pin shape (V224), and fail RowLevelSecurityIntegrationTest on any unpinned policy (rls-pin-late-policies)

@@ -168,7 +168,7 @@ class RowLevelSecurityIntegrationTest {
                 + "VALUES (?, ?, 'Invite (B)', 'B subject', '<p>B</p>', 'portal.invite')", TEMPLATE_B, TENANT_B);
 
         // Rows on tables created after V201's one-time policy rewrite (V214, V222), whose
-        // policies V223 had to pin after the fact.
+        // policies V224 had to pin after the fact.
         for (String[] t : new String[][]{
                 {TENANT_A, USER_A, NOTIFICATION_A, MODULE_A, DEAD_LETTER_A},
                 {TENANT_B, USER_B, NOTIFICATION_B, MODULE_B, DEAD_LETTER_B}}) {
@@ -563,10 +563,10 @@ class RowLevelSecurityIntegrationTest {
     }
 
     @Test
-    @DisplayName("V223 pins any policy left in the pre-V201 shape, expression by expression, and is idempotent")
-    void v223PinsUnpinnedPoliciesGenericallyAndIdempotently() throws Exception {
-        String v223 = new String(getClass().getResourceAsStream(
-                "/db/migration/V223__rls_pin_late_policies.sql").readAllBytes(),
+    @DisplayName("V224 pins any policy left in the pre-V201 shape, expression by expression, and is idempotent")
+    void v224PinsUnpinnedPoliciesGenericallyAndIdempotently() throws Exception {
+        String v224 = new String(getClass().getResourceAsStream(
+                "/db/migration/V224__rls_pin_late_policies.sql").readAllBytes(),
                 java.nio.charset.StandardCharsets.UTF_8);
         // The migrating role, on one connection. DDL is transactional and both transactions roll
         // back, so the throwaway tables and policies are never visible to another test.
@@ -588,8 +588,8 @@ class RowLevelSecurityIntegrationTest {
                         + "USING (current_setting('app.current_tenant_id'::text, true) = ''::text)");
                 migrator.execute("CREATE POLICY tenant_insert ON late_tenant_table FOR INSERT WITH CHECK " + plain);
 
-                migrator.execute(v223);
-                migrator.execute(v223);
+                migrator.execute(v224);
+                migrator.execute(v224);
 
                 Map<String, Map<String, Object>> policies = new HashMap<>();
                 migrator.queryForList("SELECT policyname, qual, with_check FROM pg_policies "
@@ -614,7 +614,7 @@ class RowLevelSecurityIntegrationTest {
                 migrator.execute("CREATE TABLE late_child_table (id varchar(36) PRIMARY KEY)");
                 migrator.execute("CREATE POLICY tenant_isolation ON late_child_table "
                         + "USING (current_setting('app.current_tenant_id'::text, true) <> ''::text)");
-                migrator.execute(v223);
+                migrator.execute(v224);
             }))
                     .rootCause()
                     .hasMessageContaining("late_child_table")
