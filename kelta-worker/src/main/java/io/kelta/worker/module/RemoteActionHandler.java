@@ -11,6 +11,8 @@ import io.kelta.runtime.workflow.ActionResult;
 import io.kelta.runtime.workflow.ModuleUnavailableException;
 import io.kelta.worker.module.ExternalModuleRegistry.Endpoint;
 import io.kelta.worker.service.FieldMaskingService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -39,12 +41,29 @@ import java.util.UUID;
  * {@link ActionResult#failure} with {@code <error.code>: <error.message>} (flow error
  * {@code ActionFailed}); a timeout → {@code ModuleTimeoutException}; disabled, breaker open,
  * unreachable, non-2xx or an unreadable body → {@code ModuleUnavailableException}.
+ *
+ * <p><b>Long-running actions</b> (part 9h, §3.6.2). When the step can wait
+ * ({@link ActionContext#awaitable()}: a top-level flow Task) and the installed manifest gives the
+ * action a {@code maxDurationSeconds}, a task is issued before the call
+ * ({@link ModuleAsyncTaskStore#issue}) and its token and expiry ride the request as {@code task}.
+ * The module may then answer {@code 202 Accepted}: the step parks ({@link ActionResult#awaiting})
+ * until the module completes the task. A {@code 202} to a call without a task is an invalid
+ * answer. A task the module did not take up (any other answer, or a failed call) is discarded.
+ * Schedules and branch steps never carry a task. The issued task reaches {@link #requestBody} and
+ * {@link #readResult} through {@link #AWAITED_TASK}, bound around the shared {@link #run}.
  */
 final class RemoteActionHandler implements ActionHandler {
 
     /** {@code ActionResponse.output}: at most this many top-level keys. */
     static final int MAX_OUTPUT_KEYS = 1000;
     static final String IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
+    /** The status by which a module takes up a call's task (part 9h). */
+    static final int ACCEPTED = 202;
+
+    private static final Logger log = LoggerFactory.getLogger(RemoteActionHandler.class);
+
+    /** The task this thread's call carries, while {@link #runAwaitable} runs it. */
+    private static final ScopedValue<ModuleAsyncTaskStore.Issued> AWAITED_TASK = ScopedValue.newInstance();
 
     private final String tenantId;
     private final String moduleId;
@@ -55,10 +74,20 @@ final class RemoteActionHandler implements ActionHandler {
     private final CollectionRegistry collectionRegistry;
     private final FieldMaskingService masking;
     private final ObjectMapper objectMapper;
+    private final ModuleAsyncTaskStore asyncTasks;
 
     RemoteActionHandler(String tenantId, String moduleId, TenantModuleData.TenantModuleActionData action,
                         ExternalModuleRegistry registry, ExternalModuleInvoker invoker,
                         CollectionRegistry collectionRegistry, FieldMaskingService masking, ObjectMapper objectMapper) {
+        this(tenantId, moduleId, action, registry, invoker, collectionRegistry, masking, objectMapper, null);
+    }
+
+    /** @param asyncTasks issues the tasks of long-running actions; null, every call is synchronous */
+    RemoteActionHandler(String tenantId, String moduleId, TenantModuleData.TenantModuleActionData action,
+                        ExternalModuleRegistry registry, ExternalModuleInvoker invoker,
+                        CollectionRegistry collectionRegistry, FieldMaskingService masking, ObjectMapper objectMapper,
+                        ModuleAsyncTaskStore asyncTasks) {
+        this.asyncTasks = asyncTasks;
         this.tenantId = Objects.requireNonNull(tenantId);
         this.moduleId = Objects.requireNonNull(moduleId);
         this.action = Objects.requireNonNull(action);
@@ -83,7 +112,65 @@ final class RemoteActionHandler implements ActionHandler {
         String idempotencyKey = context.executionLogId() != null && context.stepName() != null
                 ? context.executionLogId() + ":" + context.stepName()
                 : UUID.randomUUID().toString();
-        return run(context, idempotencyKey);
+        return context.awaitable() ? runAwaitable(context, idempotencyKey) : run(context, idempotencyKey);
+    }
+
+    /**
+     * A step that can wait: issues a task when the installed manifest declares the action
+     * long-running, runs the call with it bound, and discards it unless the module took it up.
+     * A call that carries a task is keyed per attempt ({@code <executionId>:<stepName>:<attempt>}):
+     * each attempt brings a new task, and a module replaying its stored answer to an earlier
+     * attempt would never see the new token.
+     */
+    private ActionResult runAwaitable(ActionContext context, String idempotencyKey) {
+        ModuleAsyncTaskStore.Issued task = issueTask(context);
+        if (task == null) {
+            return run(context, idempotencyKey);
+        }
+        String attemptKey = idempotencyKey + ":" + Math.max(1, context.attempt());
+        ActionResult result;
+        try {
+            result = ScopedValue.where(AWAITED_TASK, task).call(() -> run(context, attemptKey));
+        } catch (RuntimeException e) {
+            discard(task);
+            throw e;
+        }
+        if (!result.isAwaiting()) {
+            discard(task);
+        }
+        return result;
+    }
+
+    /** A task for this call, or null when the action is synchronous (or {@link #run} will refuse the call). */
+    private ModuleAsyncTaskStore.Issued issueTask(ActionContext context) {
+        if (asyncTasks == null || context.executionLogId() == null || context.stepName() == null) {
+            return null;
+        }
+        Endpoint endpoint = registry.endpoint(tenantId, moduleId).orElse(null);
+        if (endpoint == null || !ExternalModuleInvoker.callable(endpoint.row())) {
+            return null;
+        }
+        ExternalModuleManifest.Action declared = endpoint.manifest().actions().stream()
+                .filter(a -> a.key().equals(key)).findFirst().orElse(null);
+        if (declared == null || !declared.asynchronous()) {
+            return null;
+        }
+        try {
+            return asyncTasks.issue(endpoint.row(), key, context, declared.maxDurationSeconds());
+        } catch (RuntimeException e) {
+            throw ModuleUnavailableException.of(moduleId, "Module '" + moduleId
+                    + "' action '" + key + "' could not be given a task: " + e.getMessage());
+        }
+    }
+
+    private void discard(ModuleAsyncTaskStore.Issued task) {
+        try {
+            asyncTasks.discard(tenantId, task);
+        } catch (RuntimeException e) {
+            // Unused, it expires unclaimed: nothing is parked on it.
+            log.warn("Could not discard unused task {} of module '{}' (tenant {}): {}", task.id(), moduleId,
+                    tenantId, e.getMessage());
+        }
     }
 
     /** Runs the action with an explicit {@code Idempotency-Key} (a schedule's {@code <jobId>:<fireTime>}). */
@@ -129,6 +216,13 @@ final class RemoteActionHandler implements ActionHandler {
         execution.put("attempt", Math.max(1, context.attempt()));
         execution.put("triggerDepth", context.triggerDepth());
         body.put("execution", execution);
+        if (AWAITED_TASK.isBound()) {
+            ModuleAsyncTaskStore.Issued task = AWAITED_TASK.get();
+            Map<String, Object> awaited = new LinkedHashMap<>();
+            awaited.put("token", task.token());
+            awaited.put("expiresAt", task.expiresAt().toString());
+            body.put("task", awaited);
+        }
         return body;
     }
 
@@ -164,7 +258,24 @@ final class RemoteActionHandler implements ActionHandler {
     }
 
     private ActionResult readResult(OutboundHttpClient.Response response) {
-        JsonNode json = ExternalModuleRegistry.readObject(objectMapper, response);
+        if (response.statusCode() == ACCEPTED) {
+            if (!AWAITED_TASK.isBound()) {
+                throw new ExternalModuleInvoker.InvalidResponseException(
+                        "202 Accepted answers only a call that carries a task");
+            }
+            ModuleAsyncTaskStore.Issued task = AWAITED_TASK.get();
+            return ActionResult.awaiting(task.resumeKey(), task.expiresAt());
+        }
+        return actionResult(objectMapper, ExternalModuleRegistry.readObject(objectMapper, response));
+    }
+
+    /**
+     * An {@code ActionResponse} object as an {@link ActionResult}, with the protocol's limits; also
+     * how a long-running action's completion is read ({@link ModuleTaskService}).
+     *
+     * @throws ExternalModuleInvoker.InvalidResponseException when the object breaks the protocol
+     */
+    static ActionResult actionResult(ObjectMapper objectMapper, JsonNode json) {
         JsonNode success = json.get("success");
         if (success == null || !success.isBoolean()) {
             throw new ExternalModuleInvoker.InvalidResponseException("ActionResponse.success must be a boolean");

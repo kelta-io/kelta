@@ -642,6 +642,42 @@ pinning do not guarantee:
 - **Names only.** The resolver looks a UUID up as a credential id first, so UUID-shaped names are
   refused even when declared. A credential named like a UUID cannot be granted to a module.
 
+### External modules — long-running actions (part 9h, accepted)
+
+`architecture.md` → External module task completion; `integrations.md` → Wait states (Awaited
+Tasks). What the task-token design does not guarantee:
+
+- **The task token is redacted from recorded bodies, not encrypted in transit beyond TLS.** It
+  rides the request body (`POST /api/modules/self/tasks/complete` / `heartbeat`), never the path,
+  so access logs and span names do not carry it; `SensitiveBodyRedactor` replaces the `token`
+  member and any `kmt_…` value before a body becomes span data. The module receives it in the
+  action request body, which the platform does not record. It is stored only as a hash, works once,
+  expires, and is useless without the same install's principal token.
+- **A lost completion answer looks like a dead token.** A module whose completion `202` was lost
+  and that retries gets `404 TASK_NOT_FOUND`, exactly as for an unknown token: the platform keeps
+  no outcome to replay and does not say which. Modules must treat a `404` after a completion
+  attempt as possibly delivered (spec §3.6.2 step 7).
+- **A stuck resume claim waits out its lease.** A completion (or the poller) claims the
+  `flow_pending_resume` row before it resumes. If the claiming pod dies, or its queued resume is
+  dropped at shutdown, the poller takes the claim over once it is older than
+  `kelta.flow.resume.claim-lease-seconds` (300 s default) — so such a step resumes up to that late.
+  A lease shorter than a resume's wait in the engine's queue cannot run a step twice (only the
+  current claim consumes the row) but makes the slow resume a no-op. Rows claimed before V223 have
+  no `claimed_at` and stay as they were.
+- **Only top-level Task steps can wait.** `Parallel`/`Map` branch states and invoked sub-flows run
+  in memory and are not persisted, so they cannot park; a long-running action there gets no task
+  and its `202` fails the step (`ModuleUnavailableException`).
+- **Expiry is the poller's interval late.** A task past `expiresAt` fails on the next resume poll
+  (`kelta.flow.resume.poll-interval-ms`, 10 s default), and a completion racing it wins only if it
+  commits first: both move the task out of `PENDING` with one conditional update, so exactly one
+  takes effect.
+- **The flow's `TaskState.timeoutSeconds` does not cap the wait.** As for synchronous calls, the
+  field is parsed but not enforced; the wait is bounded by the manifest's `maxDurationSeconds` and
+  the platform cap (`KELTA_MODULES_EXTERNAL_ASYNC_ACTION_MAX_DURATION_SECONDS`, one day default).
+- **A heartbeat hands out a fresh principal token for as long as the task lives.** That is its
+  purpose: the 15-minute token cannot outlive an hours-long task. A disabled install, a deactivated
+  principal or an expired task gets none.
+
 ### External modules — in-cluster modules and the Rust billing module (part 9f, accepted)
 
 `kelta-modules/billing` is the first external module the platform runs itself, as a pod in the

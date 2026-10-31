@@ -76,7 +76,8 @@ export interface InstallPlan {
     credentials: string[]
   }
   capabilities?: {
-    actions: { key: string; name: string; timeoutMs: number }[]
+    /** `maxDurationSeconds` is present only on a long-running action (answers `202`, part 9h). */
+    actions: { key: string; name: string; timeoutMs: number; maxDurationSeconds?: number }[]
     hooks: { collection: string; events: string[]; order: number; failurePolicy: string }[]
     events: { collection: string; types: string[] }[]
     services: { port: string; cacheTtlSeconds: number }[]
@@ -178,4 +179,16 @@ export function metadataCounts(items: MetadataPlanItem[] | undefined): Record<st
 export function objectGrantLabel(grant: ObjectGrant): string {
   const ops = (['create', 'read', 'edit', 'delete'] as const).filter((op) => grant[op])
   return ops.length === 0 ? 'no access' : ops.join(', ')
+}
+
+/** A long-running action's `maxDurationSeconds` as an admin reads it: `2 h`, `90 min`, `45 s`. */
+export function durationLabel(seconds: number): string {
+  if (seconds >= 3600 && seconds % 3600 === 0) {
+    const hours = seconds / 3600
+    return hours % 24 === 0 ? `${hours / 24} d` : `${hours} h`
+  }
+  if (seconds >= 60 && seconds % 60 === 0) {
+    return `${seconds / 60} min`
+  }
+  return `${seconds} s`
 }

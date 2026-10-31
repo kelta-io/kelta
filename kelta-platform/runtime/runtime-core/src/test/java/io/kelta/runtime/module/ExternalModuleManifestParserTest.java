@@ -260,6 +260,40 @@ class ExternalModuleManifestParserTest {
                     .timeoutMs()).isEqualTo(120000);
         }
 
+        @Test
+        @DisplayName("an action without maxDurationSeconds is synchronous")
+        void actionSynchronousByDefault() {
+            ExternalModuleManifest.Action action = parse(r -> { }).actions().get(0);
+            assertThat(action.maxDurationSeconds()).isNull();
+            assertThat(action.asynchronous()).isFalse();
+        }
+
+        @Test
+        @DisplayName("action maxDurationSeconds accepts both bounds and makes the action asynchronous")
+        void actionMaxDurationBounds() {
+            ExternalModuleManifest.Action shortest = parse(r -> ((ObjectNode) r.get("actions").get(0))
+                    .put("maxDurationSeconds", 1)).actions().get(0);
+            assertThat(shortest.maxDurationSeconds()).isEqualTo(1);
+            assertThat(shortest.asynchronous()).isTrue();
+            assertThat(parse(r -> ((ObjectNode) r.get("actions").get(0)).put("maxDurationSeconds", 604800))
+                    .actions().get(0).maxDurationSeconds()).isEqualTo(604800);
+        }
+
+        @ParameterizedTest
+        @CsvSource({"0", "604801", "-1"})
+        @DisplayName("action maxDurationSeconds is 1–604800")
+        void actionMaxDuration(int value) {
+            refused(r -> ((ObjectNode) r.get("actions").get(0)).put("maxDurationSeconds", value),
+                    "must be between 1 and 604800");
+        }
+
+        @Test
+        @DisplayName("action maxDurationSeconds must be an integer")
+        void actionMaxDurationType() {
+            refused(r -> ((ObjectNode) r.get("actions").get(0)).put("maxDurationSeconds", "1h"),
+                    "maxDurationSeconds");
+        }
+
         @ParameterizedTest
         @CsvSource({"99", "5001"})
         @DisplayName("hook timeoutMs is 100–5000")

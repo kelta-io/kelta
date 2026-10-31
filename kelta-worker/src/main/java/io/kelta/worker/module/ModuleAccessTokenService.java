@@ -42,7 +42,21 @@ public class ModuleAccessTokenService {
     /** Refresh this long before {@code exp}, so a token never expires mid-request. */
     static final Duration EXPIRY_MARGIN = Duration.ofSeconds(60);
 
-    private record Cached(String token, Instant refreshAt) {}
+    private record Cached(String token, Instant refreshAt, Instant expiresAt) {}
+
+    /**
+     * A token and when it expires.
+     *
+     * @param token     the access token
+     * @param expiresAt its {@code exp}, from the token response's {@code expires_in}
+     */
+    public record AccessToken(String token, Instant expiresAt) {
+        /** Never prints the token. */
+        @Override
+        public String toString() {
+            return "AccessToken{expiresAt=" + expiresAt + '}';
+        }
+    }
 
     private final String tokenUrl;
     private final ModuleServicePrincipalService principals;
@@ -84,12 +98,38 @@ public class ModuleAccessTokenService {
         if (cached != null && clock.instant().isBefore(cached.refreshAt())) {
             return cached.token();
         }
+        return fresh(module).token();
+    }
+
+    /**
+     * An access token for the install's service principal that stays valid at least
+     * {@code minValidity} from now — the cached one if it does, else a new one. For a module that
+     * renews its token while it works on a long-running task (the task heartbeat, part 9h).
+     *
+     * @throws IllegalStateException when the install has no active principal or kelta-auth refuses
+     */
+    public AccessToken accessToken(TenantModuleData module, Duration minValidity) {
+        String appId = module.connectedAppId();
+        if (appId == null) {
+            throw new IllegalStateException("Module '" + module.moduleId() + "' has no service principal");
+        }
+        Cached cached = cache.get(appId);
+        Instant now = clock.instant();
+        if (cached != null && now.isBefore(cached.refreshAt()) && !now.plus(minValidity).isAfter(cached.expiresAt())) {
+            return new AccessToken(cached.token(), cached.expiresAt());
+        }
+        Cached fresh = fresh(module);
+        return new AccessToken(fresh.token(), fresh.expiresAt());
+    }
+
+    private Cached fresh(TenantModuleData module) {
+        String appId = module.connectedAppId();
         ClientCredentials credentials = principals.clientCredentials(module.tenantId(), appId)
                 .orElseThrow(() -> new IllegalStateException(
                         "Module '" + module.moduleId() + "' has no active service principal credentials"));
         Cached fresh = request(credentials);
         cache.put(appId, fresh);
-        return fresh.token();
+        return fresh;
     }
 
     /** Forgets the cached token of a principal that changed or was deactivated. */
@@ -130,8 +170,8 @@ public class ModuleAccessTokenService {
             throw new IllegalStateException("kelta-auth answered without an access_token");
         }
         long expiresIn = json.has("expires_in") ? json.get("expires_in").asLong() : 300L;
-        Instant refreshAt = clock.instant().plusSeconds(expiresIn).minus(EXPIRY_MARGIN);
-        return new Cached(token.stringValue(), refreshAt);
+        Instant expiresAt = clock.instant().plusSeconds(expiresIn);
+        return new Cached(token.stringValue(), expiresAt.minus(EXPIRY_MARGIN), expiresAt);
     }
 
     /** RFC 6749 §2.3.1: client id and secret are form-encoded before Basic encoding. */

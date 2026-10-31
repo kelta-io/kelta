@@ -523,7 +523,16 @@ async fn action<H: ModuleHandlers>(
     if let Err(refused) = same_tenant(&call, &request.tenant_id) {
         return *refused;
     }
-    respond(app.handlers.action(call, key, request).await)
+    let carries_task = request.task.is_some();
+    match app.handlers.action(call, key, request).await {
+        // A long-running action took on its task: 202, no body (part 9h).
+        Ok(answer) if answer.is_accepted() && carries_task => StatusCode::ACCEPTED.into_response(),
+        Ok(answer) if answer.is_accepted() => {
+            HandlerError::internal("ActionResponse::accepted() answers only a request that carries a task")
+                .into_response()
+        }
+        result => respond(result),
+    }
 }
 
 async fn hook<H: ModuleHandlers>(

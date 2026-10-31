@@ -15,7 +15,7 @@ License: **MIT** (the same as the `@kelta/*` SDK packages in `kelta-web`).
 | `assertion` | Verifies the platform's ES256 assertion on every request (see below). |
 | `server` | The protocol endpoints as an axum `Router`. It verifies before any handler runs; the module implements `ModuleHandlers`. |
 | `protocol` | Typed request and response bodies: actions, hooks, events, entitlements, lifecycle, health, credentials. |
-| `client` | The platform API (`PlatformClient`), called with the request's `Kelta-Access-Token`; `credential(name, purpose)` reads a declared tenant credential. |
+| `client` | The platform API (`PlatformClient`), called with the request's `Kelta-Access-Token`; `credential(name, purpose)` reads a declared tenant credential; `complete_task` / `heartbeat_task` finish a long-running action. |
 | `manifest` | A manifest v2 builder. `build()` refuses what the installer would refuse. |
 | `testing` (feature) | A signing key, signed test assertions and an in-memory platform. Enable it in `dev-dependencies` only. |
 
@@ -115,6 +115,15 @@ never store it.
 `credential(name, purpose)` reads `GET /api/modules/self/credentials/{name}`. The manifest must
 declare the name in `permissions.credentials`. Keep the secret in memory for that request only,
 and never log it or return it.
+
+## Long-running actions
+
+Declare `Action::new(..).max_duration_seconds(n)` for work that outlasts one call. A flow step
+calling it sends `request.task`; answer `ActionResponse::accepted()` (`202`) and do the work in the
+background. Finish with `platform.complete_task(&task.token, &ActionResponse::success(output))`
+(or `failure(..)`) before `task.expires_at`, or the step fails with `ModuleTimeoutException`. The
+request's access token lasts 15 minutes: `heartbeat_task(&task.token)` returns a fresh one, so
+build a new `PlatformClient` with it as the work goes on. The task token works once; never log it.
 
 ## Logging
 

@@ -177,6 +177,10 @@ pub struct Action {
     pub category: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u32>,
+    /// Makes the action long-running: a call that carries a `task` may answer `202` and complete
+    /// it within this many seconds (1-604800, capped by the platform).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_duration_seconds: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_schema: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -191,6 +195,7 @@ impl Action {
             description: None,
             category: None,
             timeout_ms: None,
+            max_duration_seconds: None,
             input_schema: None,
             output_schema: None,
         }
@@ -208,6 +213,12 @@ impl Action {
 
     pub fn timeout_ms(mut self, timeout_ms: u32) -> Self {
         self.timeout_ms = Some(timeout_ms);
+        self
+    }
+
+    /// Long-running: see [`Action::max_duration_seconds`](Action#structfield.max_duration_seconds).
+    pub fn max_duration_seconds(mut self, seconds: u32) -> Self {
+        self.max_duration_seconds = Some(seconds);
         self
     }
 
@@ -558,6 +569,9 @@ impl Manifest {
             if action.timeout_ms.is_some_and(|t| !(1..=120_000).contains(&t)) {
                 return Err(invalid(format!("action '{}' timeoutMs must be 1-120000", action.key)));
             }
+            if action.max_duration_seconds.is_some_and(|s| !(1..=604_800).contains(&s)) {
+                return Err(invalid(format!("action '{}' maxDurationSeconds must be 1-604800", action.key)));
+            }
         }
         for hook in &self.hooks {
             if hook.collection.trim().is_empty() || hook.events.is_empty() {
@@ -659,6 +673,7 @@ mod tests {
                     .field(FieldSpec::new("count", "Count", "INTEGER")),
             )
             .action(Action::new("ping", "Ping").timeout_ms(5000))
+            .action(Action::new("ingest", "Ingest").max_duration_seconds(7200))
             .hook(Hook::new("*", [HookEvent::BeforeCreate]).order(-90).failure_policy(FailurePolicy::Ignore))
             .events("acme_items", ["created", "deleted"])
             .entitlements_service(0)
@@ -691,6 +706,8 @@ mod tests {
         assert_eq!(manifest["webhook"], json!({"enabled": true}));
         assert_eq!(manifest["ui"]["sha256"], "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881");
         assert!(manifest.get("settings").is_none());
+        assert!(manifest["actions"][0].get("maxDurationSeconds").is_none());
+        assert_eq!(manifest["actions"][1]["maxDurationSeconds"], 7200);
     }
 
     #[test]
@@ -703,6 +720,9 @@ mod tests {
         assert!(refused(base().action(Action::new("Ping", "Ping"))));
         assert!(refused(base().action(Action::new("ping", "Ping")).action(Action::new("ping", "Again"))));
         assert!(refused(base().action(Action::new("ping", "Ping").timeout_ms(120_001))));
+        assert!(refused(base().action(Action::new("ping", "Ping").max_duration_seconds(0))));
+        assert!(refused(base().action(Action::new("ping", "Ping").max_duration_seconds(604_801))));
+        assert!(!refused(base().action(Action::new("ping", "Ping").max_duration_seconds(604_800))));
         assert!(refused(base().hook(Hook::new("*", [HookEvent::BeforeCreate]).timeout_ms(50))));
         assert!(refused(base().hook(Hook::new("*", []))));
         assert!(refused(base().events("x", ["touched"])));

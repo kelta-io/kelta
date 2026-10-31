@@ -120,6 +120,20 @@ class ExternalModulePlannerTest {
     }
 
     @Test
+    @DisplayName("a long-running action shows its maxDurationSeconds; a synchronous one has none")
+    @SuppressWarnings("unchecked")
+    void longRunningAction() {
+        ExternalModulePlan plan = plan(manifest(root ->
+                ((ObjectNode) root.get("actions").get(0)).put("maxDurationSeconds", 7200)));
+
+        Map<String, Object> capabilities = (Map<String, Object>) plan.attributes().get("capabilities");
+        List<Map<String, Object>> actions = (List<Map<String, Object>>) capabilities.get("actions");
+        assertThat(actions.get(0)).containsEntry("key", "charge").doesNotContainKey("maxDurationSeconds");
+        assertThat(actions.get(1)).containsEntry("key", "refund").containsEntry("maxDurationSeconds", 7200);
+        assertThat(plan.planHash()).as("the admin approves the duration too").isNotEqualTo(plan(MANIFEST).planHash());
+    }
+
+    @Test
     @DisplayName("planHash is stable: the same manifest, reordered lists and reordered dry-run items hash the same")
     void hashIsStable() {
         String first = plan(MANIFEST).planHash();

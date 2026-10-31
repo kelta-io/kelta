@@ -11,8 +11,8 @@ info:
 
     **Status: draft.** Design and slice plan:
     `.claude/docs/specs/module-platform/9-external-modules.md`. The platform side is built
-    through part 9e plus the credential read below; the shapes may change until protocol
-    version 1 ships.
+    through part 9e plus the credential read and the long-running action tasks below; the shapes
+    may change until protocol version 1 ships.
 
     ## Authenticating the platform
 
@@ -39,9 +39,27 @@ info:
     permissions the admin approved at install. Do not store it; every call brings a fresh one.
 
     The same token reads the tenant credentials the manifest declares in
-    `permissions.credentials`: `GET /api/modules/self/credentials/{name}` (tag `platform`, the
-    one platform endpoint in this document). Read a secret when you need it and keep it in
+    `permissions.credentials`: `GET /api/modules/self/credentials/{name}` (tag `platform`, like
+    the task endpoints under "Long-running actions"). Read a secret when you need it and keep it in
     memory only for the request; never log it or put it in an answer.
+
+    ## Long-running actions
+
+    An action that declares `maxDurationSeconds` in the manifest may take longer than one call.
+    Its `ActionRequest` then carries `task: { token, expiresAt }`. Answer `202 Accepted` to take
+    the work on: the flow step waits. When the work is done, send the result as an
+    `ActionResponse` plus the task's `token` to `POST /api/modules/self/tasks/complete` (tag
+    `platform`) with the service-principal token; the step resumes with it, success or failure.
+    Before `expiresAt`, or the step fails with `ModuleTimeoutException` and the token is refused.
+    The access token lasts 15 minutes: while the work runs, `POST /api/modules/self/tasks/heartbeat`
+    with `{ "token": ... }` returns a fresh one. The task token goes in the body, never in a URL
+    (paths are recorded in logs and traces). It is a secret and works once: keep it only until you
+    complete the task, and never log it. Answering `200` instead finishes the step at once, as for
+    a synchronous action.
+
+    If a completion's answer is lost (a timeout, a dropped connection), send it again. A `404
+    TASK_NOT_FOUND` to that retry may mean the first one landed: the platform does not tell a used
+    token from an unknown one. Treat it as possibly delivered, not as a failure to report.
 
     ## Errors
 
@@ -98,9 +116,15 @@ paths:
       operationId: executeAction
       summary: Run a flow action
       description: |
-        Called when a flow Task state references the action, or a schedule fires. Synchronous:
-        answer within the action's `timeoutMs`. Retries are driven by the flow's `Retry` policy
-        and reuse the same `Idempotency-Key`.
+        Called when a flow Task state references the action, or a schedule fires. Answer within
+        the action's `timeoutMs`. Retries are driven by the flow's `Retry` policy and reuse the
+        same `Idempotency-Key`, except for a call that carries `task` (see `Idempotency-Key`).
+
+        A long-running action (manifest `maxDurationSeconds`) receives `task` in the request when
+        the step can wait for it, and may answer `202` to finish later through
+        `POST /api/modules/self/tasks/complete`. Without `task` in the request (a schedule, a step in
+        a `Parallel` or `Map` branch, or a synchronous action) a `202` is treated as the module
+        being unavailable.
       parameters:
         - name: key
           in: path
@@ -112,7 +136,11 @@ paths:
         - name: Idempotency-Key
           in: header
           required: true
-          description: '`<executionId>:<stepName>` for flow calls, `<jobId>:<fireTime>` for schedules. Stable across retries of one step.'
+          description: |
+            `<executionId>:<stepName>` for flow calls, stable across retries of one step;
+            `<jobId>:<fireTime>` for schedules. A call that carries `task` is keyed per attempt,
+            `<executionId>:<stepName>:<attempt>`: each attempt brings a new task token, so an answer
+            stored for an earlier attempt must not be replayed to it.
           schema:
             type: string
       requestBody:
@@ -128,6 +156,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ActionResponse'
+        '202':
+          description: |
+            The module took on the request's `task` and will complete it with
+            `POST /api/modules/self/tasks/complete` before `task.expiresAt`. The body is ignored.
+            Valid only when the request carried `task`.
         default:
           $ref: '#/components/responses/Unavailable'
   /kelta/v1/hooks:
@@ -409,6 +442,126 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlatformErrors'
+  /api/modules/self/tasks/complete:
+    servers:
+      - url: '{platformUrl}/{tenantSlug}'
+        description: The tenant's platform URL, the same base the access token's JSON:API calls use.
+        variables:
+          platformUrl:
+            default: https://api.example.com
+          tenantSlug:
+            default: acme
+    post:
+      tags: [platform]
+      operationId: completeModuleTask
+      summary: Complete a long-running action's task
+      description: |
+        Records the result of the task named by the body's `token` (from `ActionRequest.task`) and
+        resumes the flow step that waits on it. The body is the action's `ActionResponse` plus
+        `token`, under the same limits as a synchronous answer (at most 1 MiB; `output` an object
+        of at most 1000 top-level keys). A success resumes the step with `output`; a failure fails
+        it with `ActionFailed` (`<error.code>: <error.message>`), and the step's `Retry` and
+        `Catch` apply.
+
+        Checked in this order:
+
+        1. The bearer token is the calling install's service-principal token
+           (`403 NOT_MODULE_PRINCIPAL` for a user token, a personal access token or a plain
+           connected app).
+        2. The install is `ACTIVE` or `DEGRADED` (`403 MODULE_NOT_ACTIVE`).
+        3. The body is a valid `ActionResponse` (`400 INVALID_TASK_RESULT`). Nothing is recorded,
+           so a corrected body may be sent again.
+        4. `token` is a pending, unexpired task of this install (`404 TASK_NOT_FOUND`). A missing
+           or malformed token, an unknown one, another install's, a completed one and an expired
+           one all get this answer.
+
+        A token completes once, so a `404` to a retry of a completion whose answer was lost may
+        mean the first one landed. Every answer carries `Cache-Control: no-store`.
+      security:
+        - serviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCompletion'
+      responses:
+        '202':
+          description: Recorded. The step resumes.
+        '400':
+          description: '`INVALID_TASK_RESULT`: the body is not a JSON object with a valid `ActionResponse`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformErrors'
+        '401':
+          description: No token, or an expired or invalid one. Answered by the platform gateway.
+        '403':
+          description: '`NOT_MODULE_PRINCIPAL` or `MODULE_NOT_ACTIVE`; see the operation description.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformErrors'
+        '404':
+          description: '`TASK_NOT_FOUND`: no pending, unexpired task of this install has that token.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformErrors'
+  /api/modules/self/tasks/heartbeat:
+    servers:
+      - url: '{platformUrl}/{tenantSlug}'
+        description: The tenant's platform URL, the same base the access token's JSON:API calls use.
+        variables:
+          platformUrl:
+            default: https://api.example.com
+          tenantSlug:
+            default: acme
+    post:
+      tags: [platform]
+      operationId: heartbeatModuleTask
+      summary: Renew the access token while a task runs
+      description: |
+        For the pending, unexpired task of the calling install named by the body's `token`:
+        records that the module is still working on it and returns a service-principal access
+        token valid for at least 10 more minutes. It does not extend the task's `expiresAt` and
+        does not use up the token. Checks 1, 2 and 4 of `completeModuleTask` apply, with the same
+        answers. Every answer carries `Cache-Control: no-store`.
+      security:
+        - serviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskReference'
+      responses:
+        '200':
+          description: The task is pending; a fresh access token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskHeartbeat'
+        '401':
+          description: No token, or an expired or invalid one. Answered by the platform gateway.
+        '403':
+          description: '`NOT_MODULE_PRINCIPAL` or `MODULE_NOT_ACTIVE`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformErrors'
+        '404':
+          description: '`TASK_NOT_FOUND`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformErrors'
+        '503':
+          description: '`TOKEN_UNAVAILABLE`: a new access token could not be issued; retry.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformErrors'
 components:
   securitySchemes:
     platformAssertion:
@@ -594,8 +747,53 @@ components:
               minimum: 1
             triggerDepth:
               type: integer
+        task:
+          $ref: '#/components/schemas/ActionTask'
         settings:
           $ref: '#/components/schemas/Settings'
+    ActionTask:
+      description: |
+        Present only for a long-running action (`maxDurationSeconds`) on a step that can wait.
+        Answer `202` to complete it later with `POST /api/modules/self/tasks/complete`.
+      type: object
+      required: [token, expiresAt]
+      properties:
+        token:
+          type: string
+          pattern: '^kmt_[A-Za-z0-9_-]{43}$'
+          description: Single use; a secret. Send it only in a request body, never log it.
+        expiresAt:
+          type: string
+          format: date-time
+          description: |
+            When the step stops waiting and fails with `ModuleTimeoutException`: now plus the
+            action's `maxDurationSeconds`, capped by the platform (one day by default).
+    TaskReference:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          pattern: '^kmt_[A-Za-z0-9_-]{43}$'
+          description: The task token from `ActionRequest.task.token`.
+    TaskCompletion:
+      description: An `ActionResponse` and the task it completes.
+      allOf:
+        - $ref: '#/components/schemas/ActionResponse'
+        - $ref: '#/components/schemas/TaskReference'
+    TaskHeartbeat:
+      type: object
+      required: [accessToken, accessTokenExpiresAt, taskExpiresAt]
+      properties:
+        accessToken:
+          type: string
+          description: A service-principal token, as `Kelta-Access-Token`, valid at least 10 more minutes.
+        accessTokenExpiresAt:
+          type: string
+          format: date-time
+        taskExpiresAt:
+          type: string
+          format: date-time
     ActionResponse:
       type: object
       required: [success]
@@ -822,6 +1020,14 @@ components:
                 minimum: 1
                 maximum: 120000
                 default: 30000
+              maxDurationSeconds:
+                type: integer
+                minimum: 1
+                maximum: 604800
+                description: |
+                  Makes the action long-running: a call may answer `202` and complete its `task`
+                  within this many seconds (capped by the platform). Absent, the action is
+                  synchronous. Shown on the consent screen.
               configSchema:
                 type: object
                 additionalProperties: true

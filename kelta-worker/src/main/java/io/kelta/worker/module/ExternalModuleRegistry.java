@@ -102,6 +102,8 @@ public class ExternalModuleRegistry {
     private final Map<String, Registration> registrations = new ConcurrentHashMap<>();
     /** Set once the first {@link #reconcile} has read every row; see {@link #ensureInitialized}. */
     private volatile boolean initialized;
+    /** Issues long-running actions' tasks (part 9h); null, every action call is synchronous. */
+    private volatile ModuleAsyncTaskStore asyncTasks;
 
     public ExternalModuleRegistry(ModuleStore moduleStore, ActionHandlerRegistry actionHandlers,
                                   BeforeSaveHookRegistry hookRegistry, ModuleServiceRegistry moduleServices,
@@ -118,6 +120,11 @@ public class ExternalModuleRegistry {
         this.masking = masking;
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.parser = new ModuleManifestParser(objectMapper);
+    }
+
+    /** Lets action handlers registered from now on issue tasks for long-running actions (part 9h). */
+    public void setAsyncTasks(ModuleAsyncTaskStore asyncTasks) {
+        this.asyncTasks = asyncTasks;
     }
 
     /** The install's current snapshot on this pod, if the tenant has it installed. */
@@ -398,7 +405,7 @@ public class ExternalModuleRegistry {
     private RemoteActionHandler handler(String tenantId, String moduleId,
                                         TenantModuleData.TenantModuleActionData action) {
         return new RemoteActionHandler(tenantId, moduleId, action, this, invoker, collectionRegistry, masking,
-                objectMapper);
+                objectMapper, asyncTasks);
     }
 
     private void probe(TenantModuleData row) {

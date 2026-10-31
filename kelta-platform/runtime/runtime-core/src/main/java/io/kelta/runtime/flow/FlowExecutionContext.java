@@ -32,6 +32,8 @@ public class FlowExecutionContext {
     private boolean cancelled;
     private boolean completed;
     private boolean waiting;
+    private boolean awaitable;
+    private AwaitedTaskOutcomes.TaskOutcome awaitedOutcome;
     private String finalStatus;
     private String finalErrorCode;
     private String finalErrorMessage;
@@ -109,6 +111,29 @@ public class FlowExecutionContext {
     public boolean isWaiting() { return waiting; }
 
     public void markWaiting() { this.waiting = true; }
+
+    /**
+     * True when a Task in this context may park on work that completes later
+     * ({@link io.kelta.runtime.workflow.ActionContext#awaitable()}): the top-level loop of an
+     * execution, which the engine can resume by state id. False for Parallel, Map and InvokeFlow
+     * branches, whose states the engine cannot resume.
+     */
+    public boolean awaitable() { return awaitable; }
+
+    public void setAwaitable(boolean awaitable) { this.awaitable = awaitable; }
+
+    /**
+     * Hands the parked Task the outcome it resumes with; the Task executor takes it instead of
+     * calling its handler.
+     */
+    public void setAwaitedOutcome(AwaitedTaskOutcomes.TaskOutcome outcome) { this.awaitedOutcome = outcome; }
+
+    /** The outcome set by {@link #setAwaitedOutcome}, once; null when there is none. */
+    public AwaitedTaskOutcomes.TaskOutcome takeAwaitedOutcome() {
+        AwaitedTaskOutcomes.TaskOutcome outcome = awaitedOutcome;
+        awaitedOutcome = null;
+        return outcome;
+    }
 
     public String finalStatus() { return finalStatus; }
     public String finalErrorCode() { return finalErrorCode; }

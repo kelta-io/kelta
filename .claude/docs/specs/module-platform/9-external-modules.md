@@ -8,8 +8,10 @@
 > (credential read) built 2026-10-31 — a module reads the tenant credentials its manifest declares
 > (§3.3); 9f (Rust `kelta-module` SDK + `kelta-billing` service, CI, image, harness scenario)
 > built 2026-10-31 and every billing tenant cut over the same day (`kelta-modules/billing/CUTOVER.md`).
-> 9g (delete the JAR path) waits for the last tenant JAR module, a long-running ingest action, to
-> move out of process, which needs 9h (async actions). The settings form
+> 9h (long-running actions with task tokens) built 2026-10-31 — an action declaring
+> `maxDurationSeconds` answers `202`, its flow step parks, and the module completes it later
+> (§3.6.2). 9g (delete the JAR path) waits for the last tenant JAR module, a long-running ingest
+> action, to move out of process on 9h. The settings form
 > (§3.8) and a dead-letter list are not built yet. Planning spec for replacing the
 > in-process JAR module path with modules that run as **separate HTTP services, in any language**.
 > The machine-readable protocol contract is
@@ -78,8 +80,9 @@ by hash at install so a running module cannot swap it later (§3.9).
 - Give modules direct database or NATS access.
 - Add module-defined system permissions. A route may require an **existing** permission; a
   module minting new permission names stays slice 4.
-- Async (long-running) actions. v1 actions are synchronous with an enforced timeout. A task-token
-  callback is part 9h, later (§8).
+- Long-running work inside one synchronous call. An action's call is still bounded by its
+  `timeoutMs`; work that takes longer declares `maxDurationSeconds` and answers `202` with a task
+  the module completes later (part 9h, §3.6.2).
 - Module settings UI beyond what the manifest's `settings` schema renders (§3.8).
 
 ### The parts (one PR each, in order)
@@ -94,7 +97,7 @@ by hash at install so a running module cannot swap it later (§3.9).
 | 9e.1 | Module credential read: `GET /api/modules/self/credentials/{name}` for the calling install's declared credentials, audited as the module (§3.3) — **built** (`ModuleCredentialController`, `ModuleCredentialService`; gateway forwards the token's `connected_app_id` as `X-Connected-App-Id`; no migration) | **yes, no auto-merge** | 9e |
 | 9f | Rust billing module + `kelta-module` Rust SDK; cut the prod tenant over — **built** (`kelta-modules/sdk-rust`, `kelta-modules/billing`; the JAR moved to `kelta-modules/billing-jar` for rollback; CI `test-rust-modules`, image `harbor.rzware.com/kelta-modules/kelta-billing`, `BillingModuleScenarioTest`). Prod cutover not done: runbook `kelta-modules/billing/CUTOVER.md` | **yes, no auto-merge** (assertion verification + credential handling) | 9e.1 |
 | 9g | Delete the JAR path | — | 9f soaked one release |
-| 9h | (later) Async actions with task tokens | — | 9d |
+| 9h | Long-running actions with task tokens: `202` parks the flow step; the module completes it with `POST /api/modules/self/tasks/complete`, the token in the body (§3.6.2) — **built** (V223 `module_async_task` + `flow_pending_resume.claimed_at`, `ModuleAsyncTaskStore`, `ModuleTaskService`, `ModuleTaskController`, `ModuleSelfPrincipal`; runtime-core `AwaitedTaskOutcomes`, `ActionResult.awaiting`, `FlowEngine.resumeAwaitedTask`; resume claim lease) | **yes, no auto-merge** (a completion resumes a tenant's flow with module data) | 9d |
 
 Standing acceptance lines for every code part: `/verify` green; a `.claude/changelog.d/` fragment;
 the docs rows in §7 that the part touches; tests from §6 for what it builds.
@@ -191,6 +194,9 @@ Rules the parser enforces (part 9c):
   unique within its list. A hook or event on a collection the module neither provisions nor has
   `read` on is rejected at plan time.
 - `timeoutMs` bounds: actions 1–120000 (default 30000); hooks 100–5000 (default 2000).
+- `actions[].maxDurationSeconds` (optional, 1–604800) makes the action long-running (§3.6.2):
+  its call may answer `202` and finish later, within that many seconds. Absent, the action is
+  synchronous and a `202` is an invalid answer.
 - No wildcards in `permissions`. Collections the module provisions through `metadata` get full
   object access implicitly and are listed as "(own)" on the consent screen.
 
@@ -344,7 +350,7 @@ current rows on its next refresh (part 9d reconciles every 60 s, `ExternalModule
 
 | In-process today | External form | Platform side |
 |---|---|---|
-| `ActionHandler` (`ActionContext` → `ActionResult`) | `POST /kelta/v1/actions/{key}` → `{ success, output, error }` | `RemoteActionHandler`, registered per tenant in `ActionHandlerRegistry` under the module's key, so flows reference it exactly as today. Body carries `input` (`resolvedData`), `config`, record context, and `execution { executionId, flowId, stepName, attempt }`. Header `Idempotency-Key` = `executionId:stepName` (stable across retries of one step) |
+| `ActionHandler` (`ActionContext` → `ActionResult`) | `POST /kelta/v1/actions/{key}` → `{ success, output, error }` | `RemoteActionHandler`, registered per tenant in `ActionHandlerRegistry` under the module's key, so flows reference it exactly as today. Body carries `input` (`resolvedData`), `config`, record context, and `execution { executionId, flowId, stepName, attempt }`. Header `Idempotency-Key` = `executionId:stepName` (stable across retries of one step); a call that carries a task (§3.6.2) is keyed per attempt, `executionId:stepName:attempt` |
 | `BeforeSaveHook.beforeCreate/Update/Delete` → `BeforeSaveResult` | `POST /kelta/v1/hooks` → `{ allowed, fieldUpdates, errors[], conflict }` | `RemoteBeforeSaveHook`, registered in `BeforeSaveHookRegistry` with the manifest `order`. `errors[]` map to `ValidationError(field, message, code)`; `conflict` maps to `HookConflictException` (409). Delete hooks may only veto. Shape follows Kubernetes admission webhooks |
 | `afterCreate/Update/Delete` | `POST /kelta/v1/events` (async) | Delivered from `kelta.record.changed` (§3.6.1). **Never blocks a write**, which matches today's swallowed after-hook exceptions |
 | `getServices()` → `EntitlementProvider.resolve(tenantId, userId)` | `POST /kelta/v1/services/entitlements/resolve` → `MemberEntitlements { planCode, subscriptionStatus, values }` | `ModuleEntitlementService` keeps its contract: any failure or timeout → `MemberEntitlements.EMPTY` (restrictive). Responses cached per `(tenant, user)` for `cacheTtlSeconds` (0–300) |
@@ -405,6 +411,91 @@ filtered per §3.4.
 - **`payloadOmitted: true`** events (over `kelta.nats.max-event-payload-bytes`) are forwarded
   without `data`; the module re-reads by id with its token.
 - No new NATS subject or stream: the consumer reads `KELTA_RECORDS`, which exists.
+
+#### 3.6.2 Long-running actions (task tokens, part 9h)
+
+For work that outlasts one call (an ingest that runs for minutes or hours). The action declares
+`maxDurationSeconds` in the manifest; the consent screen shows it.
+
+1. **Issue.** When a top-level flow Task calls such an action, `RemoteActionHandler` first writes a
+   `module_async_task` row and adds `task: { token, expiresAt }` to the `ActionRequest`. The token
+   is `kmt_` + 32 bytes from `SecureRandom`, base64url (256 bits); only its SHA-256 is stored
+   (`token_hash`, unique). The row binds the tenant, the install, the execution, the step and the
+   attempt. `expiresAt` is now + `maxDurationSeconds`, capped by
+   `kelta.modules.external.async-action-max-duration-seconds`
+   (`KELTA_MODULES_EXTERNAL_ASYNC_ACTION_MAX_DURATION_SECONDS`, default 86400), in whole seconds.
+   The call's `Idempotency-Key` is `<executionId>:<stepName>:<attempt>`, not the synchronous
+   `<executionId>:<stepName>`: each attempt (a `Retry` after a failure or a timeout) brings a new
+   task, so a module that replays its stored answer to an earlier attempt would never see the new
+   token.
+2. **Accept.** The module answers `202 Accepted` (body ignored). The step parks: the execution goes
+   `WAITING` on the Task with a `flow_pending_resume` row whose `resume_event` is
+   `module-task:<id>` and whose `resume_at` is `expiresAt`. A `200` answer finishes the step as a
+   synchronous one and the unused task is deleted, so a module may decide per call. A call that
+   fails deletes it too.
+3. **Complete.** The module (or its worker) calls `POST /api/modules/self/tasks/complete` with its
+   `Kelta-Access-Token` and an `ActionResponse` plus the task's token as the body
+   (`{token, success, output, error}`) → `202`. The token rides the body, never the path: request
+   paths are recorded (span attributes and names, the gateway's audit log on a refusal, ingress
+   access logs), and a recorded body has its `token` member, and any `kmt_…` value, redacted by
+   `SensitiveBodyRedactor`. The outcome is recorded with one conditional update (`PENDING`,
+   unexpired, this tenant, this install), which is what makes the token single use; then the
+   parked step is claimed by its resume key (`claimPendingResumeByEvent`, tenant-scoped,
+   `FOR UPDATE SKIP LOCKED`) and resumed. Everything is in Postgres, so the completion may land
+   on any worker pod; no NATS subject.
+4. **Resume.** The Task re-enters with the recorded outcome in place of a handler call: success
+   applies `ResultPath`/`OutputPath` and continues; failure is `ActionFailed`
+   (`<error.code>: <error.message>`, as a synchronous `success: false`) and takes the Task's
+   `Retry` (a new call and a new task, the attempt count continuing) and then its `Catch`.
+5. **Expire.** Nobody completed it: at `expiresAt` the worker's resume poller claims the row, the
+   task moves `PENDING → EXPIRED` (the same single conditional update a completion races), and the
+   step fails with `ModuleTimeoutException`, Retry and Catch applying. A completion after that is
+   refused. Cancelling the execution expires its pending tasks at once (`AwaitedTaskOutcomes.abandon`),
+   so the module can neither complete them nor renew its access token with them.
+6. **Heartbeat.** The `Kelta-Access-Token` lasts 15 minutes and a task may run for hours, so
+   `POST /api/modules/self/tasks/heartbeat` with `{token}` (same checks, token not consumed) records
+   `last_heartbeat_at` and answers `{accessToken, accessTokenExpiresAt, taskExpiresAt}` with a
+   principal token valid at least 10 more minutes. It does not extend the task.
+7. **A lost answer.** A completion whose `202` the module never saw (a timeout, a dropped
+   connection) is sent again; a `404 TASK_NOT_FOUND` to that retry may mean the first one landed,
+   because a used token and an unknown one get the same answer. The module treats it as possibly
+   delivered. The platform keeps no outcome to replay.
+
+**Who may complete.** The rule of the credential read (§3.3), shared as `ModuleSelfPrincipal`: the
+token's `connected_app_id` (gateway `X-Connected-App-Id`) names an external install of the tenant,
+the caller is its `service_user_id`, the app and user are active (`403 NOT_MODULE_PRINCIPAL`), and
+the install is `ACTIVE`/`DEGRADED` (`403 MODULE_NOT_ACTIVE`). Then the body must be a valid
+`ActionResponse` within a synchronous answer's limits (1 MiB, `output` an object of at most 1000
+keys; `400 INVALID_TASK_RESULT`, checked before the token so a module can fix and retry). A
+missing or malformed token, an unknown one, another install's or tenant's, a used one or an
+expired one are all `404 TASK_NOT_FOUND`: one answer, so a caller learns nothing about tokens it
+does not hold. A
+heartbeat whose new token kelta-auth refuses is `503 TOKEN_UNAVAILABLE`. Every answer is
+`no-store`; the token is never logged or echoed.
+
+**Where a step can wait.** Only a top-level Task of a flow execution (manual, triggered,
+scheduled, MCP or HTTP-started) or of one resumed from WAITING. Inside a `Parallel` or `Map` branch or an invoked sub-flow the
+handler is told it cannot wait (`ActionContext.awaitable() == false`), so no task is issued and a
+`202` is an invalid answer (`ModuleUnavailableException`). A manifest schedule (§3.7) calls the
+action with no task either. A handler that returns `awaiting` anyway where it cannot wait fails
+with `States.AwaitNotSupported`.
+
+**Engine contract (runtime-core).** A handler returns `ActionResult.awaiting(resumeKey, expiresAt)`;
+the engine parks WAITING with a pending-resume row keyed by `resumeKey` and due at `expiresAt`.
+`FlowEngine.resumeAwaitedTask(tenant, key)` claims and resumes it; an `AwaitedTaskOutcomes` bean
+(`ModuleAsyncTaskStore`) settles the outcome the Task resumes with. Parking writes the row, then
+checks `delivered()`, and the completer records the outcome, then claims: each side writes before it
+reads the other, so an outcome that arrives before the step parked still resumes it exactly once.
+
+**Claim lease.** A claim stamps `flow_pending_resume.claimed_at` (V223), and every claim has its
+own identifier. The resume consumes the row (`DELETE … WHERE claimed_by = <its claim>`) before it
+does anything else, and does nothing if the row is gone or held by another claim. A resume that
+fails before it is queued releases its claim and makes the row due now. A claim no resume consumed
+within `kelta.flow.resume.claim-lease-seconds` (`KELTA_FLOW_RESUME_CLAIM_LEASE_SECONDS`, default
+300) is taken over by the resume poller, whatever the row's `resume_at`: the claimer's pod died,
+or its queued resume was dropped at shutdown. A takeover racing a slow resume runs the step once,
+since only the current claim consumes the row. Rows claimed before V223 have no `claimed_at` and are
+never taken over.
 
 ### 3.7 Schedules
 
@@ -469,7 +560,13 @@ None in 9a. Later parts, numbered at their own head+1 when written (head is **V2
 - 9c (V221, built): the `tenant_module` columns in §3.11 (`jar_checksum`, `module_class` drop
   `NOT NULL`; `s3_key`, `jar_signature` already allowed it), `version` widened to 64, and
   `scheduled_job.chk_job_type` accepts `MODULE_ACTION`.
-- 9e: `module_event_dead_letter`.
+- 9e (V222, built): `module_event_dead_letter`.
+- 9h (V223, built): `module_async_task` (`id`, `tenant_id`, `tenant_module_id` → `tenant_module`
+  and `execution_id` → `flow_execution`, both `ON DELETE CASCADE`; `step_name`, `attempt`,
+  `action_key`, `token_hash` unique, `status` `PENDING|COMPLETED|EXPIRED`, `outcome jsonb`,
+  `expires_at`, `last_heartbeat_at`, `created_at`, `completed_at`; indexed by `execution_id` and
+  `tenant_module_id` for the cascades), tenant RLS + admin bypass; `flow_pending_resume.claimed_at`
+  and a partial index on it for the claim lease.
 - 9g: drop the JAR columns and `tenant_module_signing_key` (V186), and remove `QUARANTINED`/`STUB`
   from `chk_module_status` once no row holds them.
 
@@ -488,6 +585,7 @@ Later parts, representative files (each part's PR lists all):
 | 9e | new `ModuleEventDeliveryListener` (beside `RecordWebhookPublisher.java`), `NatsSubscriptionConfig.java`; `ModuleController.java` (bundle pin); `kelta-ui/app/src/pages/ModulesPage/` (install by URL, consent, settings form) |
 | 9e.1 | (as built) runtime-core: `ModuleStore.findByConnectedAppId`; runtime-module-integration: `CredentialResolverPort.resolve(…, actorUserId)`; worker: new `ModuleCredentialController`, `ModuleCredentialService`, `ModuleServicePrincipalService.isActivePrincipal`, `JdbcModuleStore`, `CredentialResolverPortAdapter`, `ModuleConfig`; gateway: `HeaderTransformationFilter` + `IdentityHeaderStripFilter` (`X-Connected-App-Id`) |
 | 9f | `kelta-modules/billing/` (Rust, replaces the Java module), new `kelta-modules/sdk-rust/`; homelab-argo manifests (outside this repo) |
+| 9h | (as built) runtime-core: `ActionResult.awaiting`/`Awaiting`, `ActionContext.awaitable`, `StateExecutionResult.awaiting`, new `flow/AwaitedTaskOutcomes`, `FlowExecutionContext` (awaitable, delivered outcome), `TaskStateExecutor` (park, resume with an outcome), `FlowEngine` (`parkAwaitedTask`, `resumeAwaitedTask`, `resumeExecution(id, claim)`, `cancelExecution` abandons tasks), `FlowStore.claimPendingResumeByEvent(tenant, …)`, `claimPendingResumes(…, lease)`, `consumePendingResume`, `releasePendingResume`, `ExternalModuleManifest.Action.maxDurationSeconds`, `ModuleManifestParser`; worker: V223, new `ModuleAsyncTaskStore`, `ModuleTaskService`, `ModuleTaskController`, `ModuleSelfPrincipal` (shared with `ModuleCredentialService`), `RemoteActionHandler` (task + `202`), `ExternalModuleRegistry`, `ModuleAccessTokenService.accessToken(…, minValidity)`, `JdbcFlowStore`, `FlowResumePollerConfig` (claim lease), `ModuleConfig`, `FlowConfig`, `ExternalModulePlanner`; runtime-jsonapi `SensitiveBodyRedactor` (`kmt_…` values); UI `ModulePlanReview.tsx` |
 | 9g | delete `SandboxedModuleClassLoader`, `ModuleLoader`, `ModuleJarService`, `ModuleSignatureVerifier`, `ModuleLoadRetryScheduler`, `ModuleLoadFailureClassifier`, signing-key endpoints, `install-jar`; JAR branches in `RuntimeModuleManager`. Compiled-in `KeltaModule`s (`runtime-module-core`, `runtime-module-integration`) stay |
 
 Pitfalls that apply (CLAUDE.md): map the JWKS endpoint as a literal path, never `/**` under `/api`
@@ -529,7 +627,17 @@ beans.
   backoff. 9e.1 adds `readsOnlyDeclaredCredentials` (the principal reads its declared credential
   with secrets, metadata and `no-store`, audited as the module with its purpose label; it is refused
   an undeclared one; an admin token is refused, also with a forged `X-Connected-App-Id`; another
-  install's principal reads only its own; a disabled install reads nothing). The stack's Cerbos is allow-all and its gateway runs with
+  install's principal reads only its own; a disabled install reads nothing). 9h adds
+  `completesALongRunningAction` (the action call carries a task and answers `202`; the execution is
+  `WAITING` with only the token's hash stored; a user token, a forged app id, another install's
+  principal, an unknown token and a body without one are refused; an invalid body is `400`; the
+  token in the path is no endpoint; a heartbeat renews the principal token; the completion resumes
+  the step with the module's output; a reused token and a late one after expiry are `404`;
+  cancelling a waiting execution expires its task; a task nobody completes fails its step through
+  the resume poller). `JdbcFlowStorePendingResumeIntegrationTest` runs the claim lease, consume and
+  release SQL on Postgres. Unit: `FlowEngineAwaitedTaskTest` (park, resume, Retry, Catch, expiry, early delivery,
+  tenant-scoped claim, branches), `RemoteActionHandlerAsyncTest`, `ModuleAsyncTaskStoreTest`,
+  `ModuleTaskServiceTest`, `ModuleTaskRouteMappingTest`. The stack's Cerbos is allow-all and its gateway runs with
   `PERMISSIONS_ENABLED=false`, so the object-permission deny is proven on a real PDP by
   `CerbosGeneratedPolicyIT.moduleServicePrincipalReadsOnlyItsGrant` and the plain-app 403 by
   `RouteAuthorizationFilterTest.connectedAppTokenShapes`.
@@ -549,11 +657,11 @@ beans.
 | `.claude/docs/status.md` | Extensibility/modules row: slice 9 state | each part |
 | parent `README.md` | slice table row 9; security model + reuse map rewritten for external modules; deploy hazard 1 retired | 9a (notes), 9g (rewrite) |
 | `.claude/docs/playbooks.md` | "Ship a runtime-installable module" rewritten for external modules | 9e, 9e.1 |
-| `.claude/docs/architecture.md` | module invocation path, JWKS + credentials endpoints and their authorization | 9c, 9d, 9e.1 |
-| `.claude/docs/integrations.md` | module protocol, event delivery semantics, credential reads | 9d, 9e, 9e.1 |
-| `.claude/docs/concerns.md` | close the classloader-sandbox and same-JVM items; add the module-host allow-list and hook-in-transaction notes; the credential-read limits | 9d, 9e.1, 9g |
+| `.claude/docs/architecture.md` | module invocation path, JWKS + credentials + task endpoints and their authorization | 9c, 9d, 9e.1, 9h |
+| `.claude/docs/integrations.md` | module protocol, event delivery semantics, credential reads, long-running actions (flow contract) | 9d, 9e, 9e.1, 9h |
+| `.claude/docs/concerns.md` | close the classloader-sandbox and same-JVM items; add the module-host allow-list and hook-in-transaction notes; the credential-read limits; the long-running-action limits | 9d, 9e.1, 9g, 9h |
 | `CLAUDE.md` | Module Map: `kelta-modules/` holds external services | 9f |
-| `README.md` | `KELTA_MODULE_SIGNING_KEY`, `KELTA_MODULE_ALLOWED_HOSTS` | 9c |
+| `README.md` | `KELTA_MODULE_SIGNING_KEY`, `KELTA_MODULE_ALLOWED_HOSTS`; `KELTA_MODULES_EXTERNAL_ASYNC_ACTION_MAX_DURATION_SECONDS`, `KELTA_FLOW_RESUME_CLAIM_LEASE_SECONDS` | 9c, 9h |
 | `kelta-modules/billing/README.md`, `VERIFICATION.md` | rewritten for the Rust service | 9f |
 
 ## 8. Risks & open questions
@@ -592,10 +700,14 @@ beans.
 3. **On-behalf-of tokens.** v1 modules act as their own principal and receive the actor as a
    signed claim. Acting *as* the user (RFC 8693 token exchange) would let a route read exactly what
    the caller can. Deferred until a module needs it.
-4. **Async actions (9h).** `202` + task token, completed via `POST /api/modules/self/tasks/{token}`.
-   Needs a flow-engine state that waits for a callback and resumes with a payload.
-   `JdbcFlowStore.claimPendingResumeByEvent` exists but nothing calls it and its query does not
-   filter by tenant; fix both there.
+4. **Async actions (9h) — resolved, built.** `202` + task token, completed via
+   `POST /api/modules/self/tasks/complete`, the token in the body (§3.6.2). No new state type: an
+   awaited Task parks on the existing WAITING / `flow_pending_resume` machinery and resumes in place.
+   `claimPendingResumeByEvent` now filters by tenant and is what a completion calls; every pending
+   resume gained a claim lease (§3.6.2), so a claim whose resume never ran is taken over. Left open:
+   steps inside `Parallel`/`Map` branches and invoked sub-flows cannot wait (their state is not
+   persisted); the flow's own `TaskState.timeoutSeconds` does not cap `expiresAt`; a lost
+   completion answer is not replayed (a retry gets `404`, step 7).
 5. **Rust trial gate (9f).** Billing in Rust is also the measurement for any later Rust work in the
    platform: clean and incremental build time, image size, RSS, p50/p99 of
    `entitlements.resolve`, CI failures and agent iterations per PR, bugs after deploy, each
