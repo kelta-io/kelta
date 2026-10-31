@@ -21,7 +21,8 @@ io.kelta.worker/
     email/         ← Email providers (SMTP, templates)
     entitlement/   ← EntitlementService → the tenant's module EntitlementProvider; no module ⇒
                      MemberEntitlements.EMPTY. Billing is NOT compiled in — it is the
-                     kelta-modules/billing runtime module (there is no service/billing/)
+                     kelta-billing module: the Rust external service kelta-modules/billing,
+                     or the legacy JAR kelta-modules/billing-jar (there is no service/billing/)
     push/          ← Push notification providers (FCM, APNs, Web Push)
     sms/           ← SMS providers
 ```

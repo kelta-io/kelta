@@ -642,6 +642,52 @@ pinning do not guarantee:
 - **Names only.** The resolver looks a UUID up as a credential id first, so UUID-shaped names are
   refused even when declared. A credential named like a UUID cannot be granted to a module.
 
+### External modules — in-cluster modules and the Rust billing module (part 9f, accepted)
+
+`kelta-modules/billing` is the first external module the platform runs itself, as a pod in the
+homelab cluster (`ci-cd.md` → Rust external modules). What that does not guarantee:
+
+- **The worker trusts identity headers.** `X-Tenant-ID`, `X-User-Id`, `X-User-Type` and
+  `X-Connected-App-Id` are stripped from client requests by the gateway (`IdentityHeaderStripFilter`)
+  and stamped only from a verified token; the worker believes them as sent. Anything that can open
+  a connection to a worker pod can therefore act as any user of any tenant. An external module is
+  untrusted code by design, so an in-cluster module must never reach the worker directly: the
+  billing module runs in its own namespace (`kelta-billing`) whose egress NetworkPolicy allows only
+  DNS, the gateway pods and public HTTPS (private ranges excluded), and whose ingress admits only
+  the worker pods. That policy is the control — a module deployed without one, or into the `emf`
+  namespace, reopens it. The residual risk is any other path to the worker: a pod in a namespace
+  without such a policy, or a node-level process. Closing it for good needs the worker to verify
+  the gateway's identity (mTLS or a signed identity header) rather than trusting the network.
+- **A flow action may have no member.** The platform sends `act` only when a caller context is
+  bound (an HTTP request), not on a scheduled or async flow. `kelta-billing:create-checkout-session`,
+  `create-portal-session`, `me` and `resolve-entitlements` then fail with "No calling member"; the
+  module never takes the member from the input, which any flow author controls. Routes always carry
+  `act`. *JAR:* read the member from the in-process caller context the same way.
+- **The quota hook reads every collection.** Counting a member's records in an arbitrary collection
+  needs read access to it, so the manifest asks for `VIEW_ALL_DATA` — shown on the consent screen,
+  and narrower than the JAR's in-process access, but still a read grant on all of the tenant's data
+  for a module whose job is billing. A rule's `countFilter` field names go to the platform as query
+  filters; a bad one fails open.
+- **Billing quotas are soft limits.** The `*` beforeCreate hook has 2 s and
+  `failurePolicy: ignore`, so a slow, restarting or unreachable billing module lets every create
+  through. Counting and creating are separate steps with no lock, so N concurrent creates for one
+  member all see the same count and can land N − 1 over the cap. A hard limit would need the
+  platform to enforce it inside the create's transaction; no module can. Documented to tenants in
+  `kelta-modules/billing/README.md` → Per-member quotas.
+- **Install never changes an existing field.** The provisioner adopts an existing collection and
+  writes nothing under it, and keeps an existing field as it is. A module upgrade or a cutover onto
+  collections another build created therefore gets no new field and no changed flag (unique,
+  required) from its manifest. The billing cutover adds `lastStripeEventAt` and the unique
+  `stripeCheckoutSessionId` by hand (`kelta-modules/billing/CUTOVER.md` step 4b); until then two
+  concurrent deliveries of one checkout can mint two passes, and only the terminal-status rule
+  orders subscription events.
+- **Caches are per replica.** A record event reaches one replica of a module (the Service picks
+  one). The billing module's rules cache (60 s) therefore lags on any other replica by up to its
+  TTL after a rule change; its entitlements cache is off by default for that reason.
+- **`appliesTo=PORTAL` rules now apply.** The JAR module skipped them (it could not read the
+  caller's user type); the Rust module reads the signed actor's `user_type`. A tenant with active
+  PORTAL rules sees them enforced from the cutover on (`kelta-modules/billing/CUTOVER.md`).
+
 ### Outbound requests to tenant-supplied URLs
 
 `OutboundUrlGuard` + `OutboundHttpClient` (runtime-core `io.kelta.runtime.outbound`) refuse

@@ -1,0 +1,1 @@
+- 2026-10-31 feat(modules): add the kelta-module Rust SDK and the Rust kelta-billing external module, with its CI job, Harbor image and harness scenario (external modules part 9f)

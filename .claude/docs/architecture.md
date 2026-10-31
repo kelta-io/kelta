@@ -946,7 +946,7 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   (the gateway sends the caller's email there); with no resolved caller the module gets `null`.
   Before KLT-790 billing stamped the email on Stripe, so `billing_*.userId` rows were invisible to
   `EntitlementResolver`; the webhook now ignores a non-UUID `client_reference_id`/`metadata.userId`
-  and falls back to the stored customer mapping, and `kelta-modules/billing/VERIFICATION.md` has
+  and falls back to the stored customer mapping, and `kelta-modules/billing-jar/VERIFICATION.md` has
   the one-off email→UUID rewrite for existing rows.
   Checkout and portal **return URLs are validated against the credential's
   `allowedReturnOrigins`** by the module, on the semantics the deleted `ReturnUrlValidator` set:

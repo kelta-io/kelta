@@ -70,6 +70,12 @@ public final class KeltaStack {
      */
     public static final String STUB_MODULE_HOST = "stub-module";
 
+    /**
+     * Network alias of the real kelta-billing module image ({@code BillingModuleScenarioTest}),
+     * allow-listed for module traffic the same way as {@link #STUB_MODULE_HOST}.
+     */
+    public static final String BILLING_MODULE_HOST = "kelta-billing";
+
     /** The bucket {@link #OBJECT_STORE} creates and the worker stores objects in. */
     public static final String OBJECT_STORE_BUCKET = "harness-objects";
 
@@ -229,7 +235,7 @@ public final class KeltaStack {
             .withEnv("CAMPAIGN_TRACKING_SECRET",   CAMPAIGN_TRACKING_SECRET)
             .withEnv("KELTA_MAILBOX_VERP_SECRET",  MAILBOX_VERP_SECRET)
             .withEnv("KELTA_MODULE_SIGNING_KEY",   MODULE_SIGNING_KEY)
-            .withEnv("KELTA_MODULE_ALLOWED_HOSTS", STUB_MODULE_HOST)
+            .withEnv("KELTA_MODULE_ALLOWED_HOSTS", STUB_MODULE_HOST + "," + BILLING_MODULE_HOST)
             // Two quick retries, so a module event that keeps failing dead-letters within seconds.
             .withEnv("KELTA_MODULES_EXTERNAL_EVENT_BACKOFF", "1s,1s")
             .withEnv("KELTA_S3_ENABLED",           "true")

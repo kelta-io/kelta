@@ -12,7 +12,7 @@
       into the reactor would make it ship with the platform and quietly undo the point of the
       exercise — proving a customer can extend Kelta with no platform recompile or redeploy.
 
-      Build:  mvn -f kelta-modules/billing/pom.xml package
+      Build:  mvn -f kelta-modules/billing-jar/pom.xml package
       Output: target/kelta-module-billing-<version>.jar  (upload with kelta-module.json)
     -->
     <groupId>io.kelta.modules</groupId>

@@ -151,9 +151,37 @@ describe('each Java module build file triggers the job that tests it', () => {
     it(`${path} runs test-runtime`, () => assert.ok(triggers(path, 'test-runtime')));
   }
 
-  for (const path of ['kelta-modules/billing/pom.xml', 'kelta-modules/some-new-module/pom.xml', 'kelta-platform/pom.xml', 'ci/maven-settings.xml']) {
+  for (const path of ['kelta-modules/billing-jar/pom.xml', 'kelta-modules/billing-jar/src/main/java/io/kelta/modules/billing/BillingModule.java', 'kelta-modules/some-new-module/pom.xml', 'kelta-platform/pom.xml', 'ci/maven-settings.xml']) {
     it(`${path} runs test-runtime-modules`, () => assert.ok(triggers(path, 'test-runtime-modules')));
   }
+});
+
+describe('Rust external modules (kelta-modules Cargo workspace)', () => {
+  const rustPaths = [
+    'kelta-modules/Cargo.lock',
+    'kelta-modules/Cargo.toml',
+    'kelta-modules/Dockerfile',
+    'kelta-modules/sdk-rust/src/assertion.rs',
+    'kelta-modules/billing/src/webhook.rs',
+    'kelta-modules/billing/ui/ui-bundle.js',
+    'docs/module-protocol/openapi.yaml',
+  ];
+  for (const path of rustPaths) {
+    it(`${path} runs test-rust-modules and the harness that runs the image`, () => {
+      assert.ok(triggers(path, 'test-rust-modules'), `${path} matches: ${matchingFilters(path).join(', ')}`);
+      assert.ok(triggers(path, 'integration-tests'));
+      assert.ok(triggers(path, 'test-java'), 'integration-tests needs test-java; a skipped test-java skips it');
+    });
+  }
+
+  for (const path of ['kelta-modules/billing/src/lib.rs', 'kelta-modules/sdk-rust/Cargo.toml']) {
+    it(`${path} does not run the Java JAR-module job`, () => assert.ok(!triggers(path, 'test-runtime-modules')));
+  }
+
+  it('the Java JAR module is not part of the Rust workspace', () => {
+    assert.ok(!triggers('kelta-modules/billing-jar/pom.xml', 'test-rust-modules'));
+    assert.ok(!triggers('kelta-modules/billing-jar/src/main/java/io/kelta/modules/billing/BillingModule.java', 'test-rust-modules'));
+  });
 });
 
 describe('frontend and other test jobs', () => {

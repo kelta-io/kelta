@@ -97,6 +97,24 @@ java_audit:
 # flattens only one level of anchors), plus the harness itself and the Maven settings. Kept apart
 # from any_java so a harness-only change does not build and publish service images.
 # ci/path-filters.test.ts checks that each test job's build files match its filter.
+# Rust external modules (kelta-modules/Cargo.toml workspace: the kelta-module SDK crate and the
+# kelta-billing service). The "test-rust-modules" job runs cargo fmt/clippy/test in the image's
+# check stage; Build and Deploy builds the kelta-billing image on the same filter. They reach the
+# platform only over the module protocol, so no Java path re-runs them — the harness (integration)
+# runs the real image against the platform instead. The Java JAR module (billing-jar) is not part
+# of the workspace.
+rust_modules: &rust_modules
+  - 'kelta-modules/Cargo.toml'
+  - 'kelta-modules/Cargo.lock'
+  - 'kelta-modules/rust-toolchain.toml'
+  - 'kelta-modules/rustfmt.toml'
+  - 'kelta-modules/Dockerfile'
+  - 'kelta-modules/Dockerfile.dockerignore'
+  - 'kelta-modules/sdk-rust/**'
+  - 'kelta-modules/billing/**'
+  - 'docs/module-protocol/**'
+
+# BillingModuleScenarioTest runs the kelta-billing image, so a module change re-runs the harness.
 integration:
   - *runtime
   - 'kelta-gateway/**'
@@ -106,6 +124,7 @@ integration:
   - 'kelta-mcp/**'
   - 'kelta-test-harness/**'
   - *maven_build
+  - *rust_modules
 
 # E2E tests — run on any backend, frontend, or e2e suite change.
 e2e:
@@ -125,13 +144,16 @@ e2e:
   - 'docker-compose.ci.yml'
   - 'docker-compose.ci-build.yml'
 
-# Runtime-installable modules (kelta-modules/**). Built and tested separately from the
+# Runtime-installable JAR modules (kelta-modules/*/pom.xml). Built and tested separately from the
 # platform reactor, but they COMPILE AGAINST the runtime API — so a change to KeltaModule,
 # ActionHandler, ModuleContext or the SPI types they use breaks them. Anchored on *runtime
 # as well as their own tree so a platform change re-verifies every shipped module.
 runtime_modules:
   - *runtime
-  - 'kelta-modules/**'
+  - 'kelta-modules/*/pom.xml'
+  - 'kelta-modules/*/src/main/java/**'
+  - 'kelta-modules/*/src/main/resources/**'
+  - 'kelta-modules/*/src/test/java/**'
   - *maven_build
 
 # Quickstart smoke test — anything that could break "clone → docker compose up →

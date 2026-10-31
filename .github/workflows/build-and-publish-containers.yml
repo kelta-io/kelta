@@ -13,6 +13,14 @@ on:
       - 'kelta-web/**'
       - 'kelta-ui/**'
       - 'kelta-marketing/**'
+      # The Rust external modules (path-filters.yml rust_modules): the kelta-billing image.
+      - 'kelta-modules/Cargo.toml'
+      - 'kelta-modules/Cargo.lock'
+      - 'kelta-modules/rust-toolchain.toml'
+      - 'kelta-modules/Dockerfile'
+      - 'kelta-modules/Dockerfile.dockerignore'
+      - 'kelta-modules/sdk-rust/**'
+      - 'kelta-modules/billing/**'
       - 'README.md'
       - 'e2e-tests/**'
       - '.github/workflows/build-and-publish-containers.yml'
@@ -84,6 +92,7 @@ jobs:
       ui: ${{ steps.resolved.outputs.ui }}
       cli_downloads: ${{ steps.resolved.outputs.cli_downloads }}
       marketing: ${{ steps.resolved.outputs.marketing }}
+      rust_modules: ${{ steps.resolved.outputs.rust_modules }}
       any_java: ${{ steps.resolved.outputs.any_java }}
       workflows: ${{ steps.resolved.outputs.workflows }}
     steps:
@@ -147,6 +156,7 @@ jobs:
             echo "ui=$(resolve '${{ steps.filter.outputs.ui }}')"
             echo "cli_downloads=$(resolve '${{ steps.filter.outputs.cli_downloads }}')"
             echo "marketing=$(resolve '${{ steps.filter.outputs.marketing }}')"
+            echo "rust_modules=$(resolve '${{ steps.filter.outputs.rust_modules }}')"
             echo "any_java=$(resolve '${{ steps.filter.outputs.any_java }}')"
             echo "workflows=${{ steps.filter.outputs.workflows }}"
           } >> "$GITHUB_OUTPUT"
@@ -509,15 +519,99 @@ jobs:
           exit 1
 
   # ===========================================================================
+  # The kelta-billing external module image (kelta-modules/Dockerfile). Its own job,
+  # not a build-and-push leg: it lives in its own Harbor project (kelta-modules), so
+  # it pushes with that project's robot (HARBOR_MODULES_*) — the platform's emf robot
+  # is project-scoped and cannot push there, and the module's pull robot cannot read
+  # the platform's images. The check stage (fmt, clippy, tests) runs first, so a red
+  # module never reaches Harbor.
+  # ===========================================================================
+  build-and-push-modules:
+    name: Build & Push kelta-billing
+    needs: changes
+    if: needs.changes.outputs.rust_modules == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: k8s-runner
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Harbor (kelta-modules project)
+        if: github.event_name != 'workflow_dispatch' || inputs.push_images
+        uses: docker/login-action@v4
+        with:
+          registry: harbor.rzware.com
+          username: ${{ secrets.HARBOR_MODULES_USERNAME }}
+          password: ${{ secrets.HARBOR_MODULES_PASSWORD }}
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      - name: cargo fmt --check, clippy -D warnings, cargo test (check stage)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: kelta-modules/Dockerfile
+          target: check
+          push: false
+          cache-from: type=gha,scope=rust-modules-check
+          cache-to: type=gha,mode=max,scope=rust-modules-check
+          platforms: linux/amd64
+
+      - name: Build and push kelta-billing
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: kelta-modules/Dockerfile
+          target: runtime
+          push: ${{ github.event_name != 'workflow_dispatch' || inputs.push_images }}
+          tags: |
+            harbor.rzware.com/kelta-modules/kelta-billing:latest
+            harbor.rzware.com/kelta-modules/kelta-billing:main-${{ steps.sha.outputs.short }}
+          cache-from: type=gha,scope=kelta-billing
+          cache-to: type=gha,mode=max,scope=kelta-billing
+          platforms: linux/amd64
+
+      - name: Verify image pushed to Harbor
+        if: github.event_name != 'workflow_dispatch' || inputs.push_images
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_MODULES_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_MODULES_PASSWORD }}
+        run: |
+          repo="kelta-modules/kelta-billing"
+          tag="main-${{ steps.sha.outputs.short }}"
+          for attempt in $(seq 1 6); do
+            code=$(curl -sk -o /dev/null -w "%{http_code}" \
+              -u "${HARBOR_USERNAME}:${HARBOR_PASSWORD}" \
+              -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+              -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
+              -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+              -H "Accept: application/vnd.oci.image.index.v1+json" \
+              "https://harbor.rzware.com/v2/${repo}/manifests/${tag}")
+            if [[ "$code" == "200" ]]; then
+              echo "Verified harbor.rzware.com/${repo}:${tag} is queryable on Harbor."
+              exit 0
+            fi
+            echo "verify: attempt ${attempt}/6 for ${repo}:${tag} got HTTP ${code:-<no response>}"
+            sleep 5
+          done
+          echo "::error::Pushed ${repo}:${tag} but it is not queryable on Harbor after 6 attempts."
+          exit 1
+
+  # ===========================================================================
   # Update ArgoCD manifests for services that were actually built.
   # Skipping services keep their previous image tag.
   # ===========================================================================
   deploy:
     name: Update ArgoCD Manifests
-    needs: [changes, build-and-push]
+    needs: [changes, build-and-push, build-and-push-modules]
     if: |
       always() && !cancelled()
       && needs.build-and-push.result != 'failure'
+      && needs.build-and-push-modules.result != 'failure'
       && github.ref == 'refs/heads/main'
       && (github.event_name != 'workflow_dispatch' || inputs.deploy)
     runs-on: k8s-runner
@@ -580,9 +674,12 @@ jobs:
           UI_CHANGED: ${{ needs.changes.outputs.ui }}
           CLI_DOWNLOADS_CHANGED: ${{ needs.changes.outputs.cli_downloads }}
           MARKETING_CHANGED: ${{ needs.changes.outputs.marketing }}
+          RUST_MODULES_CHANGED: ${{ needs.changes.outputs.rust_modules }}
           WORKFLOWS_CHANGED: ${{ needs.changes.outputs.workflows }}
           HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
           HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+          HARBOR_MODULES_USERNAME: ${{ secrets.HARBOR_MODULES_USERNAME }}
+          HARBOR_MODULES_PASSWORD: ${{ secrets.HARBOR_MODULES_PASSWORD }}
         run: |
           IMAGE_TAG="main-${{ steps.sha.outputs.short }}"
 
@@ -595,6 +692,11 @@ jobs:
             local img="$1"            # harbor.rzware.com/emf/emf-worker
             local tag="$2"            # main-1234567
             local repo="${img#harbor.rzware.com/}"
+            # Each Harbor project is read with its own robot (the emf robot is project-scoped).
+            local user="$HARBOR_USERNAME" pass="$HARBOR_PASSWORD"
+            if [[ "$repo" == kelta-modules/* ]]; then
+              user="$HARBOR_MODULES_USERNAME" pass="$HARBOR_MODULES_PASSWORD"
+            fi
             local code
             local attempt
             local max_attempts=14
@@ -606,7 +708,7 @@ jobs:
             # sequence still gets a real window to catch up.
             for attempt in $(seq 1 "$max_attempts"); do
               code=$(curl -sk -o /dev/null -w "%{http_code}" \
-                -u "${HARBOR_USERNAME}:${HARBOR_PASSWORD}" \
+                -u "${user}:${pass}" \
                 -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
                 -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
                 -H "Accept: application/vnd.oci.image.manifest.v1+json" \
@@ -652,7 +754,20 @@ jobs:
             cd ..
           fi
 
+          # The billing external module runs in its own namespace and ArgoCD app
+          # (homelab-argo kelta-billing/), not in the emf overlay.
+          if [ -d kelta-billing ]; then
+            cd kelta-billing
+            bump "harbor.rzware.com/kelta-modules/kelta-billing" "$RUST_MODULES_CHANGED"
+            cd ..
+          elif [[ "$RUST_MODULES_CHANGED" == "true" ]]; then
+            echo "::warning::homelab-argo has no kelta-billing/ overlay yet — the kelta-billing image was pushed but not deployed."
+          fi
+
           rendered_tags="$(kustomize build emf/ | grep -oE 'harbor\.rzware\.com/emf/emf-[a-z-]+:[^[:space:]]+' | sort -u)"
+          if [ -d kelta-billing ]; then
+            rendered_tags+=$'\n'"$(kustomize build kelta-billing/ | grep -oE 'harbor\.rzware\.com/kelta-modules/[a-z-]+:[^[:space:]]+' | sort -u)"
+          fi
           echo "Rendered images:"
           echo "$rendered_tags"
 
@@ -1026,6 +1141,65 @@ jobs:
         env:
           LOKI_URL: http://loki.observability.svc.cluster.local:3100
         run: bash scripts/dora/emit-deploy-event.sh
+
+  # ===========================================================================
+  # The kelta-billing external module, when this run built it. Its own job, not a smoke-test
+  # step: the module is installed on no tenant by deploying it and the platform does not depend
+  # on it, so a failure here fails the run visibly but never rolls the platform back. Keep it
+  # out of rollback-on-smoke-failure's `needs` (ci/verify-kelta-billing-job.test.ts).
+  # Gated on the rolled tag (ArgoCD syncs after the bump), then the worker — the one caller the
+  # module's NetworkPolicy admits — must read the manifest at the version it serves.
+  # ===========================================================================
+  verify-kelta-billing:
+    name: Verify kelta-billing module
+    needs: [changes, deploy]
+    if: needs.deploy.result == 'success' && needs.changes.outputs.rust_modules == 'true'
+    runs-on: k8s-runner
+    # The image wait (5m) + rollout (3m) + manifest probe (1m) caps, plus kubectl overhead.
+    timeout-minutes: 12
+    steps:
+      - name: Verify kelta-billing module
+        run: |
+          NS=kelta-billing
+          DEPLOY=kelta-billing
+          if ! kubectl -n "${NS}" get deploy "${DEPLOY}" >/dev/null 2>&1; then
+            echo "::warning::No ${NS}/${DEPLOY} Deployment (homelab-argo kelta-billing/ not applied) — skipping."
+            exit 0
+          fi
+          EXPECT="main-$(echo ${{ github.sha }} | cut -c1-7)"
+          IMAGE=""
+          for i in $(seq 1 30); do
+            IMAGE=$(kubectl -n "${NS}" get deploy "${DEPLOY}" -o jsonpath='{.spec.template.spec.containers[0].image}')
+            [[ "${IMAGE}" == *":${EXPECT}" ]] && break
+            echo "Attempt $i/30 - ${DEPLOY} runs ${IMAGE}, waiting for ${EXPECT}..."
+            sleep 10
+          done
+          if [[ "${IMAGE}" != *":${EXPECT}" ]]; then
+            echo "::error::${NS}/${DEPLOY} never moved to ${EXPECT} (still ${IMAGE}) — check the kelta-billing ArgoCD app."
+            exit 1
+          fi
+          kubectl -n "${NS}" rollout status deploy/"${DEPLOY}" --timeout=180s
+          URL="http://${DEPLOY}.${NS}.svc.cluster.local:8080/.well-known/kelta-module.json"
+          # The worker's namespace, as smoke-test's "Detect namespace and deployment names" finds it.
+          if kubectl -n kelta get deploy kelta-worker >/dev/null 2>&1; then
+            W_NS=kelta
+            W_DEPLOY=kelta-worker
+          else
+            W_NS=emf
+            W_DEPLOY=emf-worker
+          fi
+          for i in $(seq 1 12); do
+            ID=$(kubectl -n "${W_NS}" exec deploy/"${W_DEPLOY}" -- curl -sf --max-time 5 "${URL}" 2>/dev/null \
+                 | grep -o '"id":"kelta-billing"' || true)
+            if [ -n "${ID}" ]; then
+              echo "The worker reads the kelta-billing manifest."
+              exit 0
+            fi
+            echo "Attempt $i/12 - manifest not readable from the worker yet..."
+            sleep 5
+          done
+          echo "::error::The worker could not read ${URL} — check the kelta-billing pods and its ingress NetworkPolicy."
+          exit 1
 
   # ===========================================================================
   # Auto-rollback on smoke-test failure — reverts the image bump in homelab-argo.

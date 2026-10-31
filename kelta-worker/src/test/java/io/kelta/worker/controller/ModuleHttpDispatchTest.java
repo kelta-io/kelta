@@ -60,7 +60,7 @@ class ModuleHttpDispatchTest {
         routes = new ModuleRouteRegistry();
 
         String json = Files.readString(
-                Path.of("../kelta-modules/billing/src/main/resources/kelta-module.json"));
+                Path.of("../kelta-modules/billing-jar/src/main/resources/kelta-module.json"));
         var manifest = new ModuleManifestParser(new ObjectMapper()).parse(json);
         routes.register(TENANT, "kelta-billing", manifest.routes());
         for (var r : manifest.routes()) {
