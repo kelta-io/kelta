@@ -61,10 +61,12 @@ Several problems in one request produce several entries (one per field).
 | `READ_ONLY_COLLECTION` | 403 | a write to a read-only collection |
 | `FLOW_NOT_LAUNCHABLE`, `FLOW_STATE_OVERRIDE_FORBIDDEN` | 403 | `POST /api/flows/{id}/execute` without `MANAGE_WORKFLOWS` on a flow members cannot launch, or with a `state` override |
 | `AI_DISABLED` | 403 | AI features are not enabled for the tenant |
+| `NOT_MODULE_PRINCIPAL`, `MODULE_NOT_ACTIVE`, `CREDENTIAL_NOT_DECLARED` | 403 | [`GET /api/modules/self/credentials/{name}`](/docs/platform/modules/#reading-tenant-credentials): the token is not an external module's service-user token (a user token, a personal access token, another module's token), the module is not `ACTIVE` or `DEGRADED`, or its manifest does not declare that credential name |
 | `NOT_FOUND` | 404 | record or route not found (or not visible) |
 | `COLLECTION_NOT_FOUND` | 404 | unknown collection |
 | `TENANT_NOT_FOUND` | 404 | the tenant slug in the path does not resolve |
 | `TARGET_NOT_FOUND` | 404 | [`POST /api/admin/availability/synthetic-events`](/docs/platform/messaging/#synthetic-events) names a watch target that does not exist in the tenant |
+| `CREDENTIAL_NOT_FOUND` | 404 | a module reads a credential its manifest declares, but the tenant has no active credential of that name |
 | `METHOD_NOT_ALLOWED` | 405 | the endpoint does not support the HTTP method |
 | `UNIQUE_VIOLATION` | 409 | unique-constraint violation; one entry per field of the constraint |
 | `STALE_WRITE` | 409 | stale `If-Match`: the record changed since you read it |
@@ -91,6 +93,7 @@ Several problems in one request produce several entries (one per field).
 | `TENANT_CONCURRENCY_LIMIT` | 503 | too many concurrent requests for the tenant; retry after `Retry-After` |
 | `ModuleUnavailable` | 503 | a request needed an external module that is disabled, unreachable or behind an open circuit breaker (a before-save hook with `failurePolicy: fail`, a route); `meta.moduleId` names it; retry later |
 | `ModuleTimeout` | 503 | as `ModuleUnavailable`, but the module did not answer within its timeout |
+| `CREDENTIALS_UNAVAILABLE` | 503 | a module reads a credential, but the platform has no credential store configured |
 
 Hook-raised validation errors use `VALIDATION_FAILED` unless the hook defines a more specific code.
 

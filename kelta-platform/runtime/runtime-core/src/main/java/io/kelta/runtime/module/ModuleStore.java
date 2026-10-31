@@ -191,6 +191,15 @@ public interface ModuleStore {
     }
 
     /**
+     * The install whose service principal is the connected app {@code connectedAppId}, in
+     * {@code tenantId} — how a module's own call back to the platform names its install. Empty
+     * unless exactly one row matches.
+     */
+    default Optional<TenantModuleData> findByConnectedAppId(String tenantId, String connectedAppId) {
+        return Optional.empty();
+    }
+
+    /**
      * Writes {@code status} and {@code error} only while the row still holds {@code expected}, so
      * a pod's circuit breaker (ACTIVE ⇄ DEGRADED) can never overwrite an admin's disable or an
      * uninstall in flight.

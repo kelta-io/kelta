@@ -146,6 +146,7 @@ A presence-gated hook (secret/integration configured) uses `@ConditionalOnProper
 | Per-pod registry rebuilt from DB rows (NATS refresh + local read-after-write refresh + periodic reconcile with no tenant bound; re-register only on a fingerprint change; register new before removing old) | `module/ExternalModuleRegistry.java`, `module/ExternalModuleReconcileScheduler.java` |
 | At-least-once JetStream → HTTP delivery (queue-group `EventSubscription.queueGroupWithRedelivery`; throw to nak with the next backoff; on the last attempt write a dead-letter row and return so the message is acked; never on the write path) | `module/ModuleEventDeliveryListener.java`, `module/ModuleEventDeadLetterStore.java` |
 | Pinning third-party bytes by the hash an admin approved (fetch and hash at plan time, store under a hash-named object key, re-hash on every read, never proxy live) | `module/ExternalModuleUiBundles.java` |
+| Handing secret material to an external caller (every check before decrypting, read through `CredentialResolverPort` with the caller as audit actor, literal error codes, `no-store`, a `credentials` path segment so span capture skips the body, a redacting `toString`) | `module/ModuleCredentialService.java`, `controller/ModuleCredentialController.java` |
 
 ## Running Tests
 

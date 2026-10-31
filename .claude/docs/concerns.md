@@ -618,6 +618,30 @@ pinning do not guarantee:
 - **Replaced bundles can be orphaned.** Upgrade and uninstall delete the old object best-effort,
   after the new pin is written. A failed delete is logged and leaves the object in the bucket.
 
+### External modules — credential read (part 9e.1, accepted)
+
+`architecture.md` → External module credential read. What
+`GET /api/modules/self/credentials/{name}` does not guarantee:
+
+- **The secret leaves the platform by design.** A declared credential is decrypted and sent to the
+  module's host. The admin approved the name on the consent screen; nothing stops a malicious or
+  compromised module from misusing a secret it read. Disabling or uninstalling stops further reads
+  at once (the checks run per read, not per token), but a secret already read cannot be recalled —
+  rotate the credential.
+- **The worker trusts the gateway's `X-Connected-App-Id`.** Like `X-User-Id`, it is stripped from
+  client requests at the gateway head and stamped only from a verified token. A caller that reaches
+  the worker directly, bypassing the gateway, could forge it. The worker also requires the resolved
+  caller to be the install's `service_user_id`, so a forged header alone, without that user's
+  identity, reads nothing.
+- **The purpose label is the module's.** `?purpose=` is appended to the platform's
+  `MODULE:<moduleId>` prefix in the audit row. A module can mislabel why it read a secret, never
+  which module read it.
+- **No read while installing.** The install is `INSTALLING` until the `installed` lifecycle call
+  returns, so a module cannot read a credential during that call (`403 MODULE_NOT_ACTIVE`). It
+  can read one on its first action, hook or event after install.
+- **Names only.** The resolver looks a UUID up as a credential id first, so UUID-shaped names are
+  refused even when declared. A credential named like a UUID cannot be granted to a module.
+
 ### Outbound requests to tenant-supplied URLs
 
 `OutboundUrlGuard` + `OutboundHttpClient` (runtime-core `io.kelta.runtime.outbound`) refuse

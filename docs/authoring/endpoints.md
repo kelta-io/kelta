@@ -49,7 +49,7 @@ it before routing.
 `internal` marks an endpoint only the platform's own admin UI or services call; it is reachable, but
 not a supported integration surface and may change without notice.
 
-**409** public endpoints: **317** linked to docs, **29** internal,
+**410** public endpoints: **318** linked to docs, **29** internal,
 **63** not yet documented.
 
 ## Endpoints
@@ -277,6 +277,7 @@ not a supported integration surface and may change without notice.
 | POST | `/api/modules/install` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#installing) |
 | POST | `/api/modules/install-jar` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#installing) |
 | POST | `/api/modules/plan` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#external-modules-installed-by-url) |
+| GET | `/api/modules/self/credentials/{name}` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#reading-tenant-credentials) |
 | GET | `/api/modules/signing-keys` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#signing) |
 | POST | `/api/modules/signing-keys` | worker | API_ACCESS + MANAGE_CREDENTIALS | [platform/modules](/docs/platform/modules/#signing) |
 | DELETE | `/api/modules/signing-keys/{id}` | worker | API_ACCESS + MANAGE_CREDENTIALS | [platform/modules](/docs/platform/modules/#signing) |

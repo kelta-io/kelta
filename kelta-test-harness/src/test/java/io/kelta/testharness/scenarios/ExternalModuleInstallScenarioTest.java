@@ -40,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -76,6 +77,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code module_event_dead_letter}. The module's UI bundle is fetched and hashed at plan time,
  * pinned in the object store at install, and served from Kelta's copy (never the module's live
  * file); an upgrade that ships a different bundle says so in its plan and re-pins it.
+ *
+ * <p>{@link #readsOnlyDeclaredCredentials()} covers part 9e.1: the principal's token reads a
+ * credential its manifest declares from {@code GET /api/modules/self/credentials/{name}} (secrets,
+ * metadata, {@code no-store}, a {@code CREDENTIAL_RESOLVE} audit row with the module's service user
+ * and purpose), and is refused an undeclared one; an admin token is refused even with a forged
+ * {@code X-Connected-App-Id}; a second install's principal reads only its own declaration; a
+ * disabled install reads nothing.
  */
 @DisplayName("External module install scenario")
 class ExternalModuleInstallScenarioTest extends ScenarioBase {
@@ -407,6 +415,119 @@ class ExternalModuleInstallScenarioTest extends ScenarioBase {
                 + uninstallPlan.get("planHash").stringValue(), null, HttpStatus.OK);
         assertThat(queryCount("SELECT count(*) FROM module_event_dead_letter WHERE tenant_module_id = ?", installId))
                 .as("dead letters go with their install").isZero();
+    }
+
+    @Test
+    @DisplayName("a module's principal reads a declared credential; undeclared, user, other-install and disabled reads are refused")
+    void readsOnlyDeclaredCredentials() throws Exception {
+        String suffix = Long.toHexString(System.nanoTime());
+        // Placeholder secrets only: a hyphen keeps them from looking like real provider keys.
+        String stripeName = "harness-stripe-" + suffix;
+        String secretKey = "sk_test_harness-" + suffix;
+        String otherName = "harness-other-" + suffix;
+        String stripeId = createCredential(Map.of("name", stripeName, "type", "stripe", "secretKey", secretKey,
+                "webhookSecret", "whsec_harness-" + suffix,
+                "allowedReturnOrigins", "https://app.example.test,https://www.example.test"));
+        String otherId = createCredential(Map.of("name", otherName, "type", "bearer_token",
+                "token", "harness-token-" + suffix));
+
+        // Module A declares the stripe credential only.
+        String moduleA = "harness-cred-a-" + suffix;
+        String tokenA = installWithCredentials(moduleA, "harness_cred_a_" + suffix, stripeName);
+        String appA = queryString("SELECT connected_app_id FROM tenant_module WHERE tenant_id = ? AND module_id = ?",
+                tenantId, moduleA);
+        String serviceUserA = queryString("SELECT service_user_id FROM tenant_module WHERE tenant_id = ? "
+                + "AND module_id = ?", tenantId, moduleA);
+        String path = "/" + SLUG + "/api/modules/self/credentials/";
+
+        // The declared read: secrets plus the non-secret metadata, never cached.
+        ResponseEntity<String> read = getWith(tokenA, path + stripeName + "?purpose=STRIPE_API:checkout", Map.of());
+        assertThat(read.getStatusCode()).as("read: %s", read.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(read.getHeaders().getCacheControl()).contains("no-store");
+        JsonNode credential = mapper.readTree(read.getBody());
+        assertThat(credential.get("name").stringValue()).isEqualTo(stripeName);
+        assertThat(credential.get("type").stringValue()).isEqualTo("stripe");
+        assertThat(credential.get("secrets").get("secretKey").stringValue()).isEqualTo(secretKey);
+        assertThat(credential.get("metadata").get("allowedReturnOrigins").stringValue())
+                .isEqualTo("https://app.example.test,https://www.example.test");
+        assertThat(queryCount("SELECT count(*) FROM setup_audit_trail WHERE tenant_id = ? "
+                        + "AND action = 'CREDENTIAL_RESOLVE' AND entity_id = ? AND user_id = ? "
+                        + "AND new_value->>'purpose' = ?", tenantId, stripeId, serviceUserA,
+                "MODULE:" + moduleA + ":STRIPE_API:checkout"))
+                .as("audited with the module as the actor").isEqualTo(1);
+
+        // A credential the tenant has but the manifest does not declare.
+        assertRefused(getWith(tokenA, path + otherName, Map.of()), HttpStatus.FORBIDDEN, "CREDENTIAL_NOT_DECLARED");
+
+        // A signed-in user (here the tenant admin) is no module principal, even naming A's app.
+        assertRefused(getWith(adminToken, path + stripeName, Map.of()), HttpStatus.FORBIDDEN, "NOT_MODULE_PRINCIPAL");
+        assertRefused(getWith(adminToken, path + stripeName, Map.of("X-Connected-App-Id", appA)),
+                HttpStatus.FORBIDDEN, "NOT_MODULE_PRINCIPAL");
+
+        // Module B declares the other credential: it reads that, never A's, and cannot pose as A.
+        String moduleB = "harness-cred-b-" + suffix;
+        String tokenB = installWithCredentials(moduleB, "harness_cred_b_" + suffix, otherName);
+        assertThat(getWith(tokenB, path + otherName, Map.of()).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertRefused(getWith(tokenB, path + stripeName, Map.of()), HttpStatus.FORBIDDEN, "CREDENTIAL_NOT_DECLARED");
+        assertRefused(getWith(tokenB, path + stripeName, Map.of("X-Connected-App-Id", appA)),
+                HttpStatus.FORBIDDEN, "CREDENTIAL_NOT_DECLARED");
+
+        // Disabled, A's still-valid token reads nothing.
+        admin("POST", "/" + SLUG + "/api/modules/" + moduleA + "/disable", "{}", HttpStatus.OK);
+        assertRefused(getWith(tokenA, path + stripeName, Map.of()), HttpStatus.FORBIDDEN, "MODULE_NOT_ACTIVE");
+
+        for (String moduleId : List.of(moduleA, moduleB)) {
+            JsonNode uninstallPlan = admin("GET", "/" + SLUG + "/api/modules/" + moduleId
+                    + "/uninstall-plan?purgeData=true", null, HttpStatus.OK).get("data").get("attributes");
+            admin("DELETE", "/" + SLUG + "/api/modules/" + moduleId + "?purgeData=true&planHash="
+                    + uninstallPlan.get("planHash").stringValue(), null, HttpStatus.OK);
+        }
+        for (String id : List.of(stripeId, otherId)) {
+            gatewayClientWithToken(adminToken).delete().uri("/" + SLUG + "/api/credentials/" + id).retrieve()
+                    .onStatus(st -> true, (req, resp) -> {}).toBodilessEntity();
+        }
+    }
+
+    /** Installs a module declaring {@code credentials}; returns the principal's token from {@code lifecycle}. */
+    private String installWithCredentials(String moduleId, String owned, String... credentials) throws Exception {
+        ObjectNode manifest = manifest(moduleId, owned);
+        ArrayNode declared = ((ObjectNode) manifest.get("permissions")).putArray("credentials");
+        for (String credential : credentials) {
+            declared.add(credential);
+        }
+        serveManifest(manifest);
+        JsonNode plan = admin("POST", "/" + SLUG + "/api/modules/plan", "{\"baseUrl\":\"" + BASE_URL + "\"}",
+                HttpStatus.OK).get("data").get("attributes");
+        assertThat(plan.get("blockers")).as("blockers: %s", plan.get("blockers")).isEmpty();
+        assertThat(plan.get("grants").get("credentials").get(0).stringValue()).isEqualTo(credentials[0]);
+        JsonNode installed = admin("POST", "/" + SLUG + "/api/modules/install",
+                "{\"baseUrl\":\"" + BASE_URL + "\",\"planHash\":\"" + plan.get("planHash").stringValue() + "\"}",
+                HttpStatus.OK).get("data").get("attributes");
+        assertThat(installed.get("status").stringValue()).as("install: %s", installed).isEqualTo("ACTIVE");
+        return header(lifecycleRequests().getLast(), "Kelta-Access-Token");
+    }
+
+    private String createCredential(Map<String, Object> attributes) throws Exception {
+        RestClient client = gatewayClientWithToken(adminToken);
+        waitForStatus(client, "/" + SLUG + "/api/credentials", HttpStatus.OK, 60);
+        ResponseEntity<String> created = client.post().uri("/" + SLUG + "/api/credentials")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("data", Map.of("type", "credentials", "attributes", attributes)))
+                .retrieve().onStatus(st -> true, (req, resp) -> {}).toEntity(String.class);
+        assertThat(created.getStatusCode()).as("create credential: %s", created.getBody()).isEqualTo(HttpStatus.CREATED);
+        return mapper.readTree(created.getBody()).get("data").get("id").stringValue();
+    }
+
+    private ResponseEntity<String> getWith(String token, String uri, Map<String, String> headers) {
+        RestClient.RequestHeadersSpec<?> spec = gatewayClientWithToken(token).get().uri(uri);
+        headers.forEach(spec::header);
+        return spec.retrieve().onStatus(s -> true, (req, resp) -> {}).toEntity(String.class);
+    }
+
+    private void assertRefused(ResponseEntity<String> response, HttpStatus status, String code) {
+        assertThat(response.getStatusCode()).as("%s", response.getBody()).isEqualTo(status);
+        assertThat(mapper.readTree(response.getBody()).get("errors").get(0).get("code").stringValue()).isEqualTo(code);
+        assertThat(response.getBody()).doesNotContain("sk_test_harness");
     }
 
     // ── the stub module ──────────────────────────────────────────────────────────────────

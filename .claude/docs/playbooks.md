@@ -220,7 +220,10 @@ The contract is `docs/module-protocol/openapi.yaml`; what each call carries and 
    module id, `htm`/`htu`/`body_sha256` must match the request, and `exp` must not have passed.
 3. **Call Kelta back with `Kelta-Access-Token`.** It is a short-lived token for the install's
    `SERVICE` user, whose profile holds exactly the manifest's `permissions` plus the collections
-   the module owns. Never ask for or store an admin's token.
+   the module owns. Never ask for or store an admin's token. A tenant secret (a provider API key)
+   is a credential the manifest names in `permissions.credentials`: read it per request with
+   `GET /api/modules/self/credentials/{name}` and that token, never store it, never log it
+   (`architecture.md` → External module credential read).
 4. **Implement the declared endpoints**: `lifecycle` and `health` always, then one per capability.
    Deduplicate actions and schedules on `Idempotency-Key` and events on `eventId`, since all three
    can arrive twice. Answer events with any 2xx; anything else is retried, then dead-lettered.
@@ -235,7 +238,7 @@ The contract is `docs/module-protocol/openapi.yaml`; what each call carries and 
    says so, and installs only on re-consent.
 8. **Test it** the way `kelta-test-harness` → `ExternalModuleInstallScenarioTest` does, with a
    WireMock module: install, actions, hooks, routes, webhooks, schedules, events, the UI bundle,
-   upgrade and uninstall.
+   credential reads, upgrade and uninstall.
 
 ### Legacy: JAR module (removed in part 9g)
 

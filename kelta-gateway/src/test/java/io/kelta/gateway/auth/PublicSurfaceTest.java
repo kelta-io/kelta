@@ -125,6 +125,7 @@ class PublicSurfaceTest {
                     "/api/admin/availability/synthetic-events",
                     "/api/modules/kelta-billing/x/plans", "/api/modules/kelta-billing/x/me",
                     "/api/modules/kelta-billing/x/checkout-sessions",
+                    "/api/modules/self/credentials/stripe",
                     "/api/collections", "/api/records", "/api/analytics", "/api/reports",
                     "/api/dashboards", "/api/users", "/api/files", "/api/devices",
                     "/api/operations", "/api/metadata", "/api/packages")) {
@@ -160,6 +161,10 @@ class PublicSurfaceTest {
             assertThat(isPublic("/api/modules/install", HttpMethod.POST)).isFalse();
             assertThat(isPublic("/api/modules/acme/upgrade", HttpMethod.POST)).isFalse();
             assertThat(isPublic("/api/modules/acme/uninstall-plan", HttpMethod.GET)).isFalse();
+            // A module's credential read hands out tenant secrets: it is never anonymous, and the
+            // open JWKS beside it must not have opened /api/modules/self.
+            assertThat(isPublic("/api/modules/self/credentials/stripe", HttpMethod.GET)).isFalse();
+            assertThat(isPublic("/api/modules/self", HttpMethod.GET)).isFalse();
             assertThat(isPublic("/api/telehealth/encounters", HttpMethod.GET)).isFalse();
         }
     }

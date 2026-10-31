@@ -53,7 +53,7 @@ Order values below are the live `getOrder()` returns from source (lower runs fir
 
 | Order | Filter | Purpose |
 |-------|--------|---------|
-| -400 | IdentityHeaderStripFilter | Strip client-forged internal headers (`X-User-*`, `X-Forwarded-*`, `X-Geo-*`, `X-Kelta-Client-Ip`) |
+| -400 | IdentityHeaderStripFilter | Strip client-forged internal headers (`X-User-*`, `X-Forwarded-*`, `X-Geo-*`, `X-Kelta-Client-Ip`, `X-Connected-App-Id`) |
 | -390 | ClientIpForwardingFilter | Stamp `X-Kelta-Client-Ip` with the `ClientIpResolver` result for downstream services |
 | -320 | RootEndpointsFilter (`config/`) | Answer exactly `GET`/`HEAD /robots.txt` and `/` and stop the chain — see Public root endpoints |
 | -310 | CustomDomainFilter | Map custom domain → tenant |
@@ -634,7 +634,9 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   from `run_as_user_id` — only on a connected-app principal and only for a UUID — so
   `RouteAuthorizationFilter` authorizes it, `RevokedUserFilter` honours a deactivation, and
   `HeaderTransformationFilter` stamps `X-User-Id` = the email and `X-User-Type: SERVICE` (the
-  worker's `CallerContext` reads SERVICE as INTERNAL). A plain connected app's token is unchanged:
+  worker's `CallerContext` reads SERVICE as INTERNAL), plus `X-Connected-App-Id` = the token's
+  `connected_app_id` on any connected-app token (never for a user token or PAT; a client copy is
+  stripped at -400 and removed again before stamping). A plain connected app's token is unchanged:
   no profile, so `403 User identity not resolved`. **SERVICE users** never sign in
   (`KeltaUserDetailsService`, the worker's JIT bootstrap, password reset and email verification
   skip them), hold no PAT, are not counted by `GovernorLimitsRepository.COUNT_ACTIVE_USERS`, are
@@ -743,6 +745,28 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   / `ui_bundle_key`). `GET /api/modules/{id}/ui-bundle.js` serves the stored copy for an `ACTIVE`
   or `DEGRADED` install after re-hashing it, with `ETag` = the hash. It never proxies the
   module's live file. Spec: `9-external-modules.md` §3.6.1, §3.9.
+- **External module credential read** (part 9e.1). `GET /api/modules/self/credentials/{name}`
+  (`ModuleCredentialController`, a literal mapping, unconditional) hands the calling install a
+  tenant credential its stored manifest declares in `permissions.credentials`, as
+  `{name, type, secrets, metadata}` with `Cache-Control: no-store`. **Authorization is the
+  worker's:** the path rides the `static-modules` route, so the gateway checks only `API_ACCESS`
+  (every module principal holds it; a static route also skips the child-resource check, so a
+  tenant `credentials` collection changes nothing), and the path is not unauthenticated.
+  `ModuleCredentialService` then requires, before decrypting anything: the gateway-stamped
+  `X-Connected-App-Id` names exactly one external `tenant_module` row of the tenant
+  (`ModuleStore.findByConnectedAppId`), the `CallerContext` user is that row's `service_user_id`,
+  and the app and its `SERVICE` user are active (`ModuleServicePrincipalService.isActivePrincipal`)
+  — else `403 NOT_MODULE_PRINCIPAL`, which is what a user token, a PAT or another install's token
+  gets; the install is `ACTIVE`/`DEGRADED`, read from the row each call (`403 MODULE_NOT_ACTIVE`);
+  the name is declared exactly and is not UUID-shaped, since the resolver looks a UUID up as an id
+  (`403 CREDENTIAL_NOT_DECLARED`). A missing or inactive credential is `404 CREDENTIAL_NOT_FOUND`;
+  no vault is `503 CREDENTIALS_UNAVAILABLE`. The read goes through
+  `CredentialResolverPort.resolve(tenant, name, purpose, actorUserId)`, so its `CREDENTIAL_RESOLVE`
+  audit row carries the module's SERVICE user and the purpose `MODULE:<moduleId>[:<label>]` (the
+  module may add `?purpose=<label>`, `[A-Za-z0-9_.:-]{1,64}`; the prefix is the platform's). It is a
+  `SelfScopedController` with a body that has no `data` member, so the record advices leave it alone,
+  and `SensitiveBodyRedactor` never captures a `credentials` path as span data. Spec:
+  `9-external-modules.md` §3.3.
 - **Owner-scoped collections** (member-data-ownership slice 2, V206). A collection may declare
   `ownerField` (`createdBy` or a LOOKUP→`users`), `ownerScope` (`NONE|PORTAL|ALL`) and
   `ownerScopeReads` (default true) — `collection.owner_field/owner_scope/owner_scope_reads`, on

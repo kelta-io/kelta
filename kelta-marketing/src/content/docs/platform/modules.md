@@ -169,6 +169,40 @@ Records the module receives are what its service user may read: server-only and 
 and masked fields arrive masked. After 5 failures in a row, the platform stops calling the module for 30 s
 and marks the install `DEGRADED`. The first successful call marks it `ACTIVE` again.
 
+### Reading tenant credentials
+
+A module that needs a tenant secret, such as a payment provider's API key, declares the credential's name in
+its manifest's `permissions.credentials`. The admin sees the name on the install review. The tenant creates the
+credential under that name; the module never stores a secret of its own. With the `Kelta-Access-Token` of the
+current request, the module reads it:
+
+```http
+GET /api/modules/self/credentials/{name}?purpose=STRIPE_API:checkout
+Authorization: Bearer <Kelta-Access-Token>
+```
+
+```json
+{ "name": "stripe", "type": "stripe",
+  "secrets": { "secretKey": "…", "webhookSecret": "…" },
+  "metadata": { "allowedReturnOrigins": "https://app.example.com" } }
+```
+
+- `secrets` holds the decrypted secret fields. `metadata` holds the credential's other fields as the admin
+  entered them. A list-like value can be a list or a comma-separated string, so accept both.
+- Only the module's own service-user token can read, and only names its installed manifest declares:
+  - `403 NOT_MODULE_PRINCIPAL`: any other token, including an admin's, a personal access token, or another
+    module's token;
+  - `403 MODULE_NOT_ACTIVE`: the module is not `ACTIVE` or `DEGRADED`. It is still installing during the
+    `installed` lifecycle call, so read credentials on later calls;
+  - `403 CREDENTIAL_NOT_DECLARED`: the name is not declared. Names are matched exactly; a credential id is
+    never accepted;
+  - `404 CREDENTIAL_NOT_FOUND`: declared, but the tenant has no active credential of that name.
+- Every read is recorded in the tenant's setup audit trail, with the module's service user as the actor and
+  `MODULE:<moduleId>` as the purpose. The optional `purpose` (up to 64 letters, digits and `_ . : -`) is added
+  after it, so you can say why you read the secret.
+- The answer is `Cache-Control: no-store`. Keep the secret in memory for the request that needs it, and never
+  log it or return it to a caller.
+
 ## What a module can contribute
 
 | Contribution | Mechanism |

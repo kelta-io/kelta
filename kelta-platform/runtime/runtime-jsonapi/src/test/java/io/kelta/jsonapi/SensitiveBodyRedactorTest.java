@@ -140,6 +140,8 @@ class SensitiveBodyRedactorTest {
     void sensitivePaths() {
         assertTrue(SensitiveBodyRedactor.isSensitivePath("/api/credentials"));
         assertTrue(SensitiveBodyRedactor.isSensitivePath("/acme/api/Credentials/123/test"));
+        // An external module's credential read: its body is tenant secrets, never span data.
+        assertTrue(SensitiveBodyRedactor.isSensitivePath("/acme/api/modules/self/credentials/stripe"));
         assertFalse(SensitiveBodyRedactor.isSensitivePath("/api/credentials-report"));
         assertFalse(SensitiveBodyRedactor.isSensitivePath("/api/users"));
         assertFalse(SensitiveBodyRedactor.isSensitivePath(null));

@@ -29,6 +29,7 @@ import io.kelta.worker.module.PlatformVersion;
 import io.kelta.worker.service.ModuleServicePrincipalService;
 import io.kelta.worker.module.JdbcModuleStore;
 import io.kelta.worker.module.ModuleConfigEventPublisher;
+import io.kelta.worker.module.ModuleCredentialService;
 import io.kelta.worker.module.ModuleEventDeadLetterStore;
 import io.kelta.worker.module.ModuleEventDeliveryListener;
 import io.kelta.worker.module.ModuleJarService;
@@ -48,6 +49,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -288,6 +290,18 @@ public class ModuleConfig {
     public ExternalModuleProxy externalModuleProxy(ExternalModuleRegistry externalModuleRegistry,
                                                    ExternalModuleInvoker externalModuleInvoker) {
         return new ExternalModuleProxy(externalModuleRegistry, externalModuleInvoker);
+    }
+
+    /**
+     * {@code GET /api/modules/self/credentials/{name}}: a module's service principal reads the
+     * tenant credentials its approved manifest declares, audited through the credential resolver.
+     */
+    @Bean
+    public ModuleCredentialService moduleCredentialService(ModuleStore moduleStore,
+                                                           ModuleServicePrincipalService principals,
+                                                           ObjectProvider<CredentialResolverPort> credentialResolverPort,
+                                                           ObjectMapper objectMapper) {
+        return new ModuleCredentialService(moduleStore, principals, credentialResolverPort, objectMapper);
     }
 
     @Bean

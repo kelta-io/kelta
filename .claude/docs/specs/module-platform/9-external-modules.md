@@ -4,8 +4,9 @@
 > built 2026-10-30; 9c (install by URL) built 2026-10-30; 9d (invocation) built 2026-10-30; 9e
 > (events, UI bundle pinning, Modules page) built 2026-10-31 — external modules install from the
 > Modules page behind a consent screen, run flow actions, hooks, the entitlements port, routes,
-> webhooks and schedules, receive record events, and ship a pinned admin UI bundle; the settings
-> form (§3.8) and a dead-letter list are not built yet. Planning spec for replacing the
+> webhooks and schedules, receive record events, and ship a pinned admin UI bundle; 9e.1
+> (credential read) built 2026-10-31 — a module reads the tenant credentials its manifest declares
+> (§3.3); the settings form (§3.8) and a dead-letter list are not built yet. Planning spec for replacing the
 > in-process JAR module path with modules that run as **separate HTTP services, in any language**.
 > The machine-readable protocol contract is
 > [`docs/module-protocol/openapi.yaml`](../../../../docs/module-protocol/openapi.yaml); this
@@ -86,7 +87,8 @@ by hash at install so a running module cannot swap it later (§3.9).
 | 9c | Registry + install by URL: manifest v2 parser, plan/consent, metadata provisioning, worker signing key + JWKS, `KELTA_MODULE_ALLOWED_HOSTS` — **built** (V221, `ExternalModuleService`, `ExternalModulePlanner`, `ModuleUninstaller`, `ModuleAssertionSigner`, `ModuleHostGuard`). Deferred: UI bundle pinning (9e), schedule registration (9d), `settings` validation (column only) | **yes, no auto-merge** | 9b |
 | 9d | Invocation layer: remote actions, before-save hooks, service ports, route + webhook proxies, schedules, timeouts, circuit breaker, `DEGRADED`, metrics — **built** (`ExternalModuleRegistry`, `ExternalModuleInvoker`, `ModuleCircuitBreaker`, `RemoteActionHandler`, `RemoteBeforeSaveHook`, `RemoteEntitlementProvider`, `ExternalModuleProxy`, `ModuleScheduleSync`; no migration — V221 already allows `MODULE_ACTION`) | **yes, no auto-merge** | 9c |
 | 9e | Event delivery (NATS → HTTP) + UI bundle pinning + Modules page install-by-URL and consent screen — **built** (V222 `module_event_dead_letter`, `ModuleEventDeliveryListener`, `EventSubscription.Redelivery`, `ExternalModuleUiBundles`; Modules page: install from URL with the plan review, upgrade re-consent, uninstall plan, health). Deferred: the settings form (§3.8), a dead-letter list or replay | **yes, no auto-merge** | 9d |
-| 9f | Rust billing module + `kelta-module` Rust SDK; cut the prod tenant over | — | 9e |
+| 9e.1 | Module credential read: `GET /api/modules/self/credentials/{name}` for the calling install's declared credentials, audited as the module (§3.3) — **built** (`ModuleCredentialController`, `ModuleCredentialService`; gateway forwards the token's `connected_app_id` as `X-Connected-App-Id`; no migration) | **yes, no auto-merge** | 9e |
+| 9f | Rust billing module + `kelta-module` Rust SDK; cut the prod tenant over | — | 9e.1 |
 | 9g | Delete the JAR path | — | 9f soaked one release |
 | 9h | (later) Async actions with task tokens | — | 9d |
 
@@ -271,6 +273,35 @@ resolves the module from the token's `connected_app_id`, refuses any name not de
 installed manifest, and resolves through `CredentialResolverPort` (which already audits resolves,
 V188). Security-sensitive: it returns secret material to an external service by design.
 
+As built (9e.1):
+
+- **Who may read.** The gateway forwards the token's `connected_app_id` as `X-Connected-App-Id`
+  (stripped from every client request, stamped only for a connected-app token). The worker finds
+  the one `tenant_module` row of the tenant with that `connected_app_id`, and requires that the row
+  is external, the caller `CallerContextFilter` resolved is the row's `service_user_id`, and the app
+  and its `SERVICE` user are still active. Anything else — a user token, a PAT, a plain connected
+  app, another install's principal — is `403 NOT_MODULE_PRINCIPAL`. The install must be `ACTIVE` or
+  `DEGRADED`, read from the row on every call (`403 MODULE_NOT_ACTIVE`; so a module cannot read
+  while still `INSTALLING`, including during the `installed` lifecycle call). The name must be in the
+  stored manifest's `permissions.credentials` exactly, and a UUID-shaped name is refused because the
+  resolver would look it up as a credential id (`403 CREDENTIAL_NOT_DECLARED`). A declared name the
+  tenant has not created, or has deactivated, is `404 CREDENTIAL_NOT_FOUND`; no credential store
+  (`KELTA_ENCRYPTION_KEY`) is `503 CREDENTIALS_UNAVAILABLE`. All checks run before decryption.
+- **What it returns.** `{name, type, secrets, metadata}`: the decrypted secret fields and the
+  credential's non-secret metadata as the admin entered it (billing's `allowedReturnOrigins`, a list
+  or a comma-separated string). Every answer is `Cache-Control: no-store`. Neither service records the
+  body as span data (`SensitiveBodyRedactor` skips any path with a `credentials` segment), and
+  nothing logs a value.
+- **Audit and purpose.** The read goes through `CredentialResolverPort.resolve(tenant, name,
+  purpose, actor)` (the actor overload is new), so the `CREDENTIAL_RESOLVE` row in
+  `setup_audit_trail` has the module's `SERVICE` user as `user_id`. The purpose is
+  platform-authored: `MODULE:<moduleId>`, plus `:<label>` when the module sends `?purpose=<label>`
+  (`[A-Za-z0-9_.:-]{1,64}`, else `400 INVALID_PARAMETER`). The module can label its reads but cannot
+  hide which module made them.
+- **Authorization at the gateway.** `/api/modules/**` is the `static-modules` route, so the gateway
+  checks only `API_ACCESS` (which every module principal holds); the decision above is the worker's.
+  The path is not in `unauthenticated-paths`.
+
 ### 3.4 What a module may see of a record
 
 Hook and event payloads are built from the query engine's internal record, which can contain
@@ -451,6 +482,7 @@ Later parts, representative files (each part's PR lists all):
 | 9c | (as built) runtime-core: new `ExternalModuleManifest`, `ModuleVersion`, `ModuleManifestParser.parseExternal` (v2), new `outbound/ModuleHostGuard` + `OutboundTargetGuard` (so `OutboundHttpClient` takes either guard); worker: `ModuleController.java`, `ModuleMetadataProvisioner.java` (plan/provision with ownership), new `ModuleAssertionSigner`, `ModuleJwksController`, `ModuleHttpClient`, `ModuleAccessTokenService`, `ExternalModulePlanner`, `ExternalModuleService`, `ModuleUninstaller`, `PlatformVersion`; `ModuleServicePrincipalService.updatePermissions`; `CollectionDeletionGuardHook.FORCE`; gateway `application.yml` `unauthenticated-paths` += `/api/modules/.well-known/jwks.json` (the file, not the directory) |
 | 9d | (as built) runtime-core: new `ModuleTimeoutException` (extends `ModuleUnavailableException`), `ActionContext.stepName/attempt`, `OutboundHttpClient.Request.deadline`, `ModuleStore.findAllExternal/compareAndSetStatus`, `GlobalExceptionHandler` 503 `ModuleUnavailable`/`ModuleTimeout`; worker: new `ExternalModuleRegistry` (per-pod endpoint registry; registers into `ActionHandlerRegistry`, `BeforeSaveHookRegistry`, `ModuleServiceRegistry` — not `ModuleRegistrar`, which stays JAR-only), `ExternalModuleInvoker`, `ModuleCircuitBreaker`, `ModulePrincipalAccess`, `RemoteActionHandler`, `RemoteBeforeSaveHook`, `RemoteEntitlementProvider` (`ModuleEntitlementService` unchanged), `ExternalModuleProxy`, `ModuleScheduleSync`, `ExternalModuleReconcileScheduler`; `ModuleHttpClient.invoke`; `ModuleHttpController.java`, `ModuleWebhookController.java` (raw bytes), `ModuleController.java` (health), `ModuleEventListener.java`, `ExternalModuleService.java`, `ScheduledJobRepository.java`, `ScheduledJobExecutorService.java` |
 | 9e | new `ModuleEventDeliveryListener` (beside `RecordWebhookPublisher.java`), `NatsSubscriptionConfig.java`; `ModuleController.java` (bundle pin); `kelta-ui/app/src/pages/ModulesPage/` (install by URL, consent, settings form) |
+| 9e.1 | (as built) runtime-core: `ModuleStore.findByConnectedAppId`; runtime-module-integration: `CredentialResolverPort.resolve(…, actorUserId)`; worker: new `ModuleCredentialController`, `ModuleCredentialService`, `ModuleServicePrincipalService.isActivePrincipal`, `JdbcModuleStore`, `CredentialResolverPortAdapter`, `ModuleConfig`; gateway: `HeaderTransformationFilter` + `IdentityHeaderStripFilter` (`X-Connected-App-Id`) |
 | 9f | `kelta-modules/billing/` (Rust, replaces the Java module), new `kelta-modules/sdk-rust/`; homelab-argo manifests (outside this repo) |
 | 9g | delete `SandboxedModuleClassLoader`, `ModuleLoader`, `ModuleJarService`, `ModuleSignatureVerifier`, `ModuleLoadRetryScheduler`, `ModuleLoadFailureClassifier`, signing-key endpoints, `install-jar`; JAR branches in `RuntimeModuleManager`. Compiled-in `KeltaModule`s (`runtime-module-core`, `runtime-module-integration`) stay |
 
@@ -490,7 +522,10 @@ beans.
   `eventId`; one failing every attempt dead-lettered with what was sent; the bundle pinned at
   install and served from Kelta's copy after the module swapped its file; an upgrade plan showing
   `uiBundle.changed` and re-pinning). The stack gains an S3Mock object store and a `1s,1s` event
-  backoff. The stack's Cerbos is allow-all and its gateway runs with
+  backoff. 9e.1 adds `readsOnlyDeclaredCredentials` (the principal reads its declared credential
+  with secrets, metadata and `no-store`, audited as the module with its purpose label; it is refused
+  an undeclared one; an admin token is refused, also with a forged `X-Connected-App-Id`; another
+  install's principal reads only its own; a disabled install reads nothing). The stack's Cerbos is allow-all and its gateway runs with
   `PERMISSIONS_ENABLED=false`, so the object-permission deny is proven on a real PDP by
   `CerbosGeneratedPolicyIT.moduleServicePrincipalReadsOnlyItsGrant` and the plain-app 403 by
   `RouteAuthorizationFilterTest.connectedAppTokenShapes`.
@@ -509,10 +544,10 @@ beans.
 |---|---|---|
 | `.claude/docs/status.md` | Extensibility/modules row: slice 9 state | each part |
 | parent `README.md` | slice table row 9; security model + reuse map rewritten for external modules; deploy hazard 1 retired | 9a (notes), 9g (rewrite) |
-| `.claude/docs/playbooks.md` | "Ship a runtime-installable module" rewritten for external modules | 9e |
-| `.claude/docs/architecture.md` | module invocation path, JWKS + credentials endpoints and their authorization | 9c, 9d |
-| `.claude/docs/integrations.md` | module protocol, event delivery semantics | 9d, 9e |
-| `.claude/docs/concerns.md` | close the classloader-sandbox and same-JVM items; add the module-host allow-list and hook-in-transaction notes | 9d, 9g |
+| `.claude/docs/playbooks.md` | "Ship a runtime-installable module" rewritten for external modules | 9e, 9e.1 |
+| `.claude/docs/architecture.md` | module invocation path, JWKS + credentials endpoints and their authorization | 9c, 9d, 9e.1 |
+| `.claude/docs/integrations.md` | module protocol, event delivery semantics, credential reads | 9d, 9e, 9e.1 |
+| `.claude/docs/concerns.md` | close the classloader-sandbox and same-JVM items; add the module-host allow-list and hook-in-transaction notes; the credential-read limits | 9d, 9e.1, 9g |
 | `CLAUDE.md` | Module Map: `kelta-modules/` holds external services | 9f |
 | `README.md` | `KELTA_MODULE_SIGNING_KEY`, `KELTA_MODULE_ALLOWED_HOSTS` | 9c |
 | `kelta-modules/billing/README.md`, `VERIFICATION.md` | rewritten for the Rust service | 9f |
@@ -528,7 +563,9 @@ beans.
 - **Secret exposure by design.** `GET /api/modules/self/credentials/{name}` hands a tenant secret
   to an external host. It is limited to declared names, audited, and shown on the consent screen,
   but an admin approving a malicious module gives it the secret. Same trust decision as giving a
-  SaaS vendor an API key.
+  SaaS vendor an API key. As built (9e.1), the checks run per read, so disabling or uninstalling
+  the module stops further reads at once even though its last token lives up to 15 minutes; a
+  secret it already read cannot be taken back — rotate the credential.
 - **UI bundle is still full-trust code** in the admin origin (unchanged from the JAR world).
   Pinning prevents later swaps, not a malicious first version. Sandboxing it (iframe + postMessage
   bridge) is a separate effort.

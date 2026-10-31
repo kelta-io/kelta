@@ -106,6 +106,18 @@ public class JdbcModuleStore implements ModuleStore {
     }
 
     @Override
+    public Optional<TenantModuleData> findByConnectedAppId(String tenantId, String connectedAppId) {
+        if (tenantId == null || connectedAppId == null) {
+            return Optional.empty();
+        }
+        // Two rows naming one app would be a broken install; refuse rather than pick one.
+        List<TenantModuleData> results = jdbcTemplate.query(
+            "SELECT * FROM tenant_module WHERE tenant_id = ? AND connected_app_id = ? LIMIT 2",
+            this::mapModule, tenantId, connectedAppId);
+        return results.size() == 1 ? Optional.of(results.get(0)) : Optional.empty();
+    }
+
+    @Override
     public Optional<TenantModuleData> findById(String id) {
         List<TenantModuleData> results = jdbcTemplate.query(
             "SELECT * FROM tenant_module WHERE id = ?",
