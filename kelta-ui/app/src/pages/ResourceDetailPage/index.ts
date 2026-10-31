@@ -1,8 +1,7 @@
 /**
  * ResourceDetailPage Module
  *
- * Exports the ResourceDetailPage component and related types.
+ * Exports the ResourceDetailPage component.
  */
 
 export { ResourceDetailPage } from './ResourceDetailPage'
-export type { ResourceDetailPageProps, Resource } from './ResourceDetailPage'

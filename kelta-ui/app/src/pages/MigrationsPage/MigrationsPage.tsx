@@ -30,12 +30,12 @@ import { cn } from '@/lib/utils'
 /**
  * Migration run status type
  */
-export type MigrationStatus = 'pending' | 'running' | 'completed' | 'failed' | 'rolled_back'
+type MigrationStatus = 'pending' | 'running' | 'completed' | 'failed' | 'rolled_back'
 
 /**
  * Migration step result interface
  */
-export interface MigrationStepResult {
+interface MigrationStepResult {
   stepOrder: number
   operation: string
   status: 'pending' | 'running' | 'completed' | 'failed'
@@ -48,7 +48,7 @@ export interface MigrationStepResult {
 /**
  * Migration run interface matching the API response
  */
-export interface MigrationRun {
+interface MigrationRun {
   id: string
   planId: string
   collectionId: string

@@ -1,8 +1,7 @@
 /**
  * UserDetailPage Module
  *
- * Exports the UserDetailPage component and related types.
+ * Exports the UserDetailPage component.
  */
 
 export { UserDetailPage } from './UserDetailPage'
-export type { UserDetailPageProps } from './UserDetailPage'

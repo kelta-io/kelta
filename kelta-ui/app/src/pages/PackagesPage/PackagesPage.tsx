@@ -24,7 +24,7 @@ import type { ApiClient } from '../../services/apiClient'
 /**
  * Package interface matching the API response
  */
-export interface Package {
+interface Package {
   id: string
   name: string
   version: string
@@ -37,7 +37,7 @@ export interface Package {
 /**
  * Package item interface
  */
-export interface PackageItem {
+interface PackageItem {
   type: 'collection' | 'page' | 'menu' | 'flow' | 'layout' | 'validation-rule' | 'picklist'
   id: string
   name: string
@@ -47,7 +47,7 @@ export interface PackageItem {
 /**
  * Export options interface
  */
-export interface ExportOptions {
+interface ExportOptions {
   name: string
   version: string
   description?: string
@@ -63,7 +63,7 @@ export interface ExportOptions {
 /**
  * Import preview interface
  */
-export interface ImportPreview {
+interface ImportPreview {
   creates: PackageItem[]
   updates: PackageItem[]
   conflicts: ImportConflict[]
@@ -72,7 +72,7 @@ export interface ImportPreview {
 /**
  * Import conflict interface
  */
-export interface ImportConflict {
+interface ImportConflict {
   item: PackageItem
   existingItem: PackageItem
   resolution?: 'skip' | 'overwrite'
@@ -81,7 +81,7 @@ export interface ImportConflict {
 /**
  * Import result interface
  */
-export interface ImportResult {
+interface ImportResult {
   success: boolean
   created: number
   updated: number
@@ -92,7 +92,7 @@ export interface ImportResult {
 /**
  * Import error interface
  */
-export interface ImportError {
+interface ImportError {
   item: PackageItem
   message: string
 }

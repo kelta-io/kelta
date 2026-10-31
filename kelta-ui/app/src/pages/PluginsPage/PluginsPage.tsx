@@ -15,21 +15,6 @@ import { LoadingSpinner } from '../../components'
 import type { LoadedPlugin, PluginStatus } from '../../types/plugin'
 import { cn } from '@/lib/utils'
 
-/**
- * Plugin settings interface for plugins that provide configuration
- */
-export interface PluginSettings {
-  pluginId: string
-  SettingsComponent?: React.ComponentType<PluginSettingsProps>
-  values?: Record<string, unknown>
-}
-
-interface PluginSettingsProps {
-  values: Record<string, unknown>
-  onChange: (values: Record<string, unknown>) => void
-  isSaving?: boolean
-}
-
 export interface PluginsPageProps {
   testId?: string
 }

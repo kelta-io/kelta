@@ -1,9 +1,7 @@
 /**
  * ResourceBrowserPage Module
  *
- * Exports the ResourceBrowserPage component and related types.
+ * Exports the ResourceBrowserPage component.
  */
 
 export { ResourceBrowserPage } from './ResourceBrowserPage'
-export type { ResourceBrowserPageProps } from './ResourceBrowserPage'
-export type { CollectionSummary } from '../../hooks/useCollectionSummaries'

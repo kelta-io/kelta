@@ -5,4 +5,3 @@
  */
 
 export { ResourceFormPage } from './ResourceFormPage'
-export type { ResourceFormPageProps } from './ResourceFormPage'

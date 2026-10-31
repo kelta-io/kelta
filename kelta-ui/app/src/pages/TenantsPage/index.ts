@@ -1,8 +1,7 @@
 /**
  * TenantsPage Module
  *
- * Exports the TenantsPage component and related types.
+ * Exports the TenantsPage component.
  */
 
 export { TenantsPage } from './TenantsPage'
-export type { TenantsPageProps, Tenant } from './TenantsPage'

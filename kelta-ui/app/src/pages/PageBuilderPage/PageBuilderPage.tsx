@@ -85,7 +85,7 @@ export interface PageComponent {
  * Component position on the canvas.
  * @deprecated Legacy layout coords — no longer written; migrated to `grid`/`column` + `span` on load.
  */
-export interface ComponentPosition {
+interface ComponentPosition {
   row: number
   column: number
   width: number

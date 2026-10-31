@@ -5,4 +5,3 @@
  */
 
 export { ResourceListPage } from './ResourceListPage'
-export type { ResourceListPageProps } from './ResourceListPage'
