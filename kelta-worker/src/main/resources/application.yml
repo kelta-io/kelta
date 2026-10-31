@@ -96,6 +96,10 @@ kelta:
     external:
       reconcile-enabled: ${KELTA_MODULES_EXTERNAL_RECONCILE_ENABLED:true}
       reconcile-interval-ms: ${KELTA_MODULES_EXTERNAL_RECONCILE_INTERVAL_MS:60000}
+      # Redelivery of a record event a module did not acknowledge (worker-module-events, part 9e):
+      # one delay per retry, comma-separated (5s, 2m, 1h). After the last retry the event is
+      # written to module_event_dead_letter and acknowledged. The protocol documents the default.
+      event-backoff: ${KELTA_MODULES_EXTERNAL_EVENT_BACKOFF:5s,30s,2m,10m,1h}
   # The running Kelta release (e.g. 0.1.0), compared against a module's minPlatformVersion at
   # install and upgrade. Blank = unknown: the check is skipped with a WARN, never failed.
   platform:

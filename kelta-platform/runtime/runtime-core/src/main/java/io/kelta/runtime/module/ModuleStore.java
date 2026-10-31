@@ -158,6 +158,12 @@ public interface ModuleStore {
     void updateExternalManifest(String id, String version, String name, String description,
                                 String manifestJson, int protocolVersion);
 
+    /**
+     * Records an external install's pinned admin UI bundle: its SHA-256 and object-storage key,
+     * or {@code null} for both when the module ships no UI.
+     */
+    void updateUiBundle(String id, String sha256, String key);
+
     /** Replaces a module's action rows with {@code actions}. */
     void replaceActions(String moduleRowId, List<TenantModuleData.TenantModuleActionData> actions);
 

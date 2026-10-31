@@ -21,6 +21,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -31,6 +32,7 @@ class ExternalModuleRegistryTest {
             {"manifestVersion": 2, "protocolVersion": 1, "id": "stub", "name": "Stub", "version": "%s",
              "actions": [ %s ],
              "hooks": [ { "collection": "orders", "events": ["beforeCreate"] } ],
+             "events": [ { "collection": "orders", "types": ["created", "updated"] } ],
              "services": [ { "port": "entitlements", "cacheTtlSeconds": 0 } ]}
             """;
 
@@ -179,5 +181,34 @@ class ExternalModuleRegistryTest {
         registry.reconcile();
 
         verify(invoker, never()).call(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("event subscribers: callable installs of the tenant whose events name the collection and type")
+    void eventSubscribers() {
+        stored(row(TenantModuleData.STATUS_ACTIVE, "1.0.0", "ping"));
+        registry.refresh(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE);
+
+        assertThat(registry.eventSubscribers(ExternalModuleFixtures.TENANT, "orders", "updated")).hasSize(1);
+        assertThat(registry.eventSubscribers(ExternalModuleFixtures.TENANT, "orders", "deleted")).isEmpty();
+        assertThat(registry.eventSubscribers(ExternalModuleFixtures.TENANT, "invoices", "created")).isEmpty();
+        assertThat(registry.eventSubscribers("tenant-2", "orders", "created")).isEmpty();
+
+        stored(row(TenantModuleData.STATUS_DISABLED, "1.0.0", "ping"));
+        registry.refresh(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE);
+        assertThat(registry.eventSubscribers(ExternalModuleFixtures.TENANT, "orders", "updated"))
+                .as("a disabled install gets no events").isEmpty();
+    }
+
+    @Test
+    @DisplayName("ensureInitialized runs the first reconcile once, and not at all after one has run")
+    void ensureInitialized() {
+        when(store.findAllExternal()).thenReturn(List.of(row(TenantModuleData.STATUS_ACTIVE, "1.0.0", "ping")));
+
+        registry.ensureInitialized();
+        registry.ensureInitialized();
+
+        verify(store, times(1)).findAllExternal();
+        assertThat(registry.eventSubscribers(ExternalModuleFixtures.TENANT, "orders", "created")).hasSize(1);
     }
 }

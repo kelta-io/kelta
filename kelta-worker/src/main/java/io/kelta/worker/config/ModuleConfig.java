@@ -19,6 +19,7 @@ import io.kelta.worker.module.ExternalModuleProxy;
 import io.kelta.worker.module.ExternalModuleReconcileScheduler;
 import io.kelta.worker.module.ExternalModuleRegistry;
 import io.kelta.worker.module.ExternalModuleService;
+import io.kelta.worker.module.ExternalModuleUiBundles;
 import io.kelta.worker.module.JdbcModuleSigningKeyStore;
 import io.kelta.worker.module.ModuleAccessTokenService;
 import io.kelta.worker.module.ModuleAssertionSigner;
@@ -28,6 +29,8 @@ import io.kelta.worker.module.PlatformVersion;
 import io.kelta.worker.service.ModuleServicePrincipalService;
 import io.kelta.worker.module.JdbcModuleStore;
 import io.kelta.worker.module.ModuleConfigEventPublisher;
+import io.kelta.worker.module.ModuleEventDeadLetterStore;
+import io.kelta.worker.module.ModuleEventDeliveryListener;
 import io.kelta.worker.module.ModuleJarService;
 import io.kelta.worker.module.ModuleLoadRetryPolicy;
 import io.kelta.worker.module.ModuleLoadRetryScheduler;
@@ -198,15 +201,28 @@ public class ModuleConfig {
         return new ModuleHttpClient(moduleHostGuard, signer, objectMapper);
     }
 
+    /**
+     * Pins external modules' admin UI bundles in object storage (part 9e). Always defined; with
+     * storage off ({@link S3StorageService#isEnabled()} false at run time) a module that ships a UI
+     * plans with a blocker instead.
+     */
+    @Bean
+    public ExternalModuleUiBundles externalModuleUiBundles(ModuleHttpClient moduleHttpClient,
+                                                           S3StorageService s3StorageService,
+                                                           ObjectMapper objectMapper) {
+        return new ExternalModuleUiBundles(moduleHttpClient, s3StorageService, objectMapper);
+    }
+
     @Bean
     public ExternalModulePlanner externalModulePlanner(ModuleHttpClient moduleHttpClient, ModuleStore moduleStore,
                                                        ModuleProvenanceStore provenanceStore,
                                                        ModuleMetadataProvisioner metadataProvisioner,
                                                        PlatformVersion platformVersion,
                                                        ModuleAssertionSigner signer, JdbcTemplate jdbcTemplate,
-                                                       ObjectMapper objectMapper) {
+                                                       ObjectMapper objectMapper,
+                                                       ExternalModuleUiBundles externalModuleUiBundles) {
         return new ExternalModulePlanner(moduleHttpClient, moduleStore, provenanceStore, metadataProvisioner,
-            platformVersion, signer, jdbcTemplate, objectMapper);
+            platformVersion, signer, jdbcTemplate, objectMapper, externalModuleUiBundles);
     }
 
     @Bean
@@ -231,10 +247,11 @@ public class ModuleConfig {
                                                        UserIdResolver userIdResolver,
                                                        ExternalModuleRegistry externalModuleRegistry,
                                                        ModuleScheduleSync moduleScheduleSync,
+                                                       ExternalModuleUiBundles externalModuleUiBundles,
                                                        ObjectMapper objectMapper) {
         ExternalModuleService service = new ExternalModuleService(planner, moduleStore, provenanceStore,
             metadataProvisioner, principals, tokens, moduleHttpClient, eventPublisher, tenantSlugResolver,
-            userIdResolver, objectMapper);
+            userIdResolver, externalModuleUiBundles, objectMapper);
         service.setInvocation(externalModuleRegistry, moduleScheduleSync);
         return service;
     }
@@ -277,6 +294,28 @@ public class ModuleConfig {
     public ModuleScheduleSync moduleScheduleSync(ScheduledJobRepository scheduledJobRepository,
                                                  ObjectMapper objectMapper) {
         return new ModuleScheduleSync(scheduledJobRepository, objectMapper);
+    }
+
+    @Bean
+    public ModuleEventDeadLetterStore moduleEventDeadLetterStore(JdbcTemplate jdbcTemplate) {
+        return new ModuleEventDeadLetterStore(jdbcTemplate);
+    }
+
+    /**
+     * Record events to external modules (part 9e): the {@code worker-module-events} queue-group
+     * consumer {@code NatsSubscriptionConfig} registers. A malformed
+     * {@code kelta.modules.external.event-backoff} fails startup.
+     */
+    @Bean
+    public ModuleEventDeliveryListener moduleEventDeliveryListener(
+            ExternalModuleRegistry externalModuleRegistry, ExternalModuleInvoker externalModuleInvoker,
+            ModuleEventDeadLetterStore moduleEventDeadLetterStore, CollectionRegistry collectionRegistry,
+            FieldMaskingService fieldMaskingService, ObjectMapper objectMapper,
+            @Nullable MeterRegistry meterRegistry,
+            @Value("${kelta.modules.external.event-backoff:5s,30s,2m,10m,1h}") String eventBackoff) {
+        return new ModuleEventDeliveryListener(externalModuleRegistry, externalModuleInvoker,
+            moduleEventDeadLetterStore, collectionRegistry, fieldMaskingService, objectMapper, meterRegistry,
+            ModuleEventDeliveryListener.parseBackoff(eventBackoff));
     }
 
     @Bean

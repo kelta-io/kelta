@@ -23,8 +23,15 @@ interface TenantModuleSummary {
 const loadedModuleIds = new Set<string>()
 
 /**
+ * Statuses whose bundle is served: ACTIVE, and DEGRADED (an external module whose service is not
+ * answering still has the bundle pinned at install, so its UI keeps working).
+ */
+const SERVED_STATUSES = new Set(['ACTIVE', 'DEGRADED'])
+
+/**
  * Loads the browser bundles of the tenant's active runtime modules, so a module can ship its UI
- * in the same single JAR as its backend code.
+ * in the same single JAR as its backend code — or, for an external module, in the bundle the
+ * platform pinned at install.
  *
  * <p>Each bundle's top-level code calls `ComponentRegistry.registerPageComponent(...)` from
  * `@kelta/plugin-sdk`; the caller syncs that registry into the host afterwards.
@@ -35,8 +42,10 @@ const loadedModuleIds = new Set<string>()
  *
  * **This executes publisher-authored JavaScript with the admin session's full DOM and cookie
  * access.** The trust anchor is the JAR signature the platform verified at install and re-verified
- * on read — there is no browser-side isolation. Serving a bundle from an unverified JAR would make
- * a bad module a stored-XSS vector across the tenant.
+ * on read, or for an external module the SHA-256 the admin approved in the install plan, which the
+ * worker re-checks before serving its pinned copy (never the module's live file) — there is no
+ * browser-side isolation. Serving an unverified bundle would make a bad module a stored-XSS vector
+ * across the tenant.
  *
  * A module that fails to load is logged and skipped: one broken module must not take the admin UI
  * down with it.
@@ -64,7 +73,7 @@ export async function loadModuleUiBundles(apiClient: ApiClient): Promise<string[
 
   const loaded: string[] = []
   for (const module of modules ?? []) {
-    if (module.status !== 'ACTIVE' || !module.uiBundlePath) {
+    if (!SERVED_STATUSES.has(module.status) || !module.uiBundlePath) {
       continue
     }
     if (loadedModuleIds.has(module.moduleId)) {

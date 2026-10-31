@@ -60,6 +60,17 @@ describe('loadModuleUiBundles', () => {
     expect(apiClient.get).not.toHaveBeenCalled() // listed only, never fetched
   })
 
+  it('fetches the pinned bundle of a DEGRADED external module', async () => {
+    // The bundle was pinned at install; a module service that is not answering does not change it.
+    const apiClient = fakeApiClient({
+      modules: [{ moduleId: 'ext', status: 'DEGRADED', uiBundlePath: '/ui/bundle.js' }],
+    })
+
+    await loadModuleUiBundles(apiClient)
+
+    expect(apiClient.get).toHaveBeenCalledWith('/api/modules/ext/ui-bundle.js')
+  })
+
   it('skips active modules that declare no bundle', async () => {
     const apiClient = fakeApiClient({
       modules: [{ moduleId: 'a', status: 'ACTIVE', uiBundlePath: null }],

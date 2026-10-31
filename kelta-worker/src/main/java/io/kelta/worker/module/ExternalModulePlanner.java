@@ -36,6 +36,11 @@ import java.util.TreeSet;
  * schedules, webhook, UI bundle), what its metadata package would create, adopt, keep or leave
  * alone, and every blocker. A plan with blockers is still a plan: the admin is shown why.
  *
+ * <p><b>UI bundle (part 9e, §3.9).</b> A manifest with {@code ui} has its bundle fetched here and
+ * hashed; the hash must equal {@code ui.sha256}. The plan's {@code uiBundle} says what was fetched
+ * and, on an upgrade, whether it differs from the pinned bundle, so a changed admin UI is part of
+ * what the admin consents to. The fetched bytes ride on the plan for install to pin.
+ *
  * <p><b>{@code planHash}</b> is the SHA-256 of the plan as canonical JSON (keys sorted at every
  * level, every list sorted, {@code planHash} itself excluded). It covers the manifest's SHA-256,
  * the installed version and the platform version, so any change to what would happen changes it.
@@ -57,6 +62,9 @@ public class ExternalModulePlanner {
     static final String UNKNOWN_FIELD = "UNKNOWN_FIELD";
     static final String UNKNOWN_PERMISSION = "UNKNOWN_PERMISSION";
     static final String CAPABILITY_WITHOUT_GRANT = "CAPABILITY_WITHOUT_GRANT";
+    static final String UI_BUNDLE_UNAVAILABLE = "UI_BUNDLE_UNAVAILABLE";
+    static final String UI_BUNDLE_MISMATCH = "UI_BUNDLE_MISMATCH";
+    static final String UI_BUNDLE_STORAGE_UNAVAILABLE = "UI_BUNDLE_STORAGE_UNAVAILABLE";
 
     private static final String SELECT_VISIBLE_COLLECTION_ID = """
             SELECT id FROM collection
@@ -75,11 +83,13 @@ public class ExternalModulePlanner {
     private final ModuleAssertionSigner signer;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final ExternalModuleUiBundles uiBundles;
 
     public ExternalModulePlanner(ModuleHttpClient http, ModuleStore moduleStore,
                                  ModuleProvenanceStore provenanceStore, ModuleMetadataProvisioner provisioner,
                                  PlatformVersion platformVersion, ModuleAssertionSigner signer,
-                                 JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+                                 JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
+                                 ExternalModuleUiBundles uiBundles) {
         this.http = Objects.requireNonNull(http);
         this.parser = new ModuleManifestParser(objectMapper);
         this.moduleStore = Objects.requireNonNull(moduleStore);
@@ -89,6 +99,7 @@ public class ExternalModulePlanner {
         this.signer = Objects.requireNonNull(signer);
         this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate);
         this.objectMapper = Objects.requireNonNull(objectMapper);
+        this.uiBundles = Objects.requireNonNull(uiBundles);
     }
 
     /**
@@ -137,7 +148,7 @@ public class ExternalModulePlanner {
         if (manifest == null) {
             attributes.put("moduleId", null);
             attributes.put("mode", ExternalModulePlan.MODE_BLOCKED);
-            return finish(attributes, blockers, null, manifestJson, baseUrl, null);
+            return finish(attributes, blockers, null, manifestJson, baseUrl, null, null);
         }
 
         TenantModuleData installed = moduleStore.findByTenantAndModuleId(tenantId, manifest.id()).orElse(null);
@@ -174,6 +185,8 @@ public class ExternalModulePlanner {
         }
         attributes.put("grants", grants(tenantId, manifest, ownedCollections, packageFields, blockers));
         attributes.put("capabilities", capabilities(manifest, ownedCollections, blockers));
+        ExternalModuleUiBundles.Fetched bundle = fetchUiBundle(baseUrl, manifest, blockers);
+        attributes.put("uiBundle", uiBundle(manifest, bundle, installed));
         attributes.put("metadata", metadata.stream()
                 .sorted(Comparator.comparing(PlannedItem::type).thenComparing(PlannedItem::naturalKey))
                 .map(item -> {
@@ -190,19 +203,72 @@ public class ExternalModulePlanner {
         if (!blockers.isEmpty()) {
             attributes.put("mode", ExternalModulePlan.MODE_BLOCKED);
         }
-        return finish(attributes, blockers, manifest, manifestJson, baseUrl, installed);
+        return finish(attributes, blockers, manifest, manifestJson, baseUrl, installed, bundle);
     }
 
     private ExternalModulePlan finish(Map<String, Object> attributes, List<Map<String, Object>> blockers,
                                       ExternalModuleManifest manifest, String manifestJson, String baseUrl,
-                                      TenantModuleData installed) {
+                                      TenantModuleData installed, ExternalModuleUiBundles.Fetched bundle) {
         attributes.put("blockers", blockers.stream()
                 .sorted(Comparator.comparing((Map<String, Object> b) -> String.valueOf(b.get("code")))
                         .thenComparing(b -> String.valueOf(b.get("message"))))
                 .toList());
         attributes.remove("planHash");
         attributes.put("planHash", planHash(attributes));
-        return new ExternalModulePlan(attributes, manifest, manifestJson, baseUrl, installed);
+        return new ExternalModulePlan(attributes, manifest, manifestJson, baseUrl, installed, bundle);
+    }
+
+    /**
+     * Fetches the manifest's UI bundle and checks its hash; {@code null} (with a blocker) when it
+     * cannot be pinned, and {@code null} without one when the module ships no UI.
+     */
+    private ExternalModuleUiBundles.Fetched fetchUiBundle(String baseUrl, ExternalModuleManifest manifest,
+                                                          List<Map<String, Object>> blockers) {
+        ExternalModuleManifest.Ui ui = manifest.ui();
+        if (ui == null) {
+            return null;
+        }
+        if (!uiBundles.storageAvailable()) {
+            blockers.add(blocker(UI_BUNDLE_STORAGE_UNAVAILABLE, "The module ships an admin UI bundle, which "
+                    + "is pinned in object storage, and object storage is not enabled on this platform"));
+            return null;
+        }
+        ExternalModuleUiBundles.Fetched bundle;
+        try {
+            bundle = uiBundles.fetch(baseUrl, ui);
+        } catch (ModuleHttpClient.ModuleCallException e) {
+            blockers.add(blocker(UI_BUNDLE_UNAVAILABLE, "The UI bundle at " + ui.bundlePath()
+                    + " could not be fetched: " + e.getMessage()));
+            return null;
+        }
+        if (!bundle.sha256().equals(ui.sha256())) {
+            blockers.add(blocker(UI_BUNDLE_MISMATCH, "The UI bundle at " + ui.bundlePath() + " has SHA-256 "
+                    + bundle.sha256() + ", but the manifest declares " + ui.sha256()));
+            return null;
+        }
+        return bundle;
+    }
+
+    /**
+     * The plan's {@code uiBundle}: the declared and fetched hashes, the size, and against the
+     * installed row the pinned hash and whether this plan changes it. {@code null} when neither
+     * side has a UI.
+     */
+    private static Map<String, Object> uiBundle(ExternalModuleManifest manifest, ExternalModuleUiBundles.Fetched bundle,
+                                                TenantModuleData installed) {
+        String pinned = installed == null ? null : installed.uiBundleSha256();
+        ExternalModuleManifest.Ui ui = manifest.ui();
+        if (ui == null && pinned == null) {
+            return null;
+        }
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("bundlePath", ui == null ? null : ui.bundlePath());
+        entry.put("sha256", ui == null ? null : ui.sha256());
+        entry.put("fetchedSha256", bundle == null ? null : bundle.sha256());
+        entry.put("sizeBytes", bundle == null ? null : bundle.bytes().length);
+        entry.put("installedSha256", pinned);
+        entry.put("changed", installed != null && !Objects.equals(pinned, ui == null ? null : ui.sha256()));
+        return entry;
     }
 
     private static String mode(TenantModuleData installed, ExternalModuleManifest manifest, String manifestJson,
@@ -378,7 +444,45 @@ public class ExternalModulePlanner {
                 signatures(next.events(), e -> e.collection() + " " + sorted(e.types()))));
         changes.put("schedules", diff(signatures(previous.schedules(), s -> s.action() + " " + s.cron()),
                 signatures(next.schedules(), s -> s.action() + " " + s.cron())));
+        Map<String, Object> permissions = diff(grantSignatures(previous.permissions()),
+                grantSignatures(next.permissions()));
+        // Anything added asks for access the admin has not approved yet: the UI calls for re-consent.
+        permissions.put("widened", !((List<?>) permissions.get("added")).isEmpty());
+        changes.put("permissions", permissions);
         return changes;
+    }
+
+    /**
+     * One signature per individual grant, so an upgrade's diff names exactly what it adds or
+     * removes: {@code object orders:read}, {@code field orders.cost:MASKED},
+     * {@code system MANAGE_USERS}, {@code credential stripe}.
+     */
+    private static Set<String> grantSignatures(ExternalModuleManifest.Permissions permissions) {
+        Set<String> signatures = new TreeSet<>();
+        for (ExternalModuleManifest.ObjectPermission grant : permissions.objects()) {
+            if (grant.create()) {
+                signatures.add("object " + grant.collection() + ":create");
+            }
+            if (grant.read()) {
+                signatures.add("object " + grant.collection() + ":read");
+            }
+            if (grant.edit()) {
+                signatures.add("object " + grant.collection() + ":edit");
+            }
+            if (grant.delete()) {
+                signatures.add("object " + grant.collection() + ":delete");
+            }
+        }
+        for (ExternalModuleManifest.FieldPermission grant : permissions.fields()) {
+            signatures.add("field " + grant.collection() + "." + grant.field() + ":" + grant.visibility());
+        }
+        for (String permission : permissions.system()) {
+            signatures.add("system " + permission);
+        }
+        for (String credential : permissions.credentials()) {
+            signatures.add("credential " + credential);
+        }
+        return signatures;
     }
 
     /** This module's {@code CREATED} resources the new package no longer declares; informational. */

@@ -84,7 +84,10 @@ already exist.
 
 An **external module** is an HTTPS service instead of a JAR. It publishes a v2 manifest at
 `{baseUrl}/.well-known/kelta-module.json` and is installed by URL, in two steps: review a plan, then approve it by
-its hash.
+its hash. On the **Modules** page, choose **Install Module → From URL**, enter the base URL, and select **Review**.
+The page shows what the module will be granted and what it adds, then **Approve and install**. On a module's card,
+**Upgrade** shows the same review as a diff and warns when the upgrade asks for more access. The uninstall
+(trash) button shows what will be removed and what is kept.
 
 ```http
 POST   /api/modules/plan                      { "baseUrl": "https://…" }   (the plan and its planHash; writes nothing)
@@ -150,6 +153,17 @@ An external module is called only while its install is `ACTIVE` or `DEGRADED`:
 - **Schedules.** Each manifest `schedules[]` entry runs its action on a 6-field cron, in UTC. The request has
   `Idempotency-Key: <jobId>:<fireTime>` and no calling user. A schedule can fire twice, so deduplicate on the
   key.
+- **Events.** Each manifest `events[]` entry subscribes to `created`, `updated` or `deleted` changes on one
+  collection. After the write, `POST /kelta/v1/events` carries
+  `{ eventId, type, collection, recordId, timestamp, data, previousData, changedFields }`. Delivery never slows
+  or blocks the write. Any `2xx` acknowledges. Anything else is retried after 5 s, 30 s, 2 min, 10 min and 1 h,
+  and then recorded as undelivered. Events arrive at least once and in no set order, so deduplicate on
+  `eventId`. A change too large to carry arrives with `payloadOmitted: true` and no `data`; read the record by
+  id.
+- **Admin UI bundle.** The manifest's `ui` names a bundle path and its SHA-256. Kelta fetches the bundle at
+  install and upgrade, checks the hash, and stores the approved copy. It serves only that copy, from
+  `GET /api/modules/{id}/ui-bundle.js`. Changing the file on your host has no effect until you ship a new
+  version with the new hash. The upgrade review shows that the bundle changes.
 
 Records the module receives are what its service user may read: server-only and hidden fields are left out,
 and masked fields arrive masked. After 5 failures in a row, the platform stops calling the module for 30 s

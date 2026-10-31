@@ -727,7 +727,7 @@ response client and the OIDC/OAuth2 user services (set on `oauth2Login` in
 up by type — keep exactly one). The authorization endpoint is a browser redirect, not a server
 fetch, and is not checked.
 
-## External modules — the module protocol (part 9d)
+## External modules — the module protocol (parts 9d, 9e)
 
 An external module is an HTTP service the worker calls; the contract is
 `docs/module-protocol/openapi.yaml`, the design `specs/module-platform/9-external-modules.md`
@@ -745,6 +745,8 @@ before acting.
 | `{METHOD} /kelta/v1/routes/{path}` | a caller of `/api/modules/{id}/x/{path}` | the caller's method, query, body and `Content-Type` → any status + JSON | `5xx`/timeout → `502 ModuleUnreachable`; unreachable/breaker open → `503` |
 | `POST /kelta/v1/webhooks` | a sender POSTing `/api/modules/webhooks/{tenantId}/{moduleId}` | raw bytes + allowlisted headers (`x-`, `stripe-`, `signature`, `digest`, `user-agent`, lower-cased; `Content-Type` as sent) → a status the sender sees | `503` so the sender retries |
 | `GET /kelta/v1/health` | `GET /api/modules/{id}/health`, and the 60 s reconcile for a `DEGRADED`/breaker-open install | → `{status, …}` | reported `unreachable` |
+| `POST /kelta/v1/events` | after a write to a collection the manifest's `events` subscribes to (`created`/`updated`/`deleted`), asynchronously | `{eventId, type, tenantId, collection, recordId, timestamp, data, previousData, changedFields}` (`payloadOmitted: true` and no `data` when the change was too large to carry) → any 2xx | retried after `kelta.modules.external.event-backoff` (default 5 s, 30 s, 2 min, 10 min, 1 h), then a `module_event_dead_letter` row; never fails the write |
+| `GET {ui.bundlePath}` | plan time only (install and upgrade): unsigned, no redirects, at most 5 MiB | → the bundle's bytes, which must hash to `ui.sha256` | the plan is blocked (`UI_BUNDLE_UNAVAILABLE`, `UI_BUNDLE_MISMATCH`) |
 
 What a module receives and must handle:
 
@@ -765,6 +767,15 @@ What a module receives and must handle:
   changed cron is a new job.
 - **Verify the webhook sender yourself.** The platform does not authenticate webhook senders; it
   forwards the bytes the sender signed and returns your status, with no body.
+- **Events: at least once, unordered.** One queue-group consumer, `worker-module-events`, reads
+  `kelta.record.changed.>` from `KELTA_RECORDS` (no new subject or stream). Deduplicate on
+  `eventId`: a retry caused by another subscriber failing redelivers to you as well. Use
+  `timestamp` to drop a stale update of one record. `data` and `previousData` are the principal's
+  view, like every other call (`concerns.md` → External modules — events and UI bundles).
+- **The UI bundle is pinned.** Kelta fetches it once per install or upgrade and serves its own
+  copy from `GET /api/modules/{id}/ui-bundle.js`. Changing the file on your host changes nothing
+  until an upgrade with a new `ui.sha256`, and the upgrade plan shows the admin the change. Object
+  storage (`KELTA_S3_*`) is required for a module that ships a bundle.
 
 ## OIDC federation providers (`oidc-providers`)
 

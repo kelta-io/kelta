@@ -56,6 +56,7 @@ class ExternalModulePlannerTest {
     private ModuleProvenanceStore provenanceStore;
     private ModuleMetadataProvisioner provisioner;
     private JdbcTemplate jdbcTemplate;
+    private ExternalModuleUiBundles uiBundles;
     private ExternalModulePlanner planner;
 
     @BeforeEach
@@ -64,6 +65,8 @@ class ExternalModulePlannerTest {
         provenanceStore = mock(ModuleProvenanceStore.class);
         provisioner = mock(ModuleMetadataProvisioner.class);
         jdbcTemplate = mock(JdbcTemplate.class);
+        uiBundles = mock(ExternalModuleUiBundles.class);
+        when(uiBundles.storageAvailable()).thenReturn(true);
         when(moduleStore.findByTenantAndModuleId(anyString(), anyString())).thenReturn(Optional.empty());
         when(provenanceStore.findByModule(anyString(), anyString())).thenReturn(List.of());
         when(provisioner.planPackage(eq(TENANT), anyMap(), anySet(), any())).thenReturn(List.of(
@@ -77,7 +80,7 @@ class ExternalModulePlannerTest {
     private ExternalModulePlanner planner(String platformVersion, String signingKey) {
         return new ExternalModulePlanner(mock(ModuleHttpClient.class), moduleStore, provenanceStore, provisioner,
                 new PlatformVersion(platformVersion), new ModuleAssertionSigner(signingKey, "https://k.test/api/modules"),
-                jdbcTemplate, mapper);
+                jdbcTemplate, mapper, uiBundles);
     }
 
     private String manifest(Consumer<ObjectNode> edit) {
@@ -211,9 +214,119 @@ class ExternalModulePlannerTest {
     }
 
     private void installed(String version, String manifestJson) {
+        installed(version, manifestJson, null);
+    }
+
+    private void installed(String version, String manifestJson, String pinnedSha256) {
         TenantModuleData row = new TenantModuleData("row-1", TENANT, "acme-billing", "Billing", version, null,
                 BASE_URL, null, null, null, manifestJson, TenantModuleData.STATUS_ACTIVE, "user-1", null, null,
-                null, List.of(), BASE_URL, 1, "app-1", "svc-1");
+                null, List.of(), BASE_URL, 1, "app-1", "svc-1", pinnedSha256,
+                pinnedSha256 == null ? null : "modules/key/" + pinnedSha256);
         when(moduleStore.findByTenantAndModuleId(TENANT, "acme-billing")).thenReturn(Optional.of(row));
+    }
+
+    private static ExternalModuleUiBundles.Fetched bundle(String source) {
+        byte[] bytes = source.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return new ExternalModuleUiBundles.Fetched(bytes, ModuleJarService.sha256(bytes));
+    }
+
+    private String withUi(String version, String sha256) {
+        return manifest(root -> {
+            root.put("version", version);
+            root.putObject("ui").put("bundlePath", "/ui/bundle.js").put("sha256", sha256);
+        });
+    }
+
+    @Test
+    @DisplayName("a UI bundle whose hash matches the manifest is fetched once and carried on the plan")
+    @SuppressWarnings("unchecked")
+    void uiBundleMatches() {
+        ExternalModuleUiBundles.Fetched v1 = bundle("console.log('v1')");
+        when(uiBundles.fetch(eq(BASE_URL), any())).thenReturn(v1);
+
+        ExternalModulePlan plan = plan(withUi("1.0.0", v1.sha256()));
+
+        assertThat(plan.blockers()).isEmpty();
+        assertThat(plan.uiBundle()).isSameAs(v1);
+        Map<String, Object> uiBundle = (Map<String, Object>) plan.attributes().get("uiBundle");
+        assertThat(uiBundle).containsEntry("bundlePath", "/ui/bundle.js").containsEntry("sha256", v1.sha256())
+                .containsEntry("fetchedSha256", v1.sha256()).containsEntry("sizeBytes", v1.bytes().length)
+                .containsEntry("installedSha256", null).containsEntry("changed", false);
+        assertThat(plan(MANIFEST).attributes().get("uiBundle")).as("no ui, nothing pinned").isNull();
+    }
+
+    @Test
+    @DisplayName("a bundle that does not match, cannot be fetched, or cannot be stored blocks the plan")
+    void uiBundleBlockers() {
+        ExternalModuleUiBundles.Fetched served = bundle("console.log('swapped')");
+        String declared = bundle("console.log('approved')").sha256();
+        when(uiBundles.fetch(eq(BASE_URL), any())).thenReturn(served);
+        ExternalModulePlan mismatch = plan(withUi("1.0.0", declared));
+        assertThat(codes(mismatch)).containsExactly(ExternalModulePlanner.UI_BUNDLE_MISMATCH);
+        assertThat(mismatch.uiBundle()).isNull();
+        assertThat(mismatch.mode()).isEqualTo(ExternalModulePlan.MODE_BLOCKED);
+
+        when(uiBundles.fetch(eq(BASE_URL), any()))
+                .thenThrow(new ModuleHttpClient.ModuleCallException(404, "GET /ui/bundle.js answered 404"));
+        assertThat(codes(plan(withUi("1.0.0", declared)))).containsExactly(ExternalModulePlanner.UI_BUNDLE_UNAVAILABLE);
+
+        when(uiBundles.storageAvailable()).thenReturn(false);
+        org.mockito.Mockito.clearInvocations(uiBundles);
+        assertThat(codes(plan(withUi("1.0.0", declared))))
+                .containsExactly(ExternalModulePlanner.UI_BUNDLE_STORAGE_UNAVAILABLE);
+        org.mockito.Mockito.verify(uiBundles, org.mockito.Mockito.never()).fetch(any(), any());
+    }
+
+    @Test
+    @DisplayName("an upgrade shows a changed bundle hash, and the change is part of planHash")
+    @SuppressWarnings("unchecked")
+    void upgradeShowsTheBundleChange() {
+        ExternalModuleUiBundles.Fetched v1 = bundle("console.log('v1')");
+        ExternalModuleUiBundles.Fetched v2 = bundle("console.log('v2')");
+        when(uiBundles.fetch(eq(BASE_URL), any())).thenReturn(v2);
+
+        installed("1.0.0", withUi("1.0.0", v1.sha256()), v1.sha256());
+        ExternalModulePlan changed = plan(withUi("2.0.0", v2.sha256()));
+        Map<String, Object> uiBundle = (Map<String, Object>) changed.attributes().get("uiBundle");
+        assertThat(uiBundle).containsEntry("installedSha256", v1.sha256()).containsEntry("sha256", v2.sha256())
+                .containsEntry("changed", true);
+
+        installed("1.0.0", withUi("1.0.0", v2.sha256()), v2.sha256());
+        ExternalModulePlan same = plan(withUi("2.0.0", v2.sha256()));
+        assertThat((Map<String, Object>) same.attributes().get("uiBundle")).containsEntry("changed", false);
+        assertThat(same.planHash()).isNotEqualTo(changed.planHash());
+
+        installed("1.0.0", withUi("1.0.0", v1.sha256()), v1.sha256());
+        Map<String, Object> removed = (Map<String, Object>) plan(manifest(root -> root.put("version", "2.0.0")))
+                .attributes().get("uiBundle");
+        assertThat(removed).as("dropping the UI is a change too").containsEntry("sha256", null)
+                .containsEntry("installedSha256", v1.sha256()).containsEntry("changed", true);
+    }
+
+    @Test
+    @DisplayName("an upgrade lists each grant it adds or removes, and widened when it asks for more")
+    @SuppressWarnings("unchecked")
+    void upgradePermissionChanges() {
+        installed("0.9.0", manifest(root -> {
+            root.put("version", "0.9.0");
+            ((ObjectNode) root.get("permissions")).putArray("system");
+        }));
+
+        Map<String, Object> changes = (Map<String, Object>) plan(manifest(root -> {
+            ArrayNode objects = (ArrayNode) root.get("permissions").get("objects");
+            ((ObjectNode) objects.get(1)).put("edit", true);
+        })).attributes().get("changes");
+        Map<String, Object> permissions = (Map<String, Object>) changes.get("permissions");
+        assertThat((List<String>) permissions.get("added"))
+                .containsExactly("object accounts:edit", "system VIEW_SETUP");
+        assertThat((List<String>) permissions.get("removed")).isEmpty();
+        assertThat(permissions).containsEntry("widened", true);
+
+        installed("0.9.0", manifest(root -> root.put("version", "0.9.0")));
+        Map<String, Object> narrowed = (Map<String, Object>) ((Map<String, Object>) plan(manifest(root ->
+                ((ObjectNode) root.get("permissions")).putArray("system"))).attributes().get("changes"))
+                .get("permissions");
+        assertThat((List<String>) narrowed.get("removed")).containsExactly("system VIEW_SETUP");
+        assertThat(narrowed).containsEntry("widened", false);
     }
 }

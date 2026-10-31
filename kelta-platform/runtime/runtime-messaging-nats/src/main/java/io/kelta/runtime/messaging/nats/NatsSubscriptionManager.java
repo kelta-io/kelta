@@ -65,6 +65,7 @@ public class NatsSubscriptionManager implements DisposableBean {
      */
     static final long MAX_DELIVER = 5;
     static final Duration NAK_DELAY = Duration.ofSeconds(2);
+    static final Duration ACK_WAIT = Duration.ofSeconds(30);
 
     private final NatsConnectionManager connectionManager;
     private final ObjectMapper objectMapper;
@@ -176,12 +177,13 @@ public class NatsSubscriptionManager implements DisposableBean {
     private void startPullConsumer(EventSubscription sub) throws Exception {
         JetStream js = connectionManager.jetStream();
 
+        EventSubscription.Redelivery redelivery = sub.redelivery();
         ConsumerConfiguration cc = ConsumerConfiguration.builder()
                 .durable(sub.name())
                 .filterSubject(sub.subject())
                 .deliverPolicy(DeliverPolicy.Last)
-                .ackWait(Duration.ofSeconds(30))
-                .maxDeliver(MAX_DELIVER)
+                .ackWait(redelivery != null ? redelivery.ackWait() : ACK_WAIT)
+                .maxDeliver(redelivery != null ? redelivery.maxAttempts() : MAX_DELIVER)
                 .build();
 
         PullSubscribeOptions options = PullSubscribeOptions.builder()
@@ -207,21 +209,19 @@ public class NatsSubscriptionManager implements DisposableBean {
             while (running) {
                 try {
                     List<Message> messages = attached.fetch(10, Duration.ofSeconds(1));
-                    for (Message msg : messages) {
-                        long start = System.nanoTime();
-                        try (NatsTracing.Scope ignored = tracing.extractAndOpen(msg.getHeaders())) {
-                            String data = new String(msg.getData(), StandardCharsets.UTF_8);
-                            if (!tenantEnvelopeValid(sub.name(), msg.getHeaders(), data)) {
-                                msg.ack(); // discard, don't redeliver a poisoned message
-                                recordProcessed(sub.name(), start);
-                                continue;
-                            }
-                            dispatch(sub, msg.getSubject(), data);
-                            msg.ack();
-                            recordProcessed(sub.name(), start);
-                        } catch (Exception e) {
-                            nakBounded(sub.name(), msg, e);
-                            recordFailed(sub.name(), start);
+                    if (redelivery == null) {
+                        for (Message msg : messages) {
+                            processPulled(sub, msg);
+                        }
+                    } else {
+                        // Concurrently: one slow delivery must not hold the rest of the batch
+                        // past ackWait (JetStream would redeliver them while they still wait).
+                        List<java.util.concurrent.Future<?>> inFlight = new ArrayList<>();
+                        for (Message msg : messages) {
+                            inFlight.add(pullExecutor.submit(() -> processPulled(sub, msg)));
+                        }
+                        for (java.util.concurrent.Future<?> delivery : inFlight) {
+                            delivery.get();
                         }
                     }
                 } catch (Exception e) {
@@ -237,6 +237,29 @@ public class NatsSubscriptionManager implements DisposableBean {
                 }
             }
         });
+    }
+
+    /** Processes one pulled message: ack on success, NAK (bounded, or per the redelivery schedule) on failure. */
+    void processPulled(EventSubscription sub, Message msg) {
+        long start = System.nanoTime();
+        try (NatsTracing.Scope ignored = tracing.extractAndOpen(msg.getHeaders())) {
+            String data = new String(msg.getData(), StandardCharsets.UTF_8);
+            if (!tenantEnvelopeValid(sub.name(), msg.getHeaders(), data)) {
+                msg.ack(); // discard, don't redeliver a poisoned message
+                recordProcessed(sub.name(), start);
+                return;
+            }
+            dispatch(sub, msg, data);
+            msg.ack();
+            recordProcessed(sub.name(), start);
+        } catch (Exception e) {
+            if (sub.redelivery() != null) {
+                nakScheduled(sub, msg, e);
+            } else {
+                nakBounded(sub.name(), msg, e);
+            }
+            recordFailed(sub.name(), start);
+        }
     }
 
     /**
@@ -296,6 +319,31 @@ public class NatsSubscriptionManager implements DisposableBean {
         msg.nakWithDelay(NAK_DELAY);
     }
 
+    /**
+     * NAKs a failed delivery of a subscription with its own {@link EventSubscription.Redelivery}
+     * schedule, delayed by that attempt's backoff. A failure on the last attempt is the handler's
+     * to have settled; one that still throws is logged and not redelivered.
+     */
+    private static void nakScheduled(EventSubscription sub, Message msg, Exception e) {
+        EventSubscription.Redelivery redelivery = sub.redelivery();
+        long attempt = attemptOf(msg);
+        if (attempt >= redelivery.maxAttempts()) {
+            log.error("Error processing message in '{}' on final delivery attempt {}/{} — "
+                            + "message will NOT be redelivered: {}",
+                    sub.name(), attempt, redelivery.maxAttempts(), e.getMessage(), e);
+        } else {
+            log.warn("Delivery in '{}' failed (attempt {}/{}); redelivering in {}: {}",
+                    sub.name(), attempt, redelivery.maxAttempts(), redelivery.delayAfter(attempt), e.getMessage());
+        }
+        msg.nakWithDelay(redelivery.delayAfter(attempt));
+    }
+
+    /** The 1-based delivery attempt of a message; 1 when JetStream metadata is unavailable. */
+    static long attemptOf(Message msg) {
+        long delivered = deliveredCount(msg);
+        return delivered < 1 ? 1 : delivered;
+    }
+
     private static long deliveredCount(Message msg) {
         try {
             return msg.metaData() != null ? msg.metaData().deliveredCount() : -1;
@@ -309,9 +357,12 @@ public class NatsSubscriptionManager implements DisposableBean {
      * variant when registered (wildcard subjects carrying routing tokens),
      * else the body-only handler.
      */
-    private static void dispatch(EventSubscription sub, String subject, String data) {
-        if (sub.subjectHandler() != null) {
-            sub.subjectHandler().accept(subject, data);
+    private static void dispatch(EventSubscription sub, Message msg, String data) {
+        if (sub.redelivery() != null) {
+            sub.redelivery().handler().handle(msg.getSubject(), data,
+                    new EventSubscription.Attempt(attemptOf(msg), sub.redelivery().maxAttempts()));
+        } else if (sub.subjectHandler() != null) {
+            sub.subjectHandler().accept(msg.getSubject(), data);
         } else {
             sub.handler().accept(data);
         }
@@ -324,7 +375,7 @@ public class NatsSubscriptionManager implements DisposableBean {
 
         ConsumerConfiguration cc = ConsumerConfiguration.builder()
                 .deliverPolicy(DeliverPolicy.New)
-                .ackWait(Duration.ofSeconds(30))
+                .ackWait(ACK_WAIT)
                 .maxDeliver(MAX_DELIVER)
                 .build();
 
@@ -341,7 +392,7 @@ public class NatsSubscriptionManager implements DisposableBean {
                     recordProcessed(sub.name(), start);
                     return;
                 }
-                dispatch(sub, msg.getSubject(), data);
+                dispatch(sub, msg, data);
                 msg.ack();
                 recordProcessed(sub.name(), start);
             } catch (Exception e) {

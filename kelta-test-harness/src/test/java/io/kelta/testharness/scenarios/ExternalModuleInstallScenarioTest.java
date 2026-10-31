@@ -38,6 +38,7 @@ import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -68,6 +69,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * and webhook are proxied, its entitlements port answers the watch quota, and its schedule fires
  * through the worker scheduler. Disabling the module unregisters the hook and the route and fails
  * the flow step with {@code ModuleUnavailableException}.
+ *
+ * <p>{@link #deliversEventsAndPinsTheUiBundle()} covers part 9e: record changes on a subscribed
+ * collection are POSTed to the module's {@code /kelta/v1/events}, a failed delivery is retried
+ * with the same {@code eventId}, and one that fails every attempt lands in
+ * {@code module_event_dead_letter}. The module's UI bundle is fetched and hashed at plan time,
+ * pinned in the object store at install, and served from Kelta's copy (never the module's live
+ * file); an upgrade that ships a different bundle says so in its plan and re-pins it.
  */
 @DisplayName("External module install scenario")
 class ExternalModuleInstallScenarioTest extends ScenarioBase {
@@ -307,6 +315,100 @@ class ExternalModuleInstallScenarioTest extends ScenarioBase {
         assertThat(queryCount("SELECT count(*) FROM scheduled_job WHERE job_reference_id = ?", installId)).isZero();
     }
 
+    @Test
+    @DisplayName("record events delivered, retried and dead-lettered; UI bundle pinned at install and re-pinned on upgrade")
+    void deliversEventsAndPinsTheUiBundle() throws Exception {
+        String suffix = Long.toHexString(System.nanoTime());
+        String moduleId = "harness-stub-" + suffix;
+        String owned = "harness_stub_items_" + suffix;
+        byte[] bundleV1 = ("/* harness bundle v1 " + suffix + " */ export {}").getBytes(StandardCharsets.UTF_8);
+        serveManifest(eventManifest(manifest(moduleId, owned), owned, bundleV1));
+        serveEventStubs(bundleV1);
+
+        // The plan fetched the bundle and shows the hash the admin approves.
+        JsonNode plan = admin("POST", "/" + SLUG + "/api/modules/plan", "{\"baseUrl\":\"" + BASE_URL + "\"}",
+                HttpStatus.OK).get("data").get("attributes");
+        assertThat(plan.get("blockers")).as("blockers: %s", plan.get("blockers")).isEmpty();
+        assertThat(plan.get("uiBundle").get("sha256").stringValue()).isEqualTo(sha256Hex(bundleV1));
+        assertThat(plan.get("uiBundle").get("fetchedSha256").stringValue()).isEqualTo(sha256Hex(bundleV1));
+        assertThat(plan.get("capabilities").get("events").get(0).get("collection").stringValue()).isEqualTo(owned);
+
+        JsonNode installed = admin("POST", "/" + SLUG + "/api/modules/install",
+                "{\"baseUrl\":\"" + BASE_URL + "\",\"planHash\":\"" + plan.get("planHash").stringValue() + "\"}",
+                HttpStatus.OK).get("data").get("attributes");
+        assertThat(installed.get("status").stringValue()).as("install: %s", installed).isEqualTo("ACTIVE");
+        String installId = queryString("SELECT id FROM tenant_module WHERE tenant_id = ? AND module_id = ?",
+                tenantId, moduleId);
+        assertThat(queryString("SELECT ui_bundle_sha256 FROM tenant_module WHERE id = ?", installId))
+                .isEqualTo(sha256Hex(bundleV1));
+
+        // Kelta serves its pinned copy: the module swapping its live file changes nothing.
+        stubBody("GET", "/ui/bundle.js", 1, "text/javascript", "/* swapped after approval */");
+        int bundleFetches = requests("GET", "/ui/bundle.js").size();
+        ResponseEntity<String> served = get(adminToken, "/" + SLUG + "/api/modules/" + moduleId + "/ui-bundle.js");
+        assertThat(served.getStatusCode()).as("bundle: %s", served.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(served.getBody()).isEqualTo(new String(bundleV1, StandardCharsets.UTF_8));
+        assertThat(served.getHeaders().getETag()).isEqualTo("\"" + sha256Hex(bundleV1) + "\"");
+        assertThat(requests("GET", "/ui/bundle.js")).as("serving never fetches from the module")
+                .hasSize(bundleFetches);
+
+        // Delivered: one signed POST carrying the record as the module may see it.
+        waitForStatus(gatewayClientWithToken(adminToken), "/" + SLUG + "/api/" + owned, HttpStatus.OK, 20);
+        assertThat(createItem(owned, "OK1").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        JsonNode delivered = awaitEvents("OK1", 1).getFirst();
+        JsonNode event = body(delivered);
+        assertThat(event.get("type").stringValue()).isEqualTo("created");
+        assertThat(event.get("collection").stringValue()).isEqualTo(owned);
+        assertThat(event.get("tenantId").stringValue()).isEqualTo(tenantId);
+        assertThat(event.get("eventId").stringValue()).isNotBlank();
+        assertThat(claims(header(delivered, "Authorization")).get("htu").stringValue())
+                .isEqualTo(BASE_URL + "/kelta/v1/events");
+
+        // A 500 is retried with the same eventId, and the second attempt is taken.
+        assertThat(createItem(owned, "RETRY").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        List<JsonNode> retried = awaitEvents("RETRY", 2);
+        assertThat(body(retried.get(1)).get("eventId").stringValue())
+                .isEqualTo(body(retried.get(0)).get("eventId").stringValue());
+
+        // Failing every attempt (backoff 1s,1s: three attempts) dead-letters it with what was sent.
+        assertThat(createItem(owned, "DEAD").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        List<JsonNode> dead = awaitEvents("DEAD", 3);
+        String deadEventId = body(dead.getFirst()).get("eventId").stringValue();
+        awaitCount("SELECT count(*) FROM module_event_dead_letter WHERE tenant_module_id = ? AND event_id = ?",
+                installId, deadEventId);
+        assertThat(queryString("SELECT attempts || ':' || last_status FROM module_event_dead_letter "
+                + "WHERE tenant_module_id = ? AND event_id = ?", installId, deadEventId)).isEqualTo("3:500");
+        assertThat(queryString("SELECT payload->'data'->>'code' FROM module_event_dead_letter "
+                + "WHERE tenant_module_id = ? AND event_id = ?", installId, deadEventId)).isEqualTo("DEAD");
+        assertThat(queryCount("SELECT count(*) FROM module_event_dead_letter WHERE tenant_module_id = ?", installId))
+                .as("only the event that never got through").isEqualTo(1);
+
+        // An upgrade that ships a different bundle says so in its plan, then re-pins it.
+        byte[] bundleV2 = ("/* harness bundle v2 " + suffix + " */ export {}").getBytes(StandardCharsets.UTF_8);
+        ObjectNode v2 = eventManifest(manifest(moduleId, owned), owned, bundleV2);
+        v2.put("version", "1.1.0");
+        serveManifest(v2);
+        serveEventStubs(bundleV2);
+        JsonNode upgradePlan = admin("POST", "/" + SLUG + "/api/modules/plan", "{\"baseUrl\":\"" + BASE_URL + "\"}",
+                HttpStatus.OK).get("data").get("attributes");
+        assertThat(upgradePlan.get("mode").stringValue()).isEqualTo("UPGRADE");
+        JsonNode uiChange = upgradePlan.get("uiBundle");
+        assertThat(uiChange.get("changed").asBoolean()).as("plan: %s", uiChange).isTrue();
+        assertThat(uiChange.get("installedSha256").stringValue()).isEqualTo(sha256Hex(bundleV1));
+        assertThat(uiChange.get("sha256").stringValue()).isEqualTo(sha256Hex(bundleV2));
+        admin("POST", "/" + SLUG + "/api/modules/" + moduleId + "/upgrade",
+                "{\"planHash\":\"" + upgradePlan.get("planHash").stringValue() + "\"}", HttpStatus.OK);
+        assertThat(get(adminToken, "/" + SLUG + "/api/modules/" + moduleId + "/ui-bundle.js").getBody())
+                .isEqualTo(new String(bundleV2, StandardCharsets.UTF_8));
+
+        JsonNode uninstallPlan = admin("GET", "/" + SLUG + "/api/modules/" + moduleId
+                + "/uninstall-plan?purgeData=true", null, HttpStatus.OK).get("data").get("attributes");
+        admin("DELETE", "/" + SLUG + "/api/modules/" + moduleId + "?purgeData=true&planHash="
+                + uninstallPlan.get("planHash").stringValue(), null, HttpStatus.OK);
+        assertThat(queryCount("SELECT count(*) FROM module_event_dead_letter WHERE tenant_module_id = ?", installId))
+                .as("dead letters go with their install").isZero();
+    }
+
     // ── the stub module ──────────────────────────────────────────────────────────────────
 
     private RestClient stub() {
@@ -411,6 +513,91 @@ class ExternalModuleInstallScenarioTest extends ScenarioBase {
         stub().post().uri("/__admin/mappings").contentType(MediaType.APPLICATION_JSON)
                 .body(mapping.toString())
                 .retrieve().toBodilessEntity();
+    }
+
+    /** {@link #manifest} subscribed to {@code owned}'s record events, shipping {@code bundle} as its UI. */
+    private ObjectNode eventManifest(ObjectNode manifest, String owned, byte[] bundle) throws Exception {
+        manifest.putArray("events").addObject().put("collection", owned)
+                .putArray("types").add("created").add("updated");
+        manifest.putObject("ui").put("bundlePath", "/ui/bundle.js").put("sha256", sha256Hex(bundle));
+        return manifest;
+    }
+
+    /**
+     * The UI bundle and the events endpoint; {@link #serveManifest} must have run first. A record
+     * whose code is {@code RETRY} is refused once, {@code DEAD} always; anything else is taken.
+     */
+    private void serveEventStubs(byte[] bundle) {
+        stubBody("GET", "/ui/bundle.js", 5, "text/javascript", new String(bundle, StandardCharsets.UTF_8));
+        String retry = "{\"matchesJsonPath\":{\"expression\":\"$.data.code\",\"equalTo\":\"RETRY\"}}";
+        stubEvent(1, retry, "Started", "refused-once", 500);
+        stubEvent(2, retry, "refused-once", null, 204);
+        stubEvent(1, "{\"matchesJsonPath\":{\"expression\":\"$.data.code\",\"equalTo\":\"DEAD\"}}",
+                null, null, 500);
+        stubEvent(5, null, null, null, 204);
+    }
+
+    private void stubEvent(int priority, String bodyPattern, String requiredState, String newState, int status) {
+        ObjectNode mapping = mapper.createObjectNode().put("priority", priority);
+        if (requiredState != null) {
+            mapping.put("scenarioName", "retry").put("requiredScenarioState", requiredState);
+            if (newState != null) {
+                mapping.put("newScenarioState", newState);
+            }
+        }
+        ObjectNode request = mapping.putObject("request").put("method", "POST").put("urlPath", "/kelta/v1/events");
+        if (bodyPattern != null) {
+            request.putArray("bodyPatterns").add(mapper.readTree(bodyPattern));
+        }
+        mapping.putObject("response").put("status", status);
+        stub().post().uri("/__admin/mappings").contentType(MediaType.APPLICATION_JSON)
+                .body(mapping.toString())
+                .retrieve().toBodilessEntity();
+    }
+
+    private void stubBody(String method, String urlPath, int priority, String contentType, String body) {
+        ObjectNode mapping = mapper.createObjectNode().put("priority", priority);
+        mapping.putObject("request").put("method", method).put("urlPath", urlPath);
+        ObjectNode response = mapping.putObject("response").put("status", 200).put("body", body);
+        response.putObject("headers").put("Content-Type", contentType);
+        stub().post().uri("/__admin/mappings").contentType(MediaType.APPLICATION_JSON)
+                .body(mapping.toString())
+                .retrieve().toBodilessEntity();
+    }
+
+    /** Waits until the events endpoint received {@code count} deliveries of the record coded {@code code}. */
+    private List<JsonNode> awaitEvents(String code, int count) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 30_000;
+        List<JsonNode> matching = List.of();
+        while (System.currentTimeMillis() < deadline) {
+            matching = requests("POST", "/kelta/v1/events").stream()
+                    .filter(r -> code.equals(body(r).path("data").path("code").asString()))
+                    .toList();
+            if (matching.size() >= count) {
+                return matching;
+            }
+            Thread.sleep(500);
+        }
+        throw new AssertionError("expected " + count + " deliveries of " + code + ", got " + matching.size());
+    }
+
+    private void awaitCount(String sql, Object... args) throws Exception {
+        long deadline = System.currentTimeMillis() + 30_000;
+        while (System.currentTimeMillis() < deadline) {
+            if (queryCount(sql, args) > 0) {
+                return;
+            }
+            Thread.sleep(500);
+        }
+        throw new AssertionError("no row for " + sql);
+    }
+
+    private JsonNode body(JsonNode request) {
+        return mapper.readTree(Base64.getDecoder().decode(request.get("bodyAsBase64").stringValue()));
+    }
+
+    private static String sha256Hex(byte[] bytes) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
     }
 
     /** Waits for the scheduler to run job {@code jobId}: its action call carries {@code <jobId>:<fireTime>}. */

@@ -138,6 +138,25 @@ record ModulePrincipalAccess(Map<String, ObjectAccess> objects, Map<String, Map<
         return out;
     }
 
+    /**
+     * The names of {@code fields} the module may know about — an event's {@code changedFields}:
+     * none without {@code read} on the collection, never a server-only or {@code HIDDEN} one
+     * (naming a field it cannot see would leak that it changed).
+     */
+    List<String> visibleFields(String collection, CollectionDefinition definition, List<String> fields) {
+        if (fields == null || !canRead(collection)) {
+            return List.of();
+        }
+        List<String> visible = new ArrayList<>();
+        for (String name : fields) {
+            FieldDefinition field = definition == null ? null : definition.getField(name);
+            if ((field == null || !field.serverOnly()) && !"HIDDEN".equals(visibility(collection, name))) {
+                visible.add(name);
+            }
+        }
+        return visible;
+    }
+
     /** The fields of {@code updates} the module may not set, in their order; empty when all are allowed. */
     List<String> unwritable(String collection, CollectionDefinition definition, Map<String, Object> updates,
                             boolean create) {

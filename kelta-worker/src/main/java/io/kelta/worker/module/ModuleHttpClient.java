@@ -20,7 +20,7 @@ import java.util.Objects;
  * The platform's HTTP client for external modules ({@code docs/module-protocol/openapi.yaml}):
  * the manifest fetch that plans an install, {@code lifecycle}, and (part 9d) {@link #invoke} for
  * every other protocol call — actions, hooks, service ports, health, and the route and webhook
- * proxies. Breaker, token and metrics sit one layer up, in {@link ExternalModuleInvoker}.
+ * proxies — and (part 9e) the UI bundle fetch that pins an install's admin UI. Breaker, token and metrics sit one layer up, in {@link ExternalModuleInvoker}.
  *
  * <p>Every target goes through the {@link ModuleHostGuard} — never the general
  * {@code OutboundUrlGuard}, whose private-CIDR allow-list also opens flow callouts — and is
@@ -30,8 +30,9 @@ import java.util.Objects;
  *
  * <p>Every protocol request carries {@code Authorization: Bearer <assertion>}
  * ({@link ModuleAssertionSigner}) signed over the exact URL and body bytes sent, the install's
- * {@code Kelta-Access-Token}, and {@code traceparent} when a span is current. The manifest fetch
- * carries neither credential: it is public by contract and runs before an install exists.
+ * {@code Kelta-Access-Token}, and {@code traceparent} when a span is current. The manifest and
+ * UI bundle fetches carry neither credential: both are public by contract and run before an
+ * install exists.
  *
  * <p>{@link #invoke} runs on a second client with a 2 s connect timeout and the call's own
  * deadline (the manifest's {@code timeoutMs}), so a slow module holds a flow step, a write or a
@@ -50,10 +51,13 @@ public class ModuleHttpClient {
     static final String ROUTES_PATH = "/kelta/v1/routes/";
     static final String WEBHOOKS_PATH = "/kelta/v1/webhooks";
     static final String HEALTH_PATH = "/kelta/v1/health";
+    static final String EVENTS_PATH = "/kelta/v1/events";
     public static final String ACCESS_TOKEN_HEADER = "Kelta-Access-Token";
 
     /** A manifest embeds a metadata package; 1 MiB is far above any real one. */
     static final int MAX_RESPONSE_BYTES = 1024 * 1024;
+    /** A UI bundle is a minified script; 5 MiB is far above any real one. */
+    static final int MAX_UI_BUNDLE_BYTES = 5 * 1024 * 1024;
     static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
     static final Duration DEADLINE = Duration.ofSeconds(15);
     /** Connect timeout of every invocation (spec §3.6, failure handling). */
@@ -148,6 +152,7 @@ public class ModuleHttpClient {
     private final ModuleHostGuard guard;
     private final OutboundHttpClient http;
     private final OutboundHttpClient invocationHttp;
+    private final OutboundHttpClient bundleHttp;
     private final ModuleAssertionSigner signer;
     private final ObjectMapper objectMapper;
 
@@ -157,6 +162,8 @@ public class ModuleHttpClient {
                 new OutboundHttpClient.Limits(CONNECT_TIMEOUT, DEADLINE, MAX_RESPONSE_BYTES, 0));
         this.invocationHttp = new OutboundHttpClient(guard,
                 new OutboundHttpClient.Limits(INVOKE_CONNECT_TIMEOUT, INVOKE_MAX_DEADLINE, MAX_RESPONSE_BYTES, 0));
+        this.bundleHttp = new OutboundHttpClient(guard,
+                new OutboundHttpClient.Limits(CONNECT_TIMEOUT, DEADLINE, MAX_UI_BUNDLE_BYTES, 0));
         this.signer = Objects.requireNonNull(signer);
         this.objectMapper = Objects.requireNonNull(objectMapper);
     }
@@ -209,6 +216,35 @@ public class ModuleHttpClient {
                     "the manifest is larger than " + MAX_RESPONSE_BYTES + " bytes");
         }
         return response.bodyAsString();
+    }
+
+    /**
+     * Fetches the admin UI bundle at {@code bundlePath} (the manifest's {@code ui.bundlePath}, an
+     * absolute path on the module) for pinning; the caller checks its hash.
+     *
+     * @throws ModuleCallException when it is not served with a 200, is larger than 5 MiB, or the
+     *         module could not be reached
+     */
+    public byte[] fetchUiBundle(String baseUrl, String bundlePath) {
+        String url = baseUrl + bundlePath;
+        OutboundHttpClient.Response response;
+        try {
+            response = bundleHttp.send(new OutboundHttpClient.Request("GET", url,
+                    Map.of("Accept", "application/javascript, text/javascript"), null));
+        } catch (OutboundUrlGuard.RejectedUrlException e) {
+            throw new ModuleCallException(0, "module URL refused: " + e.getMessage());
+        } catch (OutboundHttpClient.OutboundRequestException e) {
+            throw new ModuleCallException(0, "GET " + bundlePath + " failed: " + e.getMessage());
+        }
+        if (response.statusCode() != 200) {
+            throw new ModuleCallException(response.statusCode(), "GET " + bundlePath + " answered "
+                    + response.statusCode() + (isRedirect(response.statusCode()) ? " (redirects are not followed)" : ""));
+        }
+        if (response.truncated()) {
+            throw new ModuleCallException(response.statusCode(),
+                    "the UI bundle is larger than " + MAX_UI_BUNDLE_BYTES + " bytes");
+        }
+        return response.body();
     }
 
     /**

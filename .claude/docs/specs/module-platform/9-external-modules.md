@@ -1,9 +1,11 @@
 # Slice 9 — External Modules: Out-of-Process Add-Ons over HTTP
 
 > **Status:** 🟡 **In progress** — 9a (spec + contract) merged 2026-10-30; 9b (service principal)
-> built 2026-10-30; 9c (install by URL) built 2026-10-30; 9d (invocation) built 2026-10-30 —
-> external modules install, run flow actions, hooks, the entitlements port, routes, webhooks and
-> schedules; record events, UI bundle pinning and the consent screen are 9e. Planning spec for replacing the
+> built 2026-10-30; 9c (install by URL) built 2026-10-30; 9d (invocation) built 2026-10-30; 9e
+> (events, UI bundle pinning, Modules page) built 2026-10-31 — external modules install from the
+> Modules page behind a consent screen, run flow actions, hooks, the entitlements port, routes,
+> webhooks and schedules, receive record events, and ship a pinned admin UI bundle; the settings
+> form (§3.8) and a dead-letter list are not built yet. Planning spec for replacing the
 > in-process JAR module path with modules that run as **separate HTTP services, in any language**.
 > The machine-readable protocol contract is
 > [`docs/module-protocol/openapi.yaml`](../../../../docs/module-protocol/openapi.yaml); this
@@ -83,7 +85,7 @@ by hash at install so a running module cannot swap it later (§3.9).
 | 9b | Module service principal: `SERVICE` user type, manifest-generated profile, client_credentials token resolves to it — **built** (V220, `ModuleServicePrincipalService`; install does not call it until 9c) | **yes, no auto-merge** | 9a |
 | 9c | Registry + install by URL: manifest v2 parser, plan/consent, metadata provisioning, worker signing key + JWKS, `KELTA_MODULE_ALLOWED_HOSTS` — **built** (V221, `ExternalModuleService`, `ExternalModulePlanner`, `ModuleUninstaller`, `ModuleAssertionSigner`, `ModuleHostGuard`). Deferred: UI bundle pinning (9e), schedule registration (9d), `settings` validation (column only) | **yes, no auto-merge** | 9b |
 | 9d | Invocation layer: remote actions, before-save hooks, service ports, route + webhook proxies, schedules, timeouts, circuit breaker, `DEGRADED`, metrics — **built** (`ExternalModuleRegistry`, `ExternalModuleInvoker`, `ModuleCircuitBreaker`, `RemoteActionHandler`, `RemoteBeforeSaveHook`, `RemoteEntitlementProvider`, `ExternalModuleProxy`, `ModuleScheduleSync`; no migration — V221 already allows `MODULE_ACTION`) | **yes, no auto-merge** | 9c |
-| 9e | Event delivery (NATS → HTTP) + UI bundle pinning + Modules page install-by-URL and consent screen | — | 9d |
+| 9e | Event delivery (NATS → HTTP) + UI bundle pinning + Modules page install-by-URL and consent screen — **built** (V222 `module_event_dead_letter`, `ModuleEventDeliveryListener`, `EventSubscription.Redelivery`, `ExternalModuleUiBundles`; Modules page: install from URL with the plan review, upgrade re-consent, uninstall plan, health). Deferred: the settings form (§3.8), a dead-letter list or replay | **yes, no auto-merge** | 9d |
 | 9f | Rust billing module + `kelta-module` Rust SDK; cut the prod tenant over | — | 9e |
 | 9g | Delete the JAR path | — | 9f soaked one release |
 | 9h | (later) Async actions with task tokens | — | 9d |
@@ -483,12 +485,20 @@ beans.
   route proxy with query and `act`; webhook proxy drops `Cookie`; entitlements `maxActiveWatches: 0`
   refuses a watch with 422; the `MODULE_ACTION` job fires; disable unregisters hook and route and
   fails the step with `ModuleUnavailableException`; uninstall deletes the job). The harness now runs
-  the worker scheduler (`SCHEDULER_ENABLED=true`, 2 s poll). Event delivery is 9e. The stack's Cerbos is allow-all and its gateway runs with
+  the worker scheduler (`SCHEDULER_ENABLED=true`, 2 s poll). 9e adds `deliversEventsAndPinsTheUiBundle`
+  (a record event delivered and signed for `/kelta/v1/events`; a `500` retried with the same
+  `eventId`; one failing every attempt dead-lettered with what was sent; the bundle pinned at
+  install and served from Kelta's copy after the module swapped its file; an upgrade plan showing
+  `uiBundle.changed` and re-pinning). The stack gains an S3Mock object store and a `1s,1s` event
+  backoff. The stack's Cerbos is allow-all and its gateway runs with
   `PERMISSIONS_ENABLED=false`, so the object-permission deny is proven on a real PDP by
   `CerbosGeneratedPolicyIT.moduleServicePrincipalReadsOnlyItsGrant` and the plain-app 403 by
   `RouteAuthorizationFilterTest.connectedAppTokenShapes`.
-- **Playwright:** Modules page install by URL against the harness's stub module; the consent
-  screen lists grants; approve; uninstall.
+- **Playwright:** Modules page install by URL; the consent screen lists grants, capabilities and
+  the `planHash`; approve. *As built (9e):* `e2e-tests/tests/admin/integrations/modules.spec.ts`
+  mocks the module API at the browser boundary (the E2E stack runs no module); the worker side is
+  the harness scenario. Upgrade re-consent, the uninstall plan and health are Vitest
+  (`ExternalModules.test.tsx`).
 - **9f:** `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt --check`; the harness scenario
   against the real billing image; on a staging tenant, Stripe test-mode checkout → webhook →
   subscription row → entitlements, compared with the Java module's answers before cutover.

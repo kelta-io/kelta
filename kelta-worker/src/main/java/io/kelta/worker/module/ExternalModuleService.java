@@ -34,9 +34,11 @@ import java.util.regex.Pattern;
  * (422), then: writes the {@code tenant_module} row ({@code INSTALLING}, with {@code base_url}),
  * provisions the metadata package with provenance, creates the service principal from the
  * approved permissions plus full access to the collections the module now owns, writes the
- * action rows, and sends {@code lifecycle installed}. Success is {@code ACTIVE}. A failing step
+ * action rows, pins the admin UI bundle the plan fetched and checked (§3.9), and sends
+ * {@code lifecycle installed}. Success is {@code ACTIVE}. A failing step
  * marks the row {@code FAILED} with {@code last_error} and stops; every step is idempotent, so
- * {@link #enable} retries from the stored (approved) manifest without re-fetching it.
+ * {@link #enable} retries from the stored (approved) manifest without re-fetching it (only a UI
+ * bundle not yet pinned is fetched again, and must still match the approved manifest's hash).
  *
  * <p>Every outcome publishes {@code kelta.config.module.changed.<tenantId>.<moduleId>}
  * (Critical Rule 1). No pod loads anything for an external module: each pod's
@@ -68,6 +70,7 @@ public class ExternalModuleService {
     private final TenantSlugResolver tenantSlugResolver;
     private final UserIdResolver userIdResolver;
     private final ModuleManifestParser parser;
+    private final ExternalModuleUiBundles uiBundles;
 
     /** Part 9d's endpoint registry and schedule rows; setter-injected, null in tests that need neither. */
     private ExternalModuleRegistry registry;
@@ -78,7 +81,7 @@ public class ExternalModuleService {
                                  ModuleServicePrincipalService principals, ModuleAccessTokenService tokens,
                                  ModuleHttpClient http, ModuleConfigEventPublisher eventPublisher,
                                  TenantSlugResolver tenantSlugResolver, UserIdResolver userIdResolver,
-                                 ObjectMapper objectMapper) {
+                                 ExternalModuleUiBundles uiBundles, ObjectMapper objectMapper) {
         this.planner = Objects.requireNonNull(planner);
         this.moduleStore = Objects.requireNonNull(moduleStore);
         this.provenanceStore = Objects.requireNonNull(provenanceStore);
@@ -90,6 +93,7 @@ public class ExternalModuleService {
         this.tenantSlugResolver = Objects.requireNonNull(tenantSlugResolver);
         this.userIdResolver = Objects.requireNonNull(userIdResolver);
         this.parser = new ModuleManifestParser(objectMapper);
+        this.uiBundles = Objects.requireNonNull(uiBundles);
     }
 
     /**
@@ -136,7 +140,8 @@ public class ExternalModuleService {
         moduleStore.createModule(row);
         log.info("Installing external module '{}' v{} from {} for tenant {}", manifest.id(), manifest.version(),
                 plan.baseUrl(), tenantId);
-        return apply(reload(row), manifest, userId, EVENT_INSTALLED, null, ModuleChangeType.INSTALLED);
+        return apply(reload(row), manifest, plan.uiBundle(), userId, EVENT_INSTALLED, null,
+                ModuleChangeType.INSTALLED);
     }
 
     /** {@code POST /api/modules/{id}/upgrade}: same checks, from the stored base URL. */
@@ -156,7 +161,8 @@ public class ExternalModuleService {
                 plan.manifestJson(), manifest.protocolVersion());
         log.info("Upgrading external module '{}' {} → {} for tenant {}", moduleId, fromVersion,
                 manifest.version(), tenantId);
-        return apply(reload(row), manifest, userId, EVENT_UPGRADED, fromVersion, ModuleChangeType.UPGRADED);
+        return apply(reload(row), manifest, plan.uiBundle(), userId, EVENT_UPGRADED, fromVersion,
+                ModuleChangeType.UPGRADED);
     }
 
     /**
@@ -180,7 +186,7 @@ public class ExternalModuleService {
         ExternalModuleManifest manifest = parser.parseExternal(row.manifest());
         log.info("Retrying the install of external module '{}' for tenant {} (was {})", moduleId, tenantId,
                 row.status());
-        return apply(row, manifest, userId, EVENT_INSTALLED, null, ModuleChangeType.ENABLED);
+        return apply(row, manifest, null, userId, EVENT_INSTALLED, null, ModuleChangeType.ENABLED);
     }
 
     /** {@code POST /api/modules/{id}/disable}: no invocations from now on; {@code lifecycle disabled}. */
@@ -216,6 +222,7 @@ public class ExternalModuleService {
             schedules.delete(row);
         }
         moduleStore.deleteModule(row.id());
+        uiBundles.deleteQuietly(row.uiBundleKey());
         refreshLocally(row);
         eventPublisher.publishEvent(row, ModuleChangeType.UNINSTALLED);
         log.info("Uninstalled external module '{}' from tenant {}", row.moduleId(), row.tenantId());
@@ -223,7 +230,8 @@ public class ExternalModuleService {
 
     // ── the install steps ────────────────────────────────────────────────────────────────
 
-    private TenantModuleData apply(TenantModuleData row, ExternalModuleManifest manifest, String userId,
+    private TenantModuleData apply(TenantModuleData row, ExternalModuleManifest manifest,
+                                   ExternalModuleUiBundles.Fetched uiBundle, String userId,
                                    String lifecycleEvent, String fromVersion, ModuleChangeType changeType) {
         String tenantId = row.tenantId();
         ModuleMetadataProvisioner.ProvisionResult provisioned;
@@ -265,6 +273,12 @@ public class ExternalModuleService {
             }
         }
 
+        try {
+            pinUiBundle(reload(row), manifest, uiBundle);
+        } catch (RuntimeException e) {
+            return fail(row, changeType, "UI bundle: " + e.getMessage());
+        }
+
         TenantModuleData current = reload(row);
         try {
             http.lifecycle(current, slug(tenantId), new ModuleHttpClient.LifecycleEvent(lifecycleEvent, tenantId,
@@ -279,6 +293,42 @@ public class ExternalModuleService {
         eventPublisher.publishEvent(active, changeType);
         log.info("External module '{}' v{} is ACTIVE for tenant {}", active.moduleId(), active.version(), tenantId);
         return active;
+    }
+
+    /**
+     * Pins the manifest's UI bundle (§3.9) under its versioned, hash-named key and drops the one it
+     * replaces. {@code fetched} is what the approved plan fetched and checked; {@code null} on a
+     * retry, which fetches again and still requires the approved hash. A manifest without
+     * {@code ui} unpins. Already pinned at this hash and key (a retry after a later step failed):
+     * nothing to do.
+     */
+    private void pinUiBundle(TenantModuleData row, ExternalModuleManifest manifest,
+                             ExternalModuleUiBundles.Fetched fetched) {
+        String previousKey = row.uiBundleKey();
+        ExternalModuleManifest.Ui ui = manifest.ui();
+        if (ui == null) {
+            if (previousKey != null || row.uiBundleSha256() != null) {
+                moduleStore.updateUiBundle(row.id(), null, null);
+                uiBundles.deleteQuietly(previousKey);
+            }
+            return;
+        }
+        String key = ExternalModuleUiBundles.key(row.tenantId(), manifest.id(), manifest.version(), ui.sha256());
+        if (ui.sha256().equals(row.uiBundleSha256()) && key.equals(previousKey)) {
+            return;
+        }
+        ExternalModuleUiBundles.Fetched bundle = fetched != null ? fetched : uiBundles.fetch(row.baseUrl(), ui);
+        if (!bundle.sha256().equals(ui.sha256())) {
+            throw new IllegalStateException("the bundle at " + ui.bundlePath() + " has SHA-256 " + bundle.sha256()
+                    + ", but the approved manifest declares " + ui.sha256());
+        }
+        uiBundles.store(key, bundle);
+        moduleStore.updateUiBundle(row.id(), bundle.sha256(), key);
+        if (previousKey != null && !previousKey.equals(key)) {
+            uiBundles.deleteQuietly(previousKey);
+        }
+        log.info("Pinned the UI bundle of external module '{}' v{} for tenant {} (SHA-256 {})", manifest.id(),
+                manifest.version(), row.tenantId(), bundle.sha256());
     }
 
     private TenantModuleData fail(TenantModuleData row, ModuleChangeType changeType, String error) {

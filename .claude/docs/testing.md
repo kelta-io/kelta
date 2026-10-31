@@ -13,7 +13,7 @@
 
 ### Integration harness (`kelta-test-harness`)
 
-Boots a full mini-stack (Postgres, Redis, NATS, Cerbos, worker, auth, gateway) via Testcontainers and runs `*ScenarioTest.java` against it under the `integration-tests` profile.
+Boots a full mini-stack (Postgres, Redis, NATS, Cerbos, an S3Mock object store, worker, auth, gateway) via Testcontainers and runs `*ScenarioTest.java` against it under the `integration-tests` profile.
 
 No object store runs in the stack. The worker has media storage enabled (`KELTA_MEDIA_*` in `KeltaStack`) against an unreachable endpoint, which is enough because media endpoints only presign (a local HMAC); `MediaFieldScenarioTest` asserts on the redirect's `Location` with a client that does not follow redirects.
 

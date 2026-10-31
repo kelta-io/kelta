@@ -144,6 +144,8 @@ A presence-gated hook (secret/integration configured) uses `@ConditionalOnProper
 | Transient vs permanent failure (fail closed on the pod, never persist a terminal status for an infrastructure error, per-pod `@Scheduled` retry with capped backoff, runtime-checked enable flag) | `module/ModuleLoadFailureClassifier.java`, `module/ModuleLoadRetryScheduler.java` |
 | Calling an external service per tenant install (one call path: status gate → token → per-pod circuit breaker → signed HTTP; timeout vs unavailable exceptions; compare-and-set status writes off the caller's transaction; metrics) | `module/ExternalModuleInvoker.java`, `module/ModuleCircuitBreaker.java` |
 | Per-pod registry rebuilt from DB rows (NATS refresh + local read-after-write refresh + periodic reconcile with no tenant bound; re-register only on a fingerprint change; register new before removing old) | `module/ExternalModuleRegistry.java`, `module/ExternalModuleReconcileScheduler.java` |
+| At-least-once JetStream → HTTP delivery (queue-group `EventSubscription.queueGroupWithRedelivery`; throw to nak with the next backoff; on the last attempt write a dead-letter row and return so the message is acked; never on the write path) | `module/ModuleEventDeliveryListener.java`, `module/ModuleEventDeadLetterStore.java` |
+| Pinning third-party bytes by the hash an admin approved (fetch and hash at plan time, store under a hash-named object key, re-hash on every read, never proxy live) | `module/ExternalModuleUiBundles.java` |
 
 ## Running Tests
 

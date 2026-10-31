@@ -28,13 +28,15 @@ import java.util.concurrent.Executor;
  * call, the install's service-principal token is attached ({@link ModuleAccessTokenService}),
  * and {@link ModuleHttpClient#invoke} signs and sends it through the module-host guard.
  *
- * <p><b>Outcomes.</b> A protocol call (action, hook, service, health) fails on any non-2xx, an
- * unreadable body (the caller's {@link ResponseReader} throws {@link InvalidResponseException}), a
- * timeout or a connect error. A pass-through call (route, webhook) fails only on a 5xx, a timeout
+ * <p><b>Outcomes.</b> A protocol call (action, hook, service, health, event) fails on any non-2xx,
+ * an unreadable body (the caller's {@link ResponseReader} throws {@link InvalidResponseException}),
+ * a timeout or a connect error. A pass-through call (route, webhook) fails only on a 5xx, a timeout
  * or a connect error; any other status belongs to the module and goes back to the caller. Every
  * failure counts against the breaker and every call is timed. Failures surface as
  * {@link ModuleTimeoutException} or {@link ModuleUnavailableException}, whose simple class names
- * are the flow error codes.
+ * are the flow error codes — except a failed answer of a kind that reads its own failures (route,
+ * webhook, event), which goes to the reader after counting: the route maps it to the caller, the
+ * webhook passes it back to the sender, and event delivery keeps its status for the dead letter.
  *
  * <p><b>Status writes.</b> A breaker that opens writes {@code DEGRADED} with {@code last_error};
  * one that closes again writes {@code ACTIVE}. Both are compare-and-set on the current status, so
@@ -52,12 +54,17 @@ public class ExternalModuleInvoker {
 
     /** What a call is, for its failure rule and its metric tag. */
     public enum Kind {
-        ACTION(false), HOOK(false), SERVICE(false), HEALTH(false), ROUTE(true), WEBHOOK(true);
+        ACTION(false, false), HOOK(false, false), SERVICE(false, false), HEALTH(false, false),
+        ROUTE(true, true), WEBHOOK(true, true), EVENT(false, true);
 
+        /** Only a 5xx is a failure; any other status is the module's answer to pass on. */
         private final boolean passThrough;
+        /** A failed answer still goes to the reader (after counting) instead of throwing. */
+        private final boolean readsFailures;
 
-        Kind(boolean passThrough) {
+        Kind(boolean passThrough, boolean readsFailures) {
             this.passThrough = passThrough;
+            this.readsFailures = readsFailures;
         }
 
         boolean failed(int status) {
@@ -173,9 +180,9 @@ public class ExternalModuleInvoker {
                     + ModuleHttpClient.snippet(response);
             failed(module, breaker, reason);
             record(module, kind, "error", started);
-            if (kind.passThrough) {
-                // The caller maps a module 5xx itself (502 to a route caller, passed back to a
-                // webhook sender so it retries).
+            if (kind.readsFailures) {
+                // The caller maps a failed answer itself (502 to a route caller, passed back to a
+                // webhook sender so it retries, kept for an event's dead letter).
                 return reader.read(response);
             }
             throw ModuleUnavailableException.of(module.moduleId(), "Module '" + module.moduleId() + "' " + reason);

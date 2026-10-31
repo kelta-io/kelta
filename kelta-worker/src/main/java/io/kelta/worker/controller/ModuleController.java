@@ -6,7 +6,9 @@ import io.kelta.runtime.module.TenantModuleData;
 import io.kelta.worker.interceptor.PermissionGatedController;
 import io.kelta.worker.module.ExternalModulePlan;
 import io.kelta.worker.module.ExternalModuleRegistry;
+import io.kelta.worker.module.ExternalModuleInvoker;
 import io.kelta.worker.module.ExternalModuleService;
+import io.kelta.worker.module.ExternalModuleUiBundles;
 import io.kelta.worker.module.ModuleConfigEventPublisher;
 import io.kelta.worker.module.ModuleHttpClient;
 import io.kelta.worker.module.ModuleProvenanceStore;
@@ -81,6 +83,7 @@ public class ModuleController implements PermissionGatedController {
     private final ExternalModuleService externalModules;
     private final ModuleUninstaller uninstaller;
     private ExternalModuleRegistry externalRegistry;
+    private ExternalModuleUiBundles externalUiBundles;
 
     public ModuleController(RuntimeModuleManager runtimeModuleManager,
                              ModuleConfigEventPublisher eventPublisher,
@@ -104,6 +107,12 @@ public class ModuleController implements PermissionGatedController {
     @Autowired(required = false)
     public void setExternalModuleRegistry(ExternalModuleRegistry externalRegistry) {
         this.externalRegistry = externalRegistry;
+    }
+
+    /** Pinned external UI bundles (part 9e); setter-injected, absent when module support is off. */
+    @Autowired(required = false)
+    public void setExternalModuleUiBundles(ExternalModuleUiBundles externalUiBundles) {
+        this.externalUiBundles = externalUiBundles;
     }
 
     /**
@@ -653,22 +662,41 @@ public class ModuleController implements PermissionGatedController {
     }
 
     /**
-     * Serves a module's browser bundle from its installed JAR, so a module can ship UI in the same
-     * single package as its backend code.
+     * Serves a module's browser bundle: a JAR module's from its installed JAR, an external
+     * module's from the copy pinned in object storage at install or upgrade (§3.9) — never fetched
+     * from the module live.
      *
-     * <p>Scoped to the calling tenant's own ACTIVE modules — a tenant can never fetch a bundle
-     * from a module it has not installed. The bytes come from a JAR that passed publisher-signature
-     * verification at install and checksum + signature re-verification on read.
+     * <p>Scoped to the calling tenant's own modules — a tenant can never fetch a bundle from a
+     * module it has not installed — and to ACTIVE ones (an external module's also when DEGRADED:
+     * the pinned bundle does not depend on the service answering). A JAR bundle comes from a JAR
+     * that passed publisher-signature verification at install and checksum + signature
+     * re-verification on read; an external bundle's bytes are re-hashed against the pinned SHA-256
+     * the admin approved in the plan, and refused on a mismatch.
      *
      * <p><b>This is publisher-authored JavaScript served same-origin to the admin UI.</b> It runs
-     * with the admin session's full DOM and cookie access; the JAR signature gate is the whole of
-     * the trust model (see {@code ModuleSignatureVerifier}). Do not relax that gate without
-     * replacing it with real isolation.
+     * with the admin session's full DOM and cookie access; the JAR signature gate, or the pinned
+     * hash, is the whole of the trust model (see {@code ModuleSignatureVerifier},
+     * {@code ExternalModuleUiBundles}). Do not relax either without replacing it with real
+     * isolation.
      */
     @GetMapping(value = "/{moduleId}/ui-bundle.js", produces = "application/javascript")
     public ResponseEntity<byte[]> getUiBundle(
             @RequestHeader("X-Tenant-ID") String tenantId,
             @PathVariable String moduleId) {
+        Optional<TenantModuleData> external = findModule(tenantId, moduleId).filter(TenantModuleData::isExternal);
+        if (external.isPresent()) {
+            TenantModuleData m = external.get();
+            if (externalUiBundles == null || !ExternalModuleInvoker.callable(m)) {
+                return ResponseEntity.notFound().build();
+            }
+            return externalUiBundles.read(m)
+                    .map(bytes -> ResponseEntity.ok()
+                            // A new bundle comes with an upgrade under the same URL: revalidate.
+                            .header("Cache-Control", "no-cache")
+                            .eTag("\"" + m.uiBundleSha256() + "\"")
+                            .body(bytes))
+                    .orElseGet(() -> ResponseEntity.notFound().build());
+        }
         return runtimeModuleManager.readUiBundle(tenantId, moduleId)
                 .map(bytes -> ResponseEntity.ok()
                         // The bundle is immutable for a given installed version, but a reinstall
@@ -696,6 +724,10 @@ public class ModuleController implements PermissionGatedController {
         // Lets the admin UI decide which modules to fetch a bundle for, rather than probing
         // every installed module with a request that would 404 for most of them.
         map.put("uiBundlePath", uiBundlePath(m));
+        // An external module's pinned bundle hash, the one the admin approved; null otherwise.
+        map.put("uiBundleSha256", m.uiBundleSha256());
+        // The admin page lists each module's action handlers from here.
+        map.put("actions", m.actions());
         // An external module is an HTTPS service installed by URL; null for a JAR module.
         map.put("baseUrl", m.baseUrl());
         map.put("protocolVersion", m.protocolVersion());
@@ -736,7 +768,7 @@ public class ModuleController implements PermissionGatedController {
     /** The module's declared UI bundle path, or null when it ships no UI or has a bad manifest. */
     private String uiBundlePath(TenantModuleData m) {
         if (m.isExternal()) {
-            return null; // external UI bundles are pinned and served from part 9e on
+            return m.uiBundleSha256() == null || externalUiBundles == null ? null : externalUiBundles.bundlePath(m);
         }
         try {
             return runtimeModuleManager.parseManifest(m.manifest()).uiBundlePath();

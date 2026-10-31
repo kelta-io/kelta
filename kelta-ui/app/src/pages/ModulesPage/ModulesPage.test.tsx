@@ -209,6 +209,8 @@ describe('ModulesPage', () => {
       await waitFor(() => expect(screen.getByText('Analytics Module')).toBeInTheDocument())
 
       await user.click(screen.getByRole('button', { name: /install module/i }))
+      // Install by URL is the default; the JAR form is the legacy tab.
+      await user.click(screen.getByTestId('install-mode-jar'))
       await user.type(
         screen.getByLabelText(/module manifest/i),
         '{{"id":"m","name":"M","version":"1.0.0","moduleClass":"C"}'
@@ -234,6 +236,7 @@ describe('ModulesPage', () => {
       await waitFor(() => expect(screen.getByText('Analytics Module')).toBeInTheDocument())
 
       await user.click(screen.getByRole('button', { name: /install module/i }))
+      await user.click(screen.getByTestId('install-mode-jar'))
 
       expect(screen.getByText(/every action it\s+declares is quarantined/i)).toBeInTheDocument()
     })
