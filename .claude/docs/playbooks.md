@@ -200,8 +200,47 @@ returned from that module's `getBeforeSaveHooks()` instead (recipe 5b).
 
 ## 5b. Ship a runtime-installable module (collections + hooks + handlers)
 
-A module is one signed JAR + `kelta-module.json`, uploaded through `POST /api/modules/install-jar`
-and installed **per tenant at runtime**. Nothing in this repo is recompiled or redeployed.
+A module is installed **per tenant at runtime**. Nothing in this repo is recompiled or redeployed.
+Build new modules as **external modules**: an HTTP service in any language, installed by URL. The
+JAR path further down is legacy; part 9g removes it
+(`specs/module-platform/9-external-modules.md`).
+
+### External module (an HTTP service)
+
+The contract is `docs/module-protocol/openapi.yaml`; what each call carries and when it comes is
+`integrations.md` → External modules — the module protocol.
+
+1. **Serve a v2 manifest** at `{baseUrl}/.well-known/kelta-module.json` (spec §3.1). It declares
+   `id`, `version`, `protocolVersion: 1`, the `permissions` the module needs, a `metadata`
+   package (collections, fields, picklists it provisions), and what it implements: `actions`,
+   `hooks`, `events`, `services`, `routes`, `schedules`, `webhook` and `ui`. Everything it does
+   must be declared here. The plan shows it to the admin, and nothing undeclared is ever called.
+2. **Verify every request** before acting on it. Check the ES256 assertion in `Authorization`
+   against `GET /api/modules/.well-known/jwks.json` (cache it at most 5 min). `aud` must be your
+   module id, `htm`/`htu`/`body_sha256` must match the request, and `exp` must not have passed.
+3. **Call Kelta back with `Kelta-Access-Token`.** It is a short-lived token for the install's
+   `SERVICE` user, whose profile holds exactly the manifest's `permissions` plus the collections
+   the module owns. Never ask for or store an admin's token.
+4. **Implement the declared endpoints**: `lifecycle` and `health` always, then one per capability.
+   Deduplicate actions and schedules on `Idempotency-Key` and events on `eventId`, since all three
+   can arrive twice. Answer events with any 2xx; anything else is retried, then dead-lettered.
+5. **A UI is a pinned bundle.** Serve it at `ui.bundlePath` and put its SHA-256 (lowercase hex) in
+   `ui.sha256`. Kelta stores the approved copy at install and serves only that. To change it,
+   ship a new `version` with the new hash; the upgrade plan shows the change.
+6. **Host it** on public `https`. An in-cluster `http` host must be listed in
+   `KELTA_MODULE_ALLOWED_HOSTS`. Redirects are never followed.
+7. **Install it**: Modules page → Install Module → From URL → Review → Approve and install. Or
+   call `POST /api/modules/plan`, then `POST /api/modules/install` with the plan's `planHash`.
+   Upgrade from the module's card (**Upgrade**). An upgrade that asks for more access
+   says so, and installs only on re-consent.
+8. **Test it** the way `kelta-test-harness` → `ExternalModuleInstallScenarioTest` does, with a
+   WireMock module: install, actions, hooks, routes, webhooks, schedules, events, the UI bundle,
+   upgrade and uninstall.
+
+### Legacy: JAR module (removed in part 9g)
+
+A JAR module is one signed JAR + `kelta-module.json`, uploaded through
+`POST /api/modules/install-jar`.
 
 **Reference implementation: [`kelta-modules/billing/`](../../kelta-modules/billing/)** — collections,
 two action handlers, a webhook handler, and a UI bundle in one JAR. Copy its `pom.xml` shape: no

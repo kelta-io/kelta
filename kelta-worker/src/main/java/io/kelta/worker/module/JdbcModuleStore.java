@@ -204,6 +204,13 @@ public class JdbcModuleStore implements ModuleStore {
     }
 
     @Override
+    public void updateUiBundle(String id, String sha256, String key) {
+        jdbcTemplate.update(
+            "UPDATE tenant_module SET ui_bundle_sha256 = ?, ui_bundle_key = ?, updated_at = NOW() WHERE id = ?",
+            sha256, key, id);
+    }
+
+    @Override
     public void replaceActions(String moduleRowId, List<TenantModuleData.TenantModuleActionData> actions) {
         jdbcTemplate.update("DELETE FROM tenant_module_action WHERE tenant_module_id = ?", moduleRowId);
         createActions(actions);
@@ -269,7 +276,9 @@ public class JdbcModuleStore implements ModuleStore {
             rs.getString("base_url"),
             rs.getObject("protocol_version") != null ? rs.getInt("protocol_version") : null,
             rs.getString("connected_app_id"),
-            rs.getString("service_user_id")
+            rs.getString("service_user_id"),
+            rs.getString("ui_bundle_sha256"),
+            rs.getString("ui_bundle_key")
         );
     }
 

@@ -19,6 +19,7 @@ import io.kelta.worker.listener.SystemFeatureCacheInvalidationListener;
 import io.kelta.worker.listener.SystemCollectionCacheInvalidationListener;
 import io.kelta.worker.listener.TranslationCacheInvalidationListener;
 import io.kelta.worker.listener.TenantEmailCacheInvalidationListener;
+import io.kelta.worker.module.ModuleEventDeliveryListener;
 import io.kelta.worker.module.ModuleEventListener;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
@@ -71,6 +72,10 @@ public class NatsSubscriptionConfig {
 
     @Autowired(required = false)
     private TenantEmailCacheInvalidationListener tenantEmailCacheInvalidationListener;
+
+    /** Absent when runtime modules are switched off ({@code kelta.modules.runtime.enabled=false}). */
+    @Autowired(required = false)
+    private ModuleEventDeliveryListener moduleEventDeliveryListener;
 
     public NatsSubscriptionConfig(NatsSubscriptionManager subscriptionManager,
                                    FlowEventListener flowEventListener,
@@ -225,6 +230,14 @@ public class NatsSubscriptionConfig {
             log.info("Registered NATS subscription for Svix record webhook publisher");
         }
 
+        // Record events to external modules (module platform part 9e) — QUEUE GROUP: one pod
+        // POSTs each event to the subscribed modules. It runs its own redelivery schedule
+        // (kelta.modules.external.event-backoff) and dead-letters after the last attempt.
+        if (moduleEventDeliveryListener != null) {
+            subscriptionManager.register(moduleEventDeliveryListener.subscription());
+            log.info("Registered NATS subscription for external module event delivery");
+        }
+
         // Tenant email config invalidation — every pod evicts its
         // SmtpEmailProvider sender cache when tenant email columns change,
         // and broadly when any credential rotates (small cache, cheap to refill).
@@ -243,6 +256,7 @@ public class NatsSubscriptionConfig {
                 + (supersetCollectionSyncListener != null ? 1 : 0)
                 + (svixWebhookPublisher != null ? 1 : 0)
                 + (recordWebhookPublisher != null ? 1 : 0)
+                + (moduleEventDeliveryListener != null ? 1 : 0)
                 + (tenantEmailCacheInvalidationListener != null ? 2 : 0));
     }
 }

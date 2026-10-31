@@ -3,6 +3,7 @@ package io.kelta.worker.controller;
 import io.kelta.runtime.module.TenantModuleData;
 import io.kelta.worker.module.ExternalModulePlan;
 import io.kelta.worker.module.ExternalModuleService;
+import io.kelta.worker.module.ExternalModuleUiBundles;
 import io.kelta.worker.module.ModuleConfigEventPublisher;
 import io.kelta.worker.module.ModuleHttpClient;
 import io.kelta.worker.module.ModuleProvenanceStore;
@@ -35,6 +36,8 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -51,6 +54,7 @@ class ModuleControllerExternalTest {
     private RuntimeModuleManager manager;
     private ExternalModuleService externalModules;
     private ModuleUninstaller uninstaller;
+    private ExternalModuleUiBundles uiBundles;
     private MockMvc mvc;
 
     @BeforeEach
@@ -71,6 +75,8 @@ class ModuleControllerExternalTest {
         ModuleController controller = new ModuleController(manager, mock(ModuleConfigEventPublisher.class),
                 mock(ObjectProvider.class), mock(ObjectProvider.class), permissionResolver, bootstrapRepository,
                 externalProvider, uninstallerProvider);
+        uiBundles = mock(ExternalModuleUiBundles.class);
+        controller.setExternalModuleUiBundles(uiBundles);
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
@@ -204,5 +210,49 @@ class ModuleControllerExternalTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.attributes.retained[0].naturalKey").value("billing_plans"));
         verify(uninstaller, never()).apply(any(), anyBoolean());
+    }
+
+    private static TenantModuleData pinned(String status) {
+        TenantModuleData row = external(status);
+        return new TenantModuleData(row.id(), row.tenantId(), row.moduleId(), row.name(), row.version(), null,
+                row.sourceUrl(), null, null, null, row.manifest(), status, row.installedBy(), null, null, null,
+                List.of(), row.baseUrl(), 1, "app-1", "svc-1", "f".repeat(64), "modules/key.js");
+    }
+
+    @Test
+    @DisplayName("GET /{id}/ui-bundle.js serves an external module's pinned bundle from storage, never the module")
+    void servesThePinnedUiBundle() throws Exception {
+        TenantModuleData degraded = pinned(TenantModuleData.STATUS_DEGRADED);
+        when(manager.listModules(TENANT)).thenReturn(List.of(degraded));
+        when(uiBundles.read(degraded)).thenReturn(java.util.Optional.of("console.log(1)".getBytes()));
+        when(uiBundles.bundlePath(degraded)).thenReturn("/ui/bundle.js");
+
+        mvc.perform(get("/api/modules/acme-billing/ui-bundle.js").header("X-Tenant-ID", TENANT))
+                .andExpect(status().isOk())
+                .andExpect(header().string("ETag", "\"" + "f".repeat(64) + "\""))
+                .andExpect(header().string("Cache-Control", "no-cache"))
+                .andExpect(content().string("console.log(1)"));
+        verify(manager, never()).readUiBundle(anyString(), anyString());
+
+        mvc.perform(get("/api/modules").header("X-Tenant-ID", TENANT))
+                .andExpect(jsonPath("$.data[0].attributes.uiBundlePath").value("/ui/bundle.js"))
+                .andExpect(jsonPath("$.data[0].attributes.uiBundleSha256").value("f".repeat(64)));
+    }
+
+    @Test
+    @DisplayName("a disabled install's bundle, or one storage refuses, is 404")
+    void refusesUnservableBundles() throws Exception {
+        TenantModuleData disabled = pinned(TenantModuleData.STATUS_DISABLED);
+        when(manager.listModules(TENANT)).thenReturn(List.of(disabled));
+
+        mvc.perform(get("/api/modules/acme-billing/ui-bundle.js").header("X-Tenant-ID", TENANT))
+                .andExpect(status().isNotFound());
+        verify(uiBundles, never()).read(any());
+
+        TenantModuleData active = pinned(TenantModuleData.STATUS_ACTIVE);
+        when(manager.listModules(TENANT)).thenReturn(List.of(active));
+        when(uiBundles.read(active)).thenReturn(java.util.Optional.empty());
+        mvc.perform(get("/api/modules/acme-billing/ui-bundle.js").header("X-Tenant-ID", TENANT))
+                .andExpect(status().isNotFound());
     }
 }

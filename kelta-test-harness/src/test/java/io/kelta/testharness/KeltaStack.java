@@ -36,7 +36,7 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>Container startup order:
  * <ol>
- *   <li>Infrastructure: Postgres, Redis, NATS, Cerbos (in parallel)
+ *   <li>Infrastructure: Postgres, Redis, NATS, Cerbos, an S3 object store (in parallel)
  *   <li>kelta-worker (Flyway runs migrations + seeds)
  *   <li>kelta-auth (needs DB + worker for user lookups)
  *   <li>kelta-gateway (needs auth for JWKS + worker for route bootstrap)
@@ -69,6 +69,9 @@ public final class KeltaStack {
      * only, which is what lets it use http and a private address.
      */
     public static final String STUB_MODULE_HOST = "stub-module";
+
+    /** The bucket {@link #OBJECT_STORE} creates and the worker stores objects in. */
+    public static final String OBJECT_STORE_BUCKET = "harness-objects";
 
     /**
      * HMAC signing keys the worker refuses to start without — there is deliberately no
@@ -188,6 +191,21 @@ public final class KeltaStack {
                     .withExposedPorts(3592, 3593)
                     .waitingFor(Wait.forHttp("/_cerbos/health").forPort(3592).withStartupTimeout(Duration.ofSeconds(60)));
 
+    /**
+     * The worker's S3 object store ({@code kelta.storage.s3}): an S3Mock with the
+     * {@link #OBJECT_STORE_BUCKET} bucket pre-created. {@code ExternalModuleInstallScenarioTest}
+     * pins external-module UI bundles in it; with no store, a module that ships a UI cannot be
+     * installed ({@code UI_BUNDLE_STORAGE_UNAVAILABLE}).
+     */
+    @SuppressWarnings({"resource", "unchecked"})
+    public static final GenericContainer<?> OBJECT_STORE =
+            new GenericContainer<>(DockerImageName.parse("adobe/s3mock:3.12.0"))
+                    .withNetworkAliases("object-store")
+                    .withNetwork(NETWORK)
+                    .withEnv("initialBuckets", OBJECT_STORE_BUCKET)
+                    .withExposedPorts(9090)
+                    .waitingFor(Wait.forHttp("/").forPort(9090).withStartupTimeout(Duration.ofSeconds(60)));
+
     // ── Service containers (built from pre-built JARs) ───────────────────────
 
     public static final GenericContainer<?> WORKER = serviceContainer("kelta-worker")
@@ -212,6 +230,15 @@ public final class KeltaStack {
             .withEnv("KELTA_MAILBOX_VERP_SECRET",  MAILBOX_VERP_SECRET)
             .withEnv("KELTA_MODULE_SIGNING_KEY",   MODULE_SIGNING_KEY)
             .withEnv("KELTA_MODULE_ALLOWED_HOSTS", STUB_MODULE_HOST)
+            // Two quick retries, so a module event that keeps failing dead-letters within seconds.
+            .withEnv("KELTA_MODULES_EXTERNAL_EVENT_BACKOFF", "1s,1s")
+            .withEnv("KELTA_S3_ENABLED",           "true")
+            .withEnv("KELTA_S3_ENDPOINT",          "http://object-store:9090")
+            .withEnv("KELTA_S3_PUBLIC_ENDPOINT",   "http://object-store:9090")
+            .withEnv("KELTA_S3_REGION",            "us-east-1")
+            .withEnv("KELTA_S3_BUCKET",            OBJECT_STORE_BUCKET)
+            .withEnv("KELTA_S3_ACCESS_KEY",        "harness-access-key")
+            .withEnv("KELTA_S3_SECRET_KEY",        "harness-secret-key")
             .withEnv("EMAIL_ENABLED",              "false")
             .withEnv("SMTP_AUTH",                  "false")
             .withEnv("SMTP_STARTTLS",              "false")
@@ -358,14 +385,14 @@ public final class KeltaStack {
         }
 
         // Phase 1: infrastructure in parallel.
-        // Use a dedicated 4-thread executor rather than ForkJoinPool.commonPool().
+        // Use a dedicated executor, one thread per container, rather than ForkJoinPool.commonPool().
         // The common pool's parallelism equals (availableProcessors - 1), which can
         // be as low as 1 on a CPU-constrained K8s pod. With only 1-2 threads, the
         // 3rd and 4th tasks queue behind POSTGRES/NATS and never get scheduled before
-        // allOf.join() times out or the runner dies. A fixed pool of 4 guarantees all
-        // four containers start concurrently regardless of pod CPU allocation.
+        // allOf.join() times out or the runner dies. A fixed pool of 5 guarantees all
+        // five containers start concurrently regardless of pod CPU allocation.
         log.info("Phase 1: starting infrastructure containers in parallel...");
-        var infra = Executors.newFixedThreadPool(4, r -> {
+        var infra = Executors.newFixedThreadPool(5, r -> {
             Thread t = new Thread(r, "infra-starter-" + r.hashCode());
             t.setDaemon(true);
             return t;
@@ -393,7 +420,12 @@ public final class KeltaStack {
                 CERBOS.start();
                 log.info("  [CERBOS] up");
             }, infra);
-            CompletableFuture.allOf(postgresF, redisF, natsF, cerbosF).join();
+            CompletableFuture<Void> objectStoreF = CompletableFuture.runAsync(() -> {
+                log.info("  [OBJECT_STORE] starting...");
+                OBJECT_STORE.start();
+                log.info("  [OBJECT_STORE] up");
+            }, infra);
+            CompletableFuture.allOf(postgresF, redisF, natsF, cerbosF, objectStoreF).join();
         } finally {
             infra.shutdown();
         }
@@ -483,6 +515,7 @@ public final class KeltaStack {
         AUTH.stop();
         WORKER.stop();
         CERBOS.stop();
+        OBJECT_STORE.stop();
         NATS.stop();
         REDIS.stop();
         if (POSTGRES != null) {

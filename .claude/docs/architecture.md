@@ -724,6 +724,25 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   not callable. Metrics: `kelta_worker_module_calls` (timer; `module`, `kind`, `outcome`) and
   `kelta_worker_module_breaker_transitions` (`module`, `transition`). JAR modules keep their own
   path unchanged. Spec: `specs/module-platform/9-external-modules.md` §3.6, §3.7.
+- **External module events and UI bundles** (part 9e). `ModuleEventDeliveryListener` is a
+  queue-group JetStream consumer, `worker-module-events`, on `kelta.record.changed.>` in the
+  existing `KELTA_RECORDS` stream, so one pod handles each change. It reads the subscribers from
+  `ExternalModuleRegistry.eventSubscribers` (tenant, collection, `created`/`updated`/`deleted`),
+  then POSTs `/kelta/v1/events` to each through `ExternalModuleInvoker` (`Kind.EVENT`, 10 s
+  deadline). Each body is filtered for that install's principal by `ModulePrincipalAccess`,
+  `changedFields` included, and installs are called concurrently. A delivery is never on the
+  write path. A failure throws, and `NatsSubscriptionManager` naks the message with the next
+  delay of `kelta.modules.external.event-backoff` (`EventSubscription.Redelivery`: `maxDeliver` is
+  the backoff length + 1). On the last attempt each install that still fails gets a
+  `module_event_dead_letter` row (V222) and the message is acked. **UI bundles:**
+  `ExternalModulePlanner` fetches `ui.bundlePath` unsigned (`ModuleHttpClient.fetchUiBundle`,
+  5 MiB cap, no redirects) and hashes it. A missing, mismatched or unstorable bundle is a
+  blocker. Install and upgrade pin exactly the bytes the plan hashed
+  (`ExternalModuleUiBundles`, key
+  `modules/{tenantId}/{moduleId}/{version}/ui-bundle.{sha256}.js`, `tenant_module.ui_bundle_sha256`
+  / `ui_bundle_key`). `GET /api/modules/{id}/ui-bundle.js` serves the stored copy for an `ACTIVE`
+  or `DEGRADED` install after re-hashing it, with `ETag` = the hash. It never proxies the
+  module's live file. Spec: `9-external-modules.md` §3.6.1, §3.9.
 - **Owner-scoped collections** (member-data-ownership slice 2, V206). A collection may declare
   `ownerField` (`createdBy` or a LOOKUP→`users`), `ownerScope` (`NONE|PORTAL|ALL`) and
   `ownerScopeReads` (default true) — `collection.owner_field/owner_scope/owner_scope_reads`, on

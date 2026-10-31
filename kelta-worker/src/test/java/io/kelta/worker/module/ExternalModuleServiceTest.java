@@ -93,7 +93,7 @@ class ExternalModuleServiceTest {
             rows.put(id, new TenantModuleData(r.id(), r.tenantId(), r.moduleId(), r.name(), r.version(),
                     r.description(), r.sourceUrl(), r.jarChecksum(), r.jarSizeBytes(), r.moduleClass(), r.manifest(),
                     status, r.installedBy(), r.installedAt(), r.updatedAt(), r.s3Key(), r.actions(), r.baseUrl(),
-                    r.protocolVersion(), r.connectedAppId(), r.serviceUserId()));
+                    r.protocolVersion(), r.connectedAppId(), r.serviceUserId(), r.uiBundleSha256(), r.uiBundleKey()));
         }
 
         @Override
@@ -127,7 +127,7 @@ class ExternalModuleServiceTest {
             rows.put(id, new TenantModuleData(r.id(), r.tenantId(), r.moduleId(), r.name(), r.version(),
                     r.description(), r.sourceUrl(), r.jarChecksum(), r.jarSizeBytes(), r.moduleClass(), r.manifest(),
                     r.status(), r.installedBy(), r.installedAt(), r.updatedAt(), r.s3Key(), r.actions(), r.baseUrl(),
-                    r.protocolVersion(), connectedAppId, serviceUserId));
+                    r.protocolVersion(), connectedAppId, serviceUserId, r.uiBundleSha256(), r.uiBundleKey()));
         }
 
         @Override
@@ -137,7 +137,16 @@ class ExternalModuleServiceTest {
             rows.put(id, new TenantModuleData(r.id(), r.tenantId(), r.moduleId(), name, version, description,
                     r.sourceUrl(), r.jarChecksum(), r.jarSizeBytes(), r.moduleClass(), manifestJson, r.status(),
                     r.installedBy(), r.installedAt(), r.updatedAt(), r.s3Key(), r.actions(), r.baseUrl(),
-                    protocolVersion, r.connectedAppId(), r.serviceUserId()));
+                    protocolVersion, r.connectedAppId(), r.serviceUserId(), r.uiBundleSha256(), r.uiBundleKey()));
+        }
+
+        @Override
+        public void updateUiBundle(String id, String sha256, String key) {
+            TenantModuleData r = rows.get(id);
+            rows.put(id, new TenantModuleData(r.id(), r.tenantId(), r.moduleId(), r.name(), r.version(),
+                    r.description(), r.sourceUrl(), r.jarChecksum(), r.jarSizeBytes(), r.moduleClass(), r.manifest(),
+                    r.status(), r.installedBy(), r.installedAt(), r.updatedAt(), r.s3Key(), r.actions(), r.baseUrl(),
+                    r.protocolVersion(), r.connectedAppId(), r.serviceUserId(), sha256, key));
         }
 
         @Override
@@ -170,6 +179,7 @@ class ExternalModuleServiceTest {
     private ModuleAccessTokenService tokens;
     private ModuleHttpClient http;
     private ModuleConfigEventPublisher events;
+    private ExternalModuleUiBundles uiBundles;
     private ExternalModuleService service;
 
     @BeforeEach
@@ -194,12 +204,13 @@ class ExternalModuleServiceTest {
         when(tokens.accessToken(any())).thenReturn("service-token");
         http = mock(ModuleHttpClient.class);
         events = mock(ModuleConfigEventPublisher.class);
+        uiBundles = mock(ExternalModuleUiBundles.class);
         TenantSlugResolver slugs = mock(TenantSlugResolver.class);
         when(slugs.resolveSlug(TENANT)).thenReturn(Optional.of("acme"));
         // Like JdbcUserIdResolver: the user's id, or the identifier itself when nothing matches.
         service = new ExternalModuleService(planner, store, provenanceStore, provisioner, principals, tokens, http,
                 events, slugs, (identifier, tenant) -> "user-1".equals(identifier) ? INSTALLER_ID : identifier,
-                mapper);
+                uiBundles, mapper);
     }
 
     private ExternalModulePlan plan(String mode, TenantModuleData installed, List<Map<String, Object>> blockers) {
@@ -208,6 +219,39 @@ class ExternalModuleServiceTest {
         attributes.put("planHash", HASH);
         attributes.put("blockers", blockers);
         return new ExternalModulePlan(attributes, manifest, ExternalModulePlannerTest.MANIFEST, BASE_URL, installed);
+    }
+
+    /** A plan for {@code manifestJson} that fetched {@code bundle}. */
+    private ExternalModulePlan plan(String mode, TenantModuleData installed, String manifestJson,
+                                    ExternalModuleUiBundles.Fetched bundle) {
+        Map<String, Object> attributes = new HashMap<>();
+        attributes.put("mode", mode);
+        attributes.put("planHash", HASH);
+        attributes.put("blockers", List.of());
+        return new ExternalModulePlan(attributes, new ModuleManifestParser(mapper).parseExternal(manifestJson),
+                manifestJson, BASE_URL, installed, bundle);
+    }
+
+    private static ExternalModuleUiBundles.Fetched bundle(String source) {
+        byte[] bytes = source.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return new ExternalModuleUiBundles.Fetched(bytes, ModuleJarService.sha256(bytes));
+    }
+
+    /** The planner test's manifest at {@code version}, with {@code ui} pinned to {@code sha256} (none when null). */
+    private String manifestWithUi(String version, String sha256) {
+        tools.jackson.databind.node.ObjectNode root =
+                (tools.jackson.databind.node.ObjectNode) mapper.readTree(ExternalModulePlannerTest.MANIFEST);
+        root.put("version", version);
+        if (sha256 != null) {
+            root.putObject("ui").put("bundlePath", "/ui/bundle.js").put("sha256", sha256);
+        }
+        return root.toString();
+    }
+
+    private TenantModuleData installedWithUi(ExternalModuleUiBundles.Fetched bundle) {
+        when(planner.plan(TENANT, BASE_URL, "user-1")).thenReturn(plan(ExternalModulePlan.MODE_INSTALL, null,
+                manifestWithUi("1.0.0", bundle.sha256()), bundle));
+        return service.install(TENANT, BASE_URL, HASH, "user-1");
     }
 
     private void planned(String mode) {
@@ -409,5 +453,107 @@ class ExternalModuleServiceTest {
         assertThatThrownBy(() -> service.enable(TENANT, "missing", "user-1"))
                 .isInstanceOf(IllegalArgumentException.class);
         verify(http, never()).lifecycle(any(), anyString(), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("install pins the bundle the plan fetched, under its versioned hash-named key, before lifecycle")
+    void installPinsTheUiBundle() {
+        ExternalModuleUiBundles.Fetched v1 = bundle("console.log('v1')");
+
+        TenantModuleData active = installedWithUi(v1);
+
+        String key = ExternalModuleUiBundles.key(TENANT, "acme-billing", "1.0.0", v1.sha256());
+        assertThat(key).isEqualTo("modules/" + TENANT + "/acme-billing/1.0.0/ui-bundle." + v1.sha256() + ".js");
+        assertThat(active.status()).isEqualTo(TenantModuleData.STATUS_ACTIVE);
+        assertThat(active.uiBundleSha256()).isEqualTo(v1.sha256());
+        assertThat(active.uiBundleKey()).isEqualTo(key);
+        InOrder order = inOrder(uiBundles, http);
+        order.verify(uiBundles).store(key, v1);
+        order.verify(http).lifecycle(any(), any(), any(), any());
+        verify(uiBundles, never()).fetch(any(), any());
+    }
+
+    @Test
+    @DisplayName("an upgrade with a new bundle pins it under the new version's key and drops the old object")
+    void upgradeRepinsAndDropsTheOldBundle() {
+        ExternalModuleUiBundles.Fetched v1 = bundle("console.log('v1')");
+        ExternalModuleUiBundles.Fetched v2 = bundle("console.log('v2')");
+        TenantModuleData active = installedWithUi(v1);
+        when(planner.planUpgrade(eq(TENANT), any(), eq("user-1"))).thenReturn(plan(ExternalModulePlan.MODE_UPGRADE,
+                active, manifestWithUi("2.0.0", v2.sha256()), v2));
+
+        TenantModuleData upgraded = service.upgrade(TENANT, "acme-billing", HASH, "user-1");
+
+        String newKey = ExternalModuleUiBundles.key(TENANT, "acme-billing", "2.0.0", v2.sha256());
+        verify(uiBundles).store(newKey, v2);
+        verify(uiBundles).deleteQuietly(active.uiBundleKey());
+        assertThat(upgraded.uiBundleSha256()).isEqualTo(v2.sha256());
+        assertThat(upgraded.uiBundleKey()).isEqualTo(newKey);
+    }
+
+    @Test
+    @DisplayName("an upgrade to a manifest without ui unpins and deletes the bundle")
+    void upgradeWithoutUiUnpins() {
+        TenantModuleData active = installedWithUi(bundle("console.log('v1')"));
+        when(planner.planUpgrade(eq(TENANT), any(), eq("user-1"))).thenReturn(plan(ExternalModulePlan.MODE_UPGRADE,
+                active, manifestWithUi("2.0.0", null), null));
+
+        TenantModuleData upgraded = service.upgrade(TENANT, "acme-billing", HASH, "user-1");
+
+        assertThat(upgraded.uiBundleSha256()).isNull();
+        assertThat(upgraded.uiBundleKey()).isNull();
+        verify(uiBundles).deleteQuietly(active.uiBundleKey());
+    }
+
+    @Test
+    @DisplayName("a retry after a later step failed keeps the pin; one that never pinned refetches and must match")
+    void retryPinsOnlyWhatIsMissingAndChecksTheHash() {
+        ExternalModuleUiBundles.Fetched v1 = bundle("console.log('v1')");
+        doThrow(new ModuleHttpClient.ModuleCallException(503, "lifecycle answered 503"))
+                .when(http).lifecycle(any(), any(), any(), any());
+        TenantModuleData failed = installedWithUi(v1);
+        assertThat(failed.status()).isEqualTo(TenantModuleData.STATUS_FAILED);
+        assertThat(failed.uiBundleSha256()).isEqualTo(v1.sha256());
+
+        org.mockito.Mockito.reset(http);
+        assertThat(service.enable(TENANT, "acme-billing", "user-1").status())
+                .isEqualTo(TenantModuleData.STATUS_ACTIVE);
+        verify(uiBundles, org.mockito.Mockito.times(1)).store(any(), any());
+        verify(uiBundles, never()).fetch(any(), any());
+
+        // Now a pin that never happened: the retry fetches, and a bundle swapped since approval fails.
+        store.updateUiBundle(failed.id(), null, null);
+        store.updateStatusWithError(failed.id(), TenantModuleData.STATUS_FAILED, "UI bundle: storage down");
+        when(uiBundles.fetch(eq(BASE_URL), any())).thenReturn(bundle("console.log('swapped')"));
+
+        TenantModuleData refused = service.enable(TENANT, "acme-billing", "user-1");
+
+        assertThat(refused.status()).isEqualTo(TenantModuleData.STATUS_FAILED);
+        assertThat(store.errors.get(refused.id())).startsWith("UI bundle:")
+                .contains("approved manifest declares " + v1.sha256());
+        assertThat(refused.uiBundleSha256()).isNull();
+    }
+
+    @Test
+    @DisplayName("a pin that cannot be stored fails the install before lifecycle")
+    void storageFailureFailsTheInstall() {
+        doThrow(new IllegalStateException("object storage is not enabled"))
+                .when(uiBundles).store(any(), any());
+
+        TenantModuleData failed = installedWithUi(bundle("console.log('v1')"));
+
+        assertThat(failed.status()).isEqualTo(TenantModuleData.STATUS_FAILED);
+        assertThat(store.errors.get(failed.id())).contains("UI bundle: object storage is not enabled");
+        verify(http, never()).lifecycle(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("uninstall deletes the pinned bundle")
+    void uninstallDeletesTheBundle() {
+        TenantModuleData active = installedWithUi(bundle("console.log('v1')"));
+
+        service.uninstall(active, false);
+
+        verify(uiBundles).deleteQuietly(active.uiBundleKey());
     }
 }

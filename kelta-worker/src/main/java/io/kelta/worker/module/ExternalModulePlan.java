@@ -16,9 +16,18 @@ import java.util.Map;
  *                     carries an {@code INVALID_MANIFEST} blocker)
  * @param manifestJson the manifest exactly as fetched
  * @param installed    the tenant's current row for the module id, or {@code null}
+ * @param uiBundle     the UI bundle fetched for this plan, whose hash matched the manifest's
+ *                     {@code ui.sha256}; {@code null} when the module ships no UI or the fetch
+ *                     failed (the plan then carries a blocker). Install pins exactly these bytes
  */
 public record ExternalModulePlan(Map<String, Object> attributes, ExternalModuleManifest manifest,
-                                 String manifestJson, String baseUrl, TenantModuleData installed) {
+                                 String manifestJson, String baseUrl, TenantModuleData installed,
+                                 ExternalModuleUiBundles.Fetched uiBundle) {
+
+    public ExternalModulePlan(Map<String, Object> attributes, ExternalModuleManifest manifest, String manifestJson,
+                              String baseUrl, TenantModuleData installed) {
+        this(attributes, manifest, manifestJson, baseUrl, installed, null);
+    }
 
     public static final String MODE_INSTALL = "INSTALL";
     public static final String MODE_UPGRADE = "UPGRADE";

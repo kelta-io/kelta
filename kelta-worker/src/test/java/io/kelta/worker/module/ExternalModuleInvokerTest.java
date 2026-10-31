@@ -154,6 +154,18 @@ class ExternalModuleInvokerTest {
     }
 
     @Test
+    @DisplayName("an event 4xx counts as a failure and still reaches the reader, so the status can be dead-lettered")
+    void eventFailureReachesTheReader() {
+        when(http.invoke(any(), any(), any(), any())).thenReturn(json(410, ""));
+
+        int status = invoker.call(row(TenantModuleData.STATUS_ACTIVE), ExternalModuleInvoker.Kind.EVENT, call,
+                r -> r.statusCode());
+
+        assertThat(status).isEqualTo(410);
+        assertThat(invoker.breakerState(ExternalModuleFixtures.INSTALL)).containsEntry("consecutiveFailures", 1);
+    }
+
+    @Test
     @DisplayName("an unreadable body is a module failure")
     void invalidResponseCounts() {
         when(http.invoke(any(), any(), any(), any())).thenReturn(json(200, "not json"));

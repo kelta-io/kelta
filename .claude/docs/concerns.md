@@ -589,6 +589,35 @@ what it does not guard against:
   answers are always served as `application/json` with `nosniff` and `no-store`, never as the
   module's own content type.
 
+### External modules — events and UI bundles (part 9e, accepted)
+
+`architecture.md` → External module events and UI bundles. What record-event delivery and bundle
+pinning do not guarantee:
+
+- **A retry redelivers to every subscriber.** One JetStream message carries one record change for
+  all the installs subscribed to it. If one install fails, the message is redelivered and the
+  installs that already took it get it again. Delivery is at least once by contract; a module
+  must deduplicate on `eventId`.
+- **A pod with a stale registry drops the event.** The consuming pod finds subscribers in its own
+  `ExternalModuleRegistry`, which follows `kelta.config.module.changed` and the 60 s reconcile. A
+  change written in the moment between an install committing and that pod refreshing is acked
+  with no subscriber, and is not delivered.
+- **Event failures trip the breaker.** A failing `/kelta/v1/events` counts toward the per-pod
+  breaker like any other call. A module whose events endpoint is broken goes `DEGRADED` and its
+  actions and hooks fail fast too.
+- **Dead letters have no replay yet.** `module_event_dead_letter` keeps what was sent, filtered
+  for the module, and goes with its install. Nothing lists or replays it: no endpoint, no UI.
+- **8 deliveries in flight per install per pod.** A delivery over that limit waits up to 10 s,
+  then counts as a failed attempt and is retried.
+- **A pinned bundle is approved by hash, not reviewed.** The admin approves the SHA-256 the plan
+  shows. That stops the module changing the bundle afterwards; it says nothing about what the code
+  does. The bundle runs same-origin with the admin's session (`moduleUiBundles.ts`).
+- **No object store, no UI.** A module that ships a bundle cannot be installed while
+  `KELTA_S3_ENABLED` is off (`UI_BUNDLE_STORAGE_UNAVAILABLE`). A pinned object that went missing
+  or no longer matches its hash is answered `404`, never served.
+- **Replaced bundles can be orphaned.** Upgrade and uninstall delete the old object best-effort,
+  after the new pin is written. A failed delete is logged and leaves the object in the bucket.
+
 ### Outbound requests to tenant-supplied URLs
 
 `OutboundUrlGuard` + `OutboundHttpClient` (runtime-core `io.kelta.runtime.outbound`) refuse

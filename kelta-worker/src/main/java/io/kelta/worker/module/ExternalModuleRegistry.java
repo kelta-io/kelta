@@ -100,6 +100,8 @@ public class ExternalModuleRegistry {
 
     private final Map<String, Endpoint> endpoints = new ConcurrentHashMap<>();
     private final Map<String, Registration> registrations = new ConcurrentHashMap<>();
+    /** Set once the first {@link #reconcile} has read every row; see {@link #ensureInitialized}. */
+    private volatile boolean initialized;
 
     public ExternalModuleRegistry(ModuleStore moduleStore, ActionHandlerRegistry actionHandlers,
                                   BeforeSaveHookRegistry hookRegistry, ModuleServiceRegistry moduleServices,
@@ -121,6 +123,44 @@ public class ExternalModuleRegistry {
     /** The install's current snapshot on this pod, if the tenant has it installed. */
     public Optional<Endpoint> endpoint(String tenantId, String moduleId) {
         return Optional.ofNullable(endpoints.get(key(tenantId, moduleId)));
+    }
+
+    /**
+     * The callable installs of {@code tenantId} whose manifest {@code events[]} subscribe to
+     * {@code type} ({@code created}, {@code updated}, {@code deleted}) on {@code collection}
+     * (part 9e, event delivery).
+     */
+    public List<Endpoint> eventSubscribers(String tenantId, String collection, String type) {
+        List<Endpoint> subscribers = new ArrayList<>();
+        for (Endpoint endpoint : endpoints.values()) {
+            if (!endpoint.row().tenantId().equals(tenantId) || !ExternalModuleInvoker.callable(endpoint.row())) {
+                continue;
+            }
+            for (ExternalModuleManifest.EventSubscription subscription : endpoint.manifest().events()) {
+                if (subscription.collection().equals(collection) && subscription.types().contains(type)) {
+                    subscribers.add(endpoint);
+                    break;
+                }
+            }
+        }
+        return subscribers;
+    }
+
+    /**
+     * Runs the first reconcile now if none has finished yet. A consumer that may see a message
+     * before {@code ApplicationReadyEvent}'s reconcile completes (NATS subscriptions start in the
+     * same event) calls this first, so a pod that just started never treats "not read yet" as
+     * "not installed". No tenant may be bound: the reconcile reads every tenant's rows.
+     */
+    public void ensureInitialized() {
+        if (initialized) {
+            return;
+        }
+        synchronized (this) {
+            if (!initialized) {
+                reconcile();
+            }
+        }
     }
 
     /** Re-reads one install (its {@code module.changed} event, or a local write) and re-registers it. */
@@ -163,6 +203,7 @@ public class ExternalModuleRegistry {
                 remove(known.substring(0, split), known.substring(split + 1));
             }
         }
+        initialized = true;
         for (TenantModuleData row : rows) {
             if (ExternalModuleInvoker.callable(row) && (TenantModuleData.STATUS_DEGRADED.equals(row.status())
                     || invoker.breakerOpen(row.id()))) {

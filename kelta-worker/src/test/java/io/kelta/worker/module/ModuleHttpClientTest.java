@@ -89,6 +89,26 @@ class ModuleHttpClientTest {
             exchange.sendResponseHeaders(200, -1);
             exchange.close();
         });
+        server.createContext("/ok/ui/bundle.js", exchange -> {
+            requestHeaders.put("bundle", Map.copyOf(exchange.getRequestHeaders()));
+            byte[] body = "console.log('ui')".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/javascript");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.createContext("/ok/ui/huge.js", exchange -> {
+            byte[] chunk = new byte[64 * 1024];
+            exchange.sendResponseHeaders(200, 0);
+            try (var out = exchange.getResponseBody()) {
+                for (int written = 0; written <= ModuleHttpClient.MAX_UI_BUNDLE_BYTES; written += chunk.length) {
+                    out.write(chunk);
+                }
+            } catch (java.io.IOException ignored) {
+                // the client stops reading at its cap
+            }
+            exchange.close();
+        });
         server.start();
         baseUrl = "http://localhost:" + server.getAddress().getPort();
         client = new ModuleHttpClient(new ModuleHostGuard("localhost"), signer, new ObjectMapper());
@@ -109,6 +129,19 @@ class ModuleHttpClientTest {
     @DisplayName("fetches the manifest from {baseUrl}/.well-known/kelta-module.json with no credential")
     void fetchesTheManifest() {
         assertThat(client.fetchManifest(baseUrl + "/ok")).isEqualTo("{\"manifestVersion\":2}");
+    }
+
+    @Test
+    @DisplayName("fetches the UI bundle with no credential; a missing or oversized bundle is a failure")
+    void fetchesTheUiBundle() {
+        assertThat(new String(client.fetchUiBundle(baseUrl + "/ok", "/ui/bundle.js"), StandardCharsets.UTF_8))
+                .isEqualTo("console.log('ui')");
+        assertThat(requestHeaders.get("bundle")).doesNotContainKeys("Authorization", "Kelta-access-token");
+
+        assertThatThrownBy(() -> client.fetchUiBundle(baseUrl + "/ok", "/ui/missing.js"))
+                .isInstanceOf(ModuleHttpClient.ModuleCallException.class).hasMessageContaining("404");
+        assertThatThrownBy(() -> client.fetchUiBundle(baseUrl + "/ok", "/ui/huge.js"))
+                .isInstanceOf(ModuleHttpClient.ModuleCallException.class).hasMessageContaining("larger than");
     }
 
     @Test

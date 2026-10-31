@@ -571,6 +571,7 @@ jobs:
           docker pull redis:7-alpine
           docker pull nats:2.10-alpine
           docker pull ghcr.io/cerbos/cerbos:0.40.0
+          docker pull adobe/s3mock:3.12.0
           docker pull eclipse-temurin:25-jre-alpine
 
       - name: Install psql client
