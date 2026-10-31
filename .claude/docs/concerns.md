@@ -888,6 +888,16 @@ tokens isolate access), single hostNetwork replica (`Recreate` → brief outage 
 
 ## Tech Debt
 
+**A tier change does not reach the gateway's rate limit.** The gateway takes `apiCallsPerDay`
+from the `tenant.limits` override only (`InternalBootstrapController.loadGovernorLimits` over
+`SELECT id, limits FROM tenant`), falling back to 100,000 — it never reads `tenant.edition`. And
+`PUT /api/governor-limits/tier` publishes `feature.changed`, not the `tenants` record event that
+makes the gateway refresh. So moving a tenant to ENTERPRISE or UNLIMITED shows the higher
+`apiCallsLimit` in `GET /api/governor-limits` while the gateway keeps enforcing the
+PROFESSIONAL-sized window. Workaround: set `apiCallsPerDay` in the override with
+`PUT /api/governor-limits`. Fix: resolve tier defaults in the gateway's limit load and publish the
+tenant event from the tier endpoint (found while building `load-tests/`, 2026-10-31).
+
 **No collection rename.** A collection's `name` is the physical table name, its `/api/<name>`
 path and gateway route, and the value of lookup `reference_target`, menu paths and search-index
 rows; nothing migrates them, so `CollectionLifecycleHook` rejects a name change (2026-10-12).
@@ -1412,6 +1422,8 @@ Default `max_connections = 100` is too small; size it to the sum above (plus wha
 the server) and recompute before scaling the worker past three replicas or raising `DB_POOL_MAX`.
 Long-term: PgBouncer in transaction mode, or a dedicated/managed Postgres past ~1k tenants.
 Follow-up: alert on `numbackends / max_connections > 0.8`.
+Measure, don't guess: `load-tests/` (k6) puts a planned request rate on a stack; watch
+`numbackends` and the Hikari pools while it runs.
 
 ## Connection Pooler Compatibility
 

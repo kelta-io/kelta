@@ -415,6 +415,30 @@ the script.
 The script's own tests are `ci/update-snapshots.test.ts` (`node --test`, Node ≥ 24). They run
 in the `test-ci-scripts` job, against a local bare repo and a fake `docker`.
 
+## Load testing (k6)
+
+`load-tests/` holds k6 scripts that put a planned request rate on a running stack and report
+p95 latency per operation; `load-tests/README.md` has every setting. `records.js` creates a
+throwaway collection, seeds it, runs a weighted list/filter/get/create/update/delete mix through
+the gateway on an open (arrival-rate) model, and force-deletes the collection afterwards.
+Profiles: `smoke`, `load`, `stress`, `soak`.
+
+- **Settings are `LOAD_*`, never `K6_*`.** k6 reads `K6_*` variables as its own options:
+  `K6_DURATION` silently replaces the scenario with a closed loop and `K6_RPS` caps the rate.
+- **The rate limit is the first ceiling.** The gateway gives a tenant `floor(apiCallsPerDay /
+  288) * 5` requests per 5-minute window (`GatewayCacheManager.getRateLimitForTenant`) and one
+  principal `round(window * user-share)` of it (`RateLimitFilter`, default 0.9): about 5.2 req/s
+  for one token on the PROFESSIONAL default. The preflight reads the enforced window from the
+  gateway's `X-RateLimit-Limit` header and refuses a plan above 90% of the token's share unless
+  `LOAD_ALLOW_THROTTLE=true`. Raise `apiCallsPerDay` in the tenant's limits override
+  (`PUT /api/governor-limits`, platform operator) — a tier change does not reach the gateway.
+  `tenantWindow`/`allowedRps` in `load-tests/lib/plan.js` must stay in step with both classes.
+- **The worker's per-tenant concurrency cap is the second.** `kelta.worker.tenant-concurrency-limit`
+  (default 10 in-flight per tenant per pod) answers the excess with `503
+  TENANT_CONCURRENCY_LIMIT`; the run counts those as `concurrency_limited`, not as failures.
+- CI does not run the scripts (they need a stack). `ci/load-tests.test.ts` unit-tests
+  `lib/plan.js` (profiles, mix, thresholds, seed count, rate-limit formulas) in `test-ci-scripts`.
+
 ## Generated reference: system collections
 
 `SystemCollectionsReferenceTest` (runtime-core, `model/system/`) renders

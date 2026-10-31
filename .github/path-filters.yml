@@ -223,9 +223,11 @@ workflows:
 # The docs checks ride the same job: ci/doc-http-paths.test.ts reads every METHOD /api/... in the
 # docs and the READMEs, and ci/doc-error-codes.test.ts reads errors.md against the codes emitted in
 # the doc-error-codes.ts SOURCE_ROOTS, so a docs-only or a code-only change re-runs both.
-# ci/path-filters.test.ts reads this file, so it is listed too.
+# ci/path-filters.test.ts reads this file, so it is listed too. ci/load-tests.test.ts imports
+# load-tests/lib/plan.js, so the k6 suite is listed as well.
 ci_scripts:
   - 'ci/**'
+  - 'load-tests/**'
   - '.github/path-filters.yml'
   - 'scripts/ci/**'
   - 'kelta-*/src/main/java/**/controller/**'
