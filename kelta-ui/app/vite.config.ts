@@ -43,7 +43,7 @@ export default defineConfig({
         // the generated worker instead. See public/push-handlers.js.
         importScripts: ['push-handlers.js'],
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        // Admin-only page chunks are emitted under assets/admin/ (see build.rollupOptions
+        // Admin-only page chunks are emitted under assets/admin/ (see build.rolldownOptions
         // below) and kept OUT of the precache — the installable end-user PWA shouldn't
         // download the admin/builder code up front. They're runtime-cached on demand instead
         // (see runtimeCaching), so an admin who visits those routes still gets a warm cache.
@@ -71,7 +71,7 @@ export default defineConfig({
     }),
   ],
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       output: {
         // Emit admin-only page chunks under assets/admin/ so the service worker can keep
         // them out of the precache (workbox.globIgnores). A lazy page chunk's facadeModuleId
@@ -90,7 +90,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(import.meta.dirname, './src'),
     },
     // Force a single instance of React AND every React-context-bearing
     // singleton across the app and the file:-linked @kelta/components /

@@ -119,11 +119,11 @@ npm run test:coverage    # With coverage report
 
 ## Tech Stack
 
-- React 19.2.0, TypeScript 5.9.3, Vite 7.2.4
+- React 19.2.0, TypeScript 5.9.3, Vite 8.3.5
 - Tailwind CSS 4.1.18, Radix UI, shadcn/ui components
 - TanStack React Query 5.90.20, React Hook Form 7.71.1
 - React Router DOM 7.13.0, Zod 4.3.6, Axios 1.13.5
-- Vitest 4.0.18, Testing Library, MSW 2.12.7
+- Vitest 5.0.5, Testing Library, MSW 2.12.7
 - ESLint 9.39.1 (with jsx-a11y), Prettier 3.8.1
 - @kelta/sdk, @kelta/components, @kelta/plugin-sdk
 
