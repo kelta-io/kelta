@@ -64,7 +64,7 @@ export class TokenManager {
       const newToken = await this.provider.refreshToken();
       this.state.token = newToken;
       this.state.expiresAt = this.parseTokenExpiration(newToken);
-    } catch (error) {
+    } catch {
       // Clear state on refresh failure
       this.state.token = null;
       this.state.expiresAt = null;

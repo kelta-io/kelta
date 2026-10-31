@@ -33,7 +33,7 @@ function auditCommand(name: string, summary: string, collection: string): Regist
         .get<unknown>(`/api/${collection}?${params.toString()}`);
       return { data: response.data };
     },
-  }) as RegisteredCommand;
+  });
 }
 
 export const auditCommands: RegisteredCommand[] = [

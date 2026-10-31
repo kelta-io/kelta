@@ -3,6 +3,7 @@ import { picklistIdByName } from '../admin/lookups.js';
 import { parseList } from '../query.js';
 import { flattenBody, flattenResource } from '../render/flatten.js';
 import { renderTable } from '../render/table.js';
+import { toText } from '../render/text.js';
 import { defineCommand, type RegisteredCommand } from '../registry/types.js';
 
 interface JsonApiResource {
@@ -57,7 +58,7 @@ const get = defineCommand({
       (a, b) => Number(a.attributes?.sortOrder ?? 0) - Number(b.attributes?.sortOrder ?? 0)
     );
     const flatValues = values.map(flattenResource);
-    const name = String(picklist.data.data?.attributes?.name ?? input.picklist);
+    const name = toText(picklist.data.data?.attributes?.name ?? input.picklist);
     return {
       data: ctx.global.raw
         ? { data: picklist.data.data, values }

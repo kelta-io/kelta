@@ -64,8 +64,8 @@ export function deepEqual(a: unknown, b: unknown): boolean {
     );
   }
   if (a && b && typeof a === 'object' && typeof b === 'object') {
-    const keysA = Object.keys(a as Record<string, unknown>);
-    const keysB = Object.keys(b as Record<string, unknown>);
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
     return (
       keysA.length === keysB.length &&
       keysA.every((k) =>

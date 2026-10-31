@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import type { FilterExpression } from '@kelta/sdk';
 import type { FilterBuilderProps } from './types';
 import { OPERATORS_BY_TYPE } from './types';
+import { toText } from '../utils/text';
 
 /**
  * FilterBuilder component for building filter expressions.
@@ -132,7 +133,7 @@ export function FilterBuilder({
         <select
           id={inputId}
           className="kelta-filter-builder__value-input kelta-filter-builder__value-input--boolean"
-          value={String(filter.value ?? '')}
+          value={toText(filter.value ?? '')}
           onChange={(e) =>
             updateFilter(index, {
               value: e.target.value === 'true',
@@ -152,7 +153,7 @@ export function FilterBuilder({
         id={inputId}
         className={`kelta-filter-builder__value-input kelta-filter-builder__value-input--${fieldType}`}
         type={inputType}
-        value={String(filter.value ?? '')}
+        value={toText(filter.value ?? '')}
         onChange={(e) =>
           updateFilter(index, {
             value:

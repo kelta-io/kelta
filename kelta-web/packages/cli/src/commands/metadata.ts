@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import type { AxiosInstance, AxiosResponse } from 'axios';
 import { z } from 'zod';
 import { parseList } from '../query.js';
+import { toText } from '../render/text.js';
 import { defineCommand, type RegisteredCommand } from '../registry/types.js';
 
 export interface ExportOptions {
@@ -149,7 +150,7 @@ interface ApplyItem {
 export function summarizeApply(result: unknown): string {
   const body = (result ?? {}) as Record<string, unknown>;
   const totals = ['created', 'updated', 'skipped', 'failed']
-    .map((key) => `${key}=${String(body[key] ?? 0)}`)
+    .map((key) => `${key}=${toText(body[key] ?? 0)}`)
     .join(' ');
   const byType = new Map<string, Map<string, number>>();
   for (const item of (Array.isArray(body.items) ? body.items : []) as ApplyItem[]) {

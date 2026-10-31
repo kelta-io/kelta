@@ -1,4 +1,5 @@
 import type { VisibilityRule } from '@kelta/sdk';
+import { toText } from '../utils/text';
 
 /**
  * @deprecated Public export unused by Kelta; it will stop being exported from @kelta/components
@@ -33,7 +34,7 @@ export function evaluateVisibilityRule(
   rule: VisibilityRule,
   record: Record<string, unknown>
 ): boolean {
-  const fieldValue = String(record[rule.fieldName] ?? '');
+  const fieldValue = toText(record[rule.fieldName] ?? '');
 
   switch (rule.operator) {
     case 'EQUALS':

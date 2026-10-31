@@ -134,7 +134,7 @@ export function FieldSection<F extends DetailField = DetailField>({
           <div className="border-t border-border px-5 py-5">
             <div
               className="kelta-field-grid"
-              style={{ ['--kelta-grid-cols' as string]: String(columns) } as React.CSSProperties}
+              style={{ ['--kelta-grid-cols' as string]: String(columns) }}
             >
               {fields.map((field) => {
                 const value = record[field.name];

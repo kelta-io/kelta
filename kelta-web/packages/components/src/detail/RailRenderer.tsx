@@ -13,6 +13,7 @@ import { AICard } from './AICard';
 import { Timeline, type TimelineEvent, type TimelineTone } from './Timeline';
 import type { StatTileConfig } from './StatStrip';
 import type { RailBlockDto } from './types';
+import { toText } from '../utils/text';
 
 export interface RailRendererProps {
   blocks: RailBlockDto[];
@@ -68,9 +69,9 @@ export function RailRenderer({ blocks }: RailRendererProps): React.ReactElement 
                   events: (block.config.events as unknown[]).map((e) => {
                     const ev = e as Record<string, unknown>;
                     return {
-                      at: String(ev.at ?? ''),
-                      title: String(ev.title ?? ''),
-                      body: ev.body ? String(ev.body) : undefined,
+                      at: toText(ev.at ?? ''),
+                      title: toText(ev.title ?? ''),
+                      body: ev.body ? toText(ev.body) : undefined,
                       tone: (ev.tone as TimelineTone | undefined) ?? 'default',
                     } satisfies TimelineEvent;
                   }),

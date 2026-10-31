@@ -283,7 +283,7 @@ export function ResourceForm({
   // Reset form when existing data is loaded
   useEffect(() => {
     if (existingData) {
-      reset(existingData as Record<string, unknown>);
+      reset(existingData);
     }
   }, [existingData, reset]);
 
@@ -318,7 +318,7 @@ export function ResourceForm({
   const updateMutation = useMutation({
     mutationFn: (data: Record<string, unknown>) => {
       if (!recordId) throw new Error('Record ID required for update');
-      return client.resource(resourceName).update(recordId, data as never);
+      return client.resource(resourceName).update(recordId, data);
     },
     onMutate: async (newData) => {
       // Cancel any outgoing refetches
@@ -356,7 +356,7 @@ export function ResourceForm({
       } else {
         await createMutation.mutateAsync(transformedData);
       }
-    } catch (error) {
+    } catch {
       // Error is handled by mutation's onError callback
       // This catch prevents unhandled promise rejection
     }

@@ -84,7 +84,7 @@ export class ResourceClient<T = unknown> {
    * Create a new resource (JSON:API format)
    */
   async create(data: Partial<T>): Promise<T> {
-    const body = this.wrapJsonApi(undefined, data as Record<string, unknown>);
+    const body = this.wrapJsonApi(undefined, data);
     const response = await this.client
       .getAxiosInstance()
       .post<T>(`/api/${this.resourceName}`, body);
@@ -128,7 +128,7 @@ export class ResourceClient<T = unknown> {
    * Patch a resource (partial update with JSON:API format)
    */
   async patch(id: string, data: Partial<T>): Promise<T> {
-    const body = this.wrapJsonApi(id, data as Record<string, unknown>);
+    const body = this.wrapJsonApi(id, data);
     const response = await this.client
       .getAxiosInstance()
       .patch<T>(`/api/${this.resourceName}/${id}`, body);

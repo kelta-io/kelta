@@ -702,7 +702,7 @@ describe('KeltaClient', () => {
       writeSpy.mockRestore();
     });
 
-    it('writes a trace line and re-rejects on an error response', async () => {
+    it('writes a trace line and re-throws on an error response', () => {
       process.env.KELTA_TRACE = '1';
       const client = new KeltaClient({ baseUrl: 'https://api.example.com' });
       const axiosInstance = client.getAxiosInstance();
@@ -716,7 +716,15 @@ describe('KeltaClient', () => {
         response: { status: 500 },
       };
 
-      await expect(traceError(error)).rejects.toBe(error);
+      // The handler re-throws the original error; axios chains interceptors with
+      // promise.then(), so the request still rejects with that same error.
+      let thrown: unknown;
+      try {
+        traceError(error);
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBe(error);
       expect(writeSpy).toHaveBeenCalledWith(expect.stringContaining('POST /api/dashboards 500'));
       writeSpy.mockRestore();
     });

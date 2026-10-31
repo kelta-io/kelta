@@ -16,14 +16,15 @@ import type {
 } from '@kelta/sdk';
 import type { LayoutRendererProps, FieldRendererFn } from './types';
 import { isVisible } from './visibilityRule';
+import { toText } from '../utils/text';
 
 // ---------------------------------------------------------------------------
 // Default field renderers
 // ---------------------------------------------------------------------------
 
 const defaultViewRenderers: Record<string, (value: unknown) => ReactNode> = {
-  string: (v) => String(v ?? ''),
-  number: (v) => String(v ?? ''),
+  string: (v) => toText(v ?? ''),
+  number: (v) => toText(v ?? ''),
   boolean: (v) => (v ? 'Yes' : 'No'),
   date: (v) => {
     if (!v) return '';
@@ -35,16 +36,16 @@ const defaultViewRenderers: Record<string, (value: unknown) => ReactNode> = {
     const d = new Date(v as string);
     return d.toLocaleString();
   },
-  reference: (v) => String(v ?? ''),
+  reference: (v) => toText(v ?? ''),
   json: (v) => JSON.stringify(v, null, 2),
-  picklist: (v) => String(v ?? ''),
-  multi_picklist: (v) => (Array.isArray(v) ? v.join(', ') : String(v ?? '')),
+  picklist: (v) => toText(v ?? ''),
+  multi_picklist: (v) => (Array.isArray(v) ? v.join(', ') : toText(v ?? '')),
   currency: (v) => (v != null ? `$${Number(v).toFixed(2)}` : ''),
-  percent: (v) => (v != null ? `${String(v)}%` : ''),
-  phone: (v) => String(v ?? ''),
-  email: (v) => String(v ?? ''),
-  url: (v) => String(v ?? ''),
-  auto_number: (v) => String(v ?? ''),
+  percent: (v) => (v != null ? `${toText(v)}%` : ''),
+  phone: (v) => toText(v ?? ''),
+  email: (v) => toText(v ?? ''),
+  url: (v) => toText(v ?? ''),
+  auto_number: (v) => toText(v ?? ''),
 };
 
 function renderFieldValue(
@@ -75,7 +76,7 @@ function renderEditField(
   onChange: (value: unknown) => void
 ): ReactNode {
   const type = field.type;
-  const strValue = value != null ? String(value) : '';
+  const strValue = value != null ? toText(value) : '';
 
   if (type === 'boolean') {
     return (
