@@ -49,7 +49,8 @@ public class CerbosPolicyGenerator {
 
             Map<String, Object> condition = new LinkedHashMap<>();
             Map<String, Object> match = new LinkedHashMap<>();
-            match.put("expr", "P.attr.profileId == \"" + profile.id() + "\" && P.attr.tenantId == \"" + tenantId + "\"");
+            match.put("expr", "P.attr.profileId == " + CustomRuleCel.stringLiteral(profile.id())
+                    + " && P.attr.tenantId == " + CustomRuleCel.stringLiteral(tenantId));
             condition.put("match", match);
             def.put("condition", condition);
 
@@ -144,8 +145,8 @@ public class CerbosPolicyGenerator {
                     String fieldId = fieldEntry.getKey();
                     String visibility = fieldEntry.getValue();
 
-                    String fieldExpr = "R.attr.collectionId == \"" + collectionId
-                            + "\" && R.attr.fieldId == \"" + fieldId + "\"";
+                    String fieldExpr = "R.attr.collectionId == " + CustomRuleCel.stringLiteral(collectionId)
+                            + " && R.attr.fieldId == " + CustomRuleCel.stringLiteral(fieldId);
 
                     if ("HIDDEN".equals(visibility)) {
                         // Deny read and write
@@ -263,7 +264,7 @@ public class CerbosPolicyGenerator {
         constants.put("viewAll", viewAll);
         constants.put("modifyAll", modifyAll);
 
-        String tenantGuard = "P.attr.tenantId == \"" + tenantId + "\"";
+        String tenantGuard = "P.attr.tenantId == " + CustomRuleCel.stringLiteral(tenantId);
         List<Map<String, Object>> rules = new ArrayList<>();
 
         if (!perms.isEmpty()) {
@@ -284,30 +285,80 @@ public class CerbosPolicyGenerator {
 
         // Custom ABAC rules from admin UI (record policy only). These keep the per-profile
         // derived role — there are few of them and admin-authored CEL may assume it.
+        Set<String> profileIds = new HashSet<>();
+        for (ProfileData profile : profiles) {
+            profileIds.add(profile.id());
+        }
         for (CustomRule customRule : customRules) {
-            if (!customRule.enabled()) continue;
-
-            Map<String, Object> rule = new LinkedHashMap<>();
-            rule.put("actions", List.of(customRule.action()));
-            rule.put("effect", "EFFECT_DENY".equalsIgnoreCase(customRule.effect())
-                    ? "EFFECT_DENY" : "EFFECT_ALLOW");
-            rule.put("derivedRoles", List.of("profile_" + customRule.profileId()));
-
-            String collExpr = "R.attr.collectionId == \""
-                    + resolveCollectionRef(collectionIdToName, customRule.collectionId()) + "\"";
-            String celExpr = customRule.celExpression();
-            String combinedExpr = celExpr != null && !celExpr.isBlank()
-                    ? collExpr + " && " + celExpr
-                    : collExpr;
-
-            Map<String, Object> condition = new LinkedHashMap<>();
-            condition.put("match", Map.of("expr", combinedExpr));
-            rule.put("condition", condition);
-
-            rules.add(rule);
+            Map<String, Object> rule = customRule(customRule, profileIds, collectionIdToName);
+            if (rule != null) {
+                rules.add(rule);
+            }
         }
 
         return buildResourcePolicy(resource, tenantId, rules, constants);
+    }
+
+    /**
+     * One custom rule as a Cerbos rule, or {@code null} when it contributes nothing.
+     *
+     * <ul>
+     *   <li><b>Effect.</b> {@code allow}/{@code EFFECT_ALLOW} (any case) emits {@code EFFECT_ALLOW};
+     *       every other stored value — {@code deny}, {@code EFFECT_DENY}, or one this version
+     *       cannot read — emits {@code EFFECT_DENY}, so a rule never grants by accident. A
+     *       matching deny beats every allow: all of a tenant's rules live in one scoped policy,
+     *       where Cerbos resolves a deny and an allow on the same action to deny.</li>
+     *   <li><b>Collection guard.</b> The condition is {@code R.attr.collectionId == "<name>" &&
+     *       (<cel>)}; the parentheses keep a top-level {@code ||} or ternary in the rule's CEL
+     *       inside its collection.</li>
+     *   <li><b>Unusable condition</b> (missing, or not well-formed CEL — see
+     *       {@link CustomRuleCel#parseProblem}): a deny rule denies its action on the whole
+     *       collection, an allow rule is left out. Either way the rest of the policy still
+     *       compiles.</li>
+     *   <li>A rule for a profile that is not in the tenant is left out: its derived role is not
+     *       defined, which would make Cerbos reject the whole policy, and no principal of the
+     *       tenant could match it anyway.</li>
+     * </ul>
+     */
+    private static Map<String, Object> customRule(CustomRule customRule, Set<String> profileIds,
+                                                  Map<String, String> collectionIdToName) {
+        if (!customRule.enabled()) {
+            return null;
+        }
+        if (!profileIds.contains(customRule.profileId())) {
+            log.warn("Skipping custom rule {}: profile {} is not in the tenant",
+                    customRule.id(), customRule.profileId());
+            return null;
+        }
+        boolean allow = CustomRuleCel.isAllow(customRule.effect());
+        if (!allow && !CustomRuleCel.isDeny(customRule.effect())) {
+            log.warn("Custom rule {} has an unknown effect; compiling it as a deny", customRule.id());
+        }
+
+        String collExpr = "R.attr.collectionId == "
+                + CustomRuleCel.stringLiteral(resolveCollectionRef(collectionIdToName, customRule.collectionId()));
+        String celExpr = customRule.celExpression();
+        String problem = CustomRuleCel.parseProblem(celExpr);
+        String combinedExpr;
+        if (problem == null) {
+            combinedExpr = collExpr + " && (" + celExpr + ")";
+        } else if (allow) {
+            log.warn("Skipping allow custom rule {}: its condition is unusable ({})", customRule.id(), problem);
+            return null;
+        } else {
+            log.warn("Deny custom rule {} has an unusable condition ({}); denying its action on the whole collection",
+                    customRule.id(), problem);
+            combinedExpr = collExpr;
+        }
+
+        Map<String, Object> rule = new LinkedHashMap<>();
+        rule.put("actions", List.of(customRule.action()));
+        rule.put("effect", allow ? "EFFECT_ALLOW" : "EFFECT_DENY");
+        rule.put("derivedRoles", List.of("profile_" + customRule.profileId()));
+        Map<String, Object> condition = new LinkedHashMap<>();
+        condition.put("match", Map.of("expr", combinedExpr));
+        rule.put("condition", condition);
+        return rule;
     }
 
     /** A rule matched on the static {@code user} role and gated purely by CEL. */

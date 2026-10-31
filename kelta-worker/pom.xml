@@ -234,6 +234,17 @@
             <version>0.20.1</version>
         </dependency>
 
+        <!-- CEL parser (cel-java). Not a new artifact: cerbos-sdk-java already ships it on the
+             runtime classpath through build.buf:protovalidate. Declared at compile scope so
+             CustomRuleCel can parse custom-rule conditions before they are saved. Keep the
+             version equal to what `mvn dependency:tree -Dincludes=dev.cel` resolves through
+             protovalidate when cerbos-sdk-java is bumped. -->
+        <dependency>
+            <groupId>dev.cel</groupId>
+            <artifactId>cel</artifactId>
+            <version>0.12.0</version>
+        </dependency>
+
         <!-- In-memory caching for Cerbos authorization results -->
         <dependency>
             <groupId>com.github.ben-manes.caffeine</groupId>
