@@ -58,7 +58,7 @@ public class AtomicOperationExecutor {
      * write — overwriting any client-supplied value. An {@code add} on a tenant-scoped system
      * collection is stamped with the bound {@code TenantContext} tenant, as the router stamps
      * {@code X-Tenant-ID}; a client-supplied {@code tenantId} naming another tenant fails that
-     * operation.
+     * {@code add} or {@code update}, on any collection.
      *
      * @param operations   the list of atomic operations to execute
      * @param actingUserId the caller's {@code platform_user} UUID, or null to stamp nothing
@@ -135,10 +135,7 @@ public class AtomicOperationExecutor {
         GeoStamping.stamp(attributes, definition, geo, true);
 
         String tenantId = TenantContext.get();
-        RecordTenantScope.foreignTenantId(attributes, definition, tenantId).ifPresent(supplied -> {
-            throw new AtomicOperationException(index, "add",
-                    "tenantId '" + supplied + "' does not match the request's tenant for type " + type);
-        });
+        rejectForeignTenantId(attributes, tenantId, index, "add", type);
         RecordTenantScope.injectTenantId(attributes, definition, tenantId);
 
         Map<String, Object> created = queryEngine.create(definition, attributes);
@@ -169,6 +166,7 @@ public class AtomicOperationExecutor {
             attributes.put("updatedBy", actingUserId);
         }
         GeoStamping.stamp(attributes, definition, geo, false);
+        rejectForeignTenantId(attributes, TenantContext.get(), index, "update", type);
 
         Optional<Map<String, Object>> updated = queryEngine.update(definition, id, attributes);
         if (updated.isEmpty()) {
@@ -189,6 +187,18 @@ public class AtomicOperationExecutor {
         }
 
         return AtomicResult.empty();
+    }
+
+    /**
+     * Fails the operation when its attributes carry a {@code tenantId} naming a tenant other than
+     * the bound one — on any collection, as the router refuses it ({@link RecordTenantScope#foreignTenantId}).
+     */
+    private static void rejectForeignTenantId(Map<String, Object> attributes, String tenantId, int index,
+                                              String opName, String type) {
+        RecordTenantScope.foreignTenantId(attributes, tenantId).ifPresent(supplied -> {
+            throw new AtomicOperationException(index, opName,
+                    "tenantId '" + supplied + "' does not match the request's tenant for type " + type);
+        });
     }
 
     private CollectionDefinition resolveCollection(String type, int index) {

@@ -1226,7 +1226,13 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   with the gateway). A collection's name is fixed once created — `CollectionLifecycleHook`
   rejects an update that changes it, because the physical table, API path, gateway route and
   name-keyed references (lookup `reference_target`, menu paths, search index) all derive from
-  it and none follow a rename.
+  it and none follow a rename. `systemCollection` is the platform's too: system collections are
+  declared in code and seeded by `SystemCollectionSeeder` over JDBC, so `CollectionLifecycleHook`
+  refuses `systemCollection: true` on a create and any change of it on an update (400
+  `systemMaintained`; `false` on create and a re-sent stored value pass), and
+  `ReservedCollectionNameHook` exempts only a row whose *stored* flag is set — the flag decides
+  how `CollectionLifecycleManager` loads the collection (system storage, validation-rule scope,
+  shared-row visibility), so a caller must never set it.
 - **Public (unauthenticated) endpoint**: to expose a path with no JWT, add its prefix to
   `kelta.gateway.security.unauthenticated-paths` (all methods) or `public-paths` (GET/HEAD only)
   in the gateway `application.yml`, *and* register its worker static route. Example: mass-email
@@ -1590,7 +1596,10 @@ provisioned before the narrowing).
     update/delete) the child must load through `RecordTenantScope.findChild` or 404 with nothing
     written → body → storage data
     (+ parent ref on a child create) → `createdBy`/`updatedBy` (`UserIdResolver`) → geo stamp →
-    `tenantId` (create) or `If-Match` (top-level update/delete only) → `QueryEngine` write
+    create/update: a body `tenantId` naming a tenant other than `X-Tenant-ID` → 400
+    `systemMaintained` on `tenantId`, nothing written (every collection,
+    `RecordTenantScope.rejectForeignTenantId`) → `tenantId` stamp (create) or `If-Match`
+    (top-level update/delete only) → `QueryEngine` write
     (hooks, validation, record-changed event) → same-pod cache eviction → response. Per-route
     differences are fields on its `WriteTarget` record, not branches.
     **Record-changed events follow the transaction:** `DefaultQueryEngine.publishRecordEvent`
@@ -1613,7 +1622,9 @@ provisioned before the narrowing).
     the parent update is not seen.
   - `JsonApiIncludeResolver` — `?include=` (see "Read-side include resolution" below);
     `RecordTenantScope` — the router's `X-Tenant-ID` second layer for tenant-scoped system
-    collections (`injectTenantFilter`, `visibleToTenant`, shared-row narrowing, `injectTenantId`)
+    collections (`injectTenantFilter`, `visibleToTenant`, shared-row narrowing, `injectTenantId`),
+    the every-collection refusal of a foreign body `tenantId` (`foreignTenantId` /
+    `rejectForeignTenantId`, shared with `AtomicOperationExecutor`)
     and the sub-resource check `findChild` (exists + `visibleToTenant` + the child's reference to
     the parent equals the URL's `{parentId}` — the predicate `listChildren` filters on; any miss
     is a 404 on get, PUT/PATCH and delete);
@@ -1677,6 +1688,23 @@ provisioned before the narrowing).
   SYSTEM_TENANT_ID`) — there every SYSTEM_TENANT_ID row is the caller's own, and the e2e /
   test-harness "default" tenant is exactly that tenant (its custom collections' fields vanished
   from `GET /api/fields`, timing out every `waitForField`).
+- **The tenant of a write is the bound one, on every collection.** `DefaultQueryEngine.create`/
+  `update` refuse a payload whose `tenantId` names a tenant other than the bound `TenantContext`
+  tenant — `ValidationException` → 400, constraint `systemMaintained`, pointer
+  `/data/attributes/tenantId` (`FieldError.foreignTenantId`) — before any hook, validation,
+  encryption or storage call sees it; a matching value, an absent one and an unbound platform
+  path pass. The tenant handed to before/after-save hooks (`BeforeSaveHookRegistry.getHooks(tenantId,
+  …)` selects that tenant's module-installed hooks, external-module hooks included, which receive
+  the payload) and named by the record-changed event comes from `extractTenantId`: the bound
+  tenant whenever one is bound — never the payload's, the stored row's (an update's
+  `previousData`, a delete's pre-fetched row) or a hook result's — and the data's `tenantId`
+  only on a path that binds none (Flyway, bootstrap), then `"default"`. The router
+  (`RecordWritePipeline`, against `X-Tenant-ID`) and `AtomicOperationExecutor` (add and update,
+  as `422 OPERATION_FAILED`) refuse the same value earlier. On a user collection `tenantId` is
+  no field at all (schema-per-tenant, no column; storage would drop it), but a foreign one is
+  refused rather than dropped so every collection follows one rule and a client bug is never
+  silent. Internal writers that act for another tenant bind it with `TenantContext.callWithTenant`
+  first (sandbox clone, promotion, module provisioning already do).
 - **Services**: `kelta-worker/src/main/java/io/kelta/service/` — Business logic (CollectionLifecycleManager, CerbosAuthorizationService, SearchIndexService, S3StorageService)
 - **Listeners**: `kelta-worker/src/main/java/io/kelta/listener/` — NATS subscribers (CollectionSchemaListener, SearchIndexListener, CerbosCacheInvalidationListener, SvixWebhookPublisher)
 - **Data**: `kelta-worker/src/main/java/io/kelta/repository/` — JdbcTemplate + JPA repositories

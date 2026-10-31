@@ -125,6 +125,20 @@ public record FieldError(
     }
     
     /**
+     * Creates the error for a write whose {@code tenantId} names a tenant other than the
+     * request's. The platform sets a record's tenant from the request, so a caller-supplied
+     * value that differs is refused rather than used. Reuses the {@code systemMaintained}
+     * constraint: {@code tenantId} is a value only the platform sets.
+     *
+     * @param collectionName the collection being written
+     * @return a FieldError for the {@code tenantId} attribute
+     */
+    public static FieldError foreignTenantId(String collectionName) {
+        return new FieldError("tenantId", "tenantId does not match the request's tenant for collection '"
+                + collectionName + "'; the platform sets it from the request", "systemMaintained");
+    }
+
+    /**
      * Creates a unique constraint violation error.
      * 
      * @param fieldName the field name

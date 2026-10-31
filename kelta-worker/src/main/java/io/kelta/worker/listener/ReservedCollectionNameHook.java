@@ -16,7 +16,8 @@ import java.util.Objects;
  * <p>The gateway matches those routes before collection routes, so a collection with such a name
  * would be reached through the static route and authorized by that route's rule rather than by
  * the collection's own permissions. System collections are declared in code and seeded directly,
- * so they never pass through this hook; a {@code systemCollection} row is left alone regardless.
+ * so they never pass through this hook on create; on update only the stored row's
+ * {@code systemCollection} exempts it — a body flag never does.
  *
  * <p>Applies on create and on an update that changes the name.
  */
@@ -40,9 +41,14 @@ public class ReservedCollectionNameHook implements BeforeSaveHook {
         return 2;
     }
 
+    /**
+     * Every create is checked: a system collection is never created through a record write, so
+     * the body's {@code systemCollection} is not a reason to skip (the schema module's
+     * {@code CollectionLifecycleHook} refuses {@code systemCollection: true} before this runs).
+     */
     @Override
     public BeforeSaveResult beforeCreate(Map<String, Object> record, String tenantId) {
-        return validate(record.get("name"), record.get("systemCollection"));
+        return validate(record.get("name"), false);
     }
 
     @Override
@@ -55,8 +61,9 @@ public class ReservedCollectionNameHook implements BeforeSaveHook {
         if (previousName != null && Objects.equals(previousName.toString().trim(), trimmed(record.get("name")))) {
             return BeforeSaveResult.ok();
         }
-        Object system = record.containsKey("systemCollection") ? record.get("systemCollection")
-                : previous != null ? previous.get("systemCollection") : null;
+        // Only the stored row says whether this is a system collection; the patch's flag is the
+        // caller's claim (and a change of it is refused by CollectionLifecycleHook).
+        Object system = previous != null ? previous.get("systemCollection") : null;
         return validate(record.get("name"), system);
     }
 

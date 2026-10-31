@@ -173,5 +173,75 @@ class CollectionLifecycleHookTest {
             assertTrue(hook.beforeUpdate("c1", new HashMap<>(Map.of("displayName", "Jobs")), stored, "t1")
                     .isSuccess());
         }
+
+        @Test
+        @DisplayName("Should refuse turning a tenant collection into a system collection")
+        void shouldRefusePromotionToSystemCollection() {
+            BeforeSaveResult result = hook.beforeUpdate("c1",
+                    new HashMap<>(Map.of("systemCollection", true)),
+                    Map.of("name", "tasks", "systemCollection", false), "t1");
+            assertFalse(result.isSuccess());
+            assertEquals("systemCollection", result.getErrors().get(0).field());
+            assertEquals("systemMaintained", result.getErrors().get(0).code());
+        }
+
+        @Test
+        @DisplayName("Should refuse clearing the flag on a system collection")
+        void shouldRefuseDemotionOfSystemCollection() {
+            BeforeSaveResult result = hook.beforeUpdate("c1",
+                    new HashMap<>(Map.of("systemCollection", false)),
+                    Map.of("name", "users", "systemCollection", true), "t1");
+            assertFalse(result.isSuccess());
+            assertEquals("systemCollection", result.getErrors().get(0).field());
+        }
+
+        @Test
+        @DisplayName("Should allow the stored systemCollection value to be sent back")
+        void shouldAllowUnchangedSystemCollectionFlag() {
+            assertTrue(hook.beforeUpdate("c1",
+                    new HashMap<>(Map.of("systemCollection", false, "displayName", "Jobs")),
+                    Map.of("name", "tasks", "systemCollection", false), "t1").isSuccess());
+            assertTrue(hook.beforeUpdate("c1",
+                    new HashMap<>(Map.of("systemCollection", true, "displayName", "Users")),
+                    Map.of("name", "users", "systemCollection", true), "t1").isSuccess());
+        }
+
+        @Test
+        @DisplayName("Should treat a stored row without the flag as a tenant collection")
+        void shouldTreatMissingStoredFlagAsFalse() {
+            assertTrue(hook.beforeUpdate("c1", new HashMap<>(Map.of("systemCollection", false)), stored, "t1")
+                    .isSuccess());
+            assertFalse(hook.beforeUpdate("c1", new HashMap<>(Map.of("systemCollection", "true")), stored, "t1")
+                    .isSuccess());
+        }
+    }
+
+    @Nested
+    @DisplayName("systemCollection on create")
+    class SystemCollectionOnCreate {
+
+        @Test
+        @DisplayName("Should refuse systemCollection: true")
+        void shouldRefuseSystemCollectionTrue() {
+            BeforeSaveResult result = hook.beforeCreate(
+                    new HashMap<>(Map.of("name", "tasks", "systemCollection", true)), "t1");
+            assertFalse(result.isSuccess());
+            assertEquals("systemCollection", result.getErrors().get(0).field());
+            assertEquals("systemMaintained", result.getErrors().get(0).code());
+        }
+
+        @Test
+        @DisplayName("Should refuse the string form of true")
+        void shouldRefuseSystemCollectionTrueString() {
+            assertFalse(hook.beforeCreate(
+                    new HashMap<>(Map.of("name", "tasks", "systemCollection", " TRUE ")), "t1").isSuccess());
+        }
+
+        @Test
+        @DisplayName("Should allow an explicit systemCollection: false")
+        void shouldAllowSystemCollectionFalse() {
+            assertTrue(hook.beforeCreate(
+                    new HashMap<>(Map.of("name", "tasks", "systemCollection", false)), "t1").isSuccess());
+        }
     }
 }

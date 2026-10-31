@@ -28,6 +28,16 @@ its own predicate rather than trusting the `getById` check before it (TOCTOU). N
 No caller was found that binds one tenant and legitimately writes another's row by id through the
 adapter (cross-tenant copiers — provisioning, promotion — use raw JDBC under each tenant in turn).
 
+The **tenant of a write** is the bound one, on every collection: `DefaultQueryEngine.create`/`update`
+refuse a payload `tenantId` that differs from the bound `TenantContext` tenant (`400 systemMaintained`
+on `tenantId`, `FieldError.foreignTenantId`) before any hook, validation or storage call, and
+`extractTenantId` — the tenant passed to before/after-save hooks (so to tenant-installed module hooks)
+and named by the record-changed event — prefers the bound tenant over the payload, the stored row
+and a hook result. Only an unbound platform path takes it from the data. `RecordWritePipeline`
+(router create/PUT/PATCH, top-level and sub-resource) and `AtomicOperationExecutor` (add and update)
+refuse the same value earlier. A writer that binds tenant A and builds a payload for tenant B now
+fails instead of running B's hooks — bind B with `callWithTenant` (the cross-tenant loops already do).
+
 **Still open:**
 - **Eleven tenant-data child collections are `.tenantScoped(false)`** (`package-items`,
   `record-type-picklists`, `script-triggers`, `approval-steps`, `approval-step-instances`,
@@ -233,7 +243,8 @@ mailbox to a high-volume public address.
   (`getCollectionIdByName`) — keep it UUID-keyed; any denial fails the whole batch; missing
   identity or Cerbos error denies. Each add/update op then gets the field write rules
   (`FieldWriteGuard`, shared with `CerbosFieldWriteSecurityAdvice`). Like the router, it stamps
-  `createdBy`/`updatedBy` (KLT-500), `tenantId` on tenant-scoped system collections (PLT-710) and
+  `createdBy`/`updatedBy` (KLT-500), `tenantId` on tenant-scoped system collections (PLT-710; a
+  `tenantId` naming another tenant fails that add or update, on any collection) and
   `createdGeo`/`updatedGeo` on `captureGeo` collections from the request's `X-Geo-*` headers
   (KLT-740; the rule is `GeoStamping`, shared with `RecordWritePipeline`). `PackageImportService`
   seeds through the two-argument `execute`, so seeded rows get null geo stamps.
@@ -992,7 +1003,7 @@ sub-resource variant; it is now ~860 lines of HTTP surface plus package-private 
 (`RecordWritePipeline`, `JsonApiIncludeResolver`, `RecordTenantScope`, `CollectionResolver`,
 `RecordETag`), the pure `router/jsonapi` serializers and the `SubResourceAuthorizer` SPI the
 sub-resource routes consult — see `architecture.md` → Worker Layers.
-- **Change behaviour only with a golden diff.** `DynamicCollectionRouterGoldenTest` pins 114 cases
+- **Change behaviour only with a golden diff.** `DynamicCollectionRouterGoldenTest` pins 120 cases
   (status, headers, body and the ordered storage/cache/user-resolver call log), and
   `DynamicCollectionRouterRequestMappingTest` pins every mapping attribute and public signature
   (worker controllers call the handlers directly; the advices depend on the return types). A
@@ -1395,6 +1406,7 @@ its own change with a full compose run.
 One line each; full write-ups are in git history.
 
 **Security**
+- 2026-10-31 (write-path-tenant-scope) — the record write path kept a body `tenantId` that differed from the request's tenant (`RecordTenantScope.injectTenantId` is `putIfAbsent` and a no-op on user collections), and `DefaultQueryEngine.extractTenantId` preferred that value over the bound `TenantContext`, so before/after-save hooks (tenant-installed module hooks included) and the record-changed event could be selected by the payload; only RLS stopped the row. The write path now refuses a body `tenantId` that differs from the request's tenant (router create/PUT/PATCH incl. sub-resources, `/api/operations` add and update, and the engine itself; `400 systemMaintained` on `tenantId`), and hooks always run for the bound tenant. Separately, `collections.systemCollection` was writable by API callers and exempted a create from `ReservedCollectionNameHook`; `CollectionLifecycleHook` now refuses `systemCollection: true` on create and any change of it on update (`400 systemMaintained`), and the reserved-name check trusts only the stored row's flag. `DefaultQueryEngineWriteTenantTest`, `DynamicCollectionRouterSystemCollectionTest`, `AtomicOperationExecutorTest`, router goldens `*_foreign_tenant`, `CollectionLifecycleHookTest`, `ReservedCollectionNameHookTest`, harness `WriteTenantScopeScenarioTest`.
 - 2026-10-31 (auth-config-hardening) — direct login now refuses accounts that require MFA: `POST /auth/direct-login` answers `401 mfa_required` for a verified TOTP enrollment or a tenant policy that requires MFA (`LoginMfaPolicy`, shared with the browser success handler); failed attempts and lockout were already shared with the browser form (global `AuthenticationManager` events). `DirectLoginControllerTest`, `LoginMfaPolicyTest`, `FailedSignInLockoutIntegrationTest`.
 - 2026-10-31 (auth-config-hardening) — AI config writes now require `MANAGE_TENANTS` and accept only known keys: the gateway gates writes on `/api/ai/config` (decoded path, `MatchedPath`), `/api/ai/**` is an authoritative static path and `ai` a reserved collection name, and `AiConfigController` accepts `model`, `maxTokens`, `temperature`, `aiTokensPerMonth`, `aiEnabled` with type and range checks (`400 VALIDATION_FAILED` otherwise, nothing written). The module signing-key rule uses the decoded path too. `RouteAuthorizationFilterTest`, `MatchedPathTest`, `RouteRegistryTest`, `AiConfigControllerTest`.
 - 2026-10-31 (auth-config-hardening) — the Cerbos admin password has no built-in default: `KELTA_WORKER_CERBOS_ADMIN_PASSWORD` must be set (deploy ordering above, Auth and Cerbos); blank skips every policy push with an ERROR instead. `CerbosPolicySyncAdminPasswordTest`, `CerbosPolicySeederTest`.

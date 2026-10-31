@@ -676,4 +676,136 @@ class DynamicCollectionRouterSystemCollectionTest {
                     "tenantId should NOT be injected for non-system collection");
         }
     }
+
+    // ==================== Foreign tenantId refusal ====================
+
+    @Nested
+    @DisplayName("A body tenantId naming another tenant")
+    class ForeignTenantIdTests {
+
+        private static final String TENANT = "11111111-1111-1111-1111-111111111111";
+        private static final String OTHER_TENANT = "22222222-2222-2222-2222-222222222222";
+
+        private MockMvc advisedMvc;
+
+        @BeforeEach
+        void setUpAdvice() {
+            advisedMvc = MockMvcBuilders.standaloneSetup(router)
+                    .setControllerAdvice(new GlobalExceptionHandler())
+                    .build();
+        }
+
+        private void assertRefused(MvcResult result) throws Exception {
+            Map<?, ?> body = objectMapper.readValue(result.getResponse().getContentAsString(), Map.class);
+            List<?> errors = (List<?>) body.get("errors");
+            assertEquals(1, errors.size());
+            Map<?, ?> error = (Map<?, ?>) errors.get(0);
+            assertEquals("systemMaintained", error.get("code"));
+            assertEquals(Map.of("pointer", "/data/attributes/tenantId"), error.get("source"));
+        }
+
+        @Test
+        @DisplayName("is refused on create for a tenant-scoped system collection, nothing written")
+        void create_refused_forTenantScopedSystemCollection() throws Exception {
+            CollectionDefinition def = buildTenantScopedSystemCollection();
+            when(registry.get("workflow-rules")).thenReturn(def);
+
+            MvcResult result = advisedMvc.perform(post("/api/workflow-rules")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(jsonApiBody(Map.of("name", "Rule", "tenantId", OTHER_TENANT)))
+                            .header("X-Tenant-ID", TENANT))
+                    .andExpect(status().isBadRequest())
+                    .andReturn();
+
+            assertRefused(result);
+            verify(queryEngine, never()).create(any(), any());
+        }
+
+        @Test
+        @DisplayName("is refused on update for a tenant-scoped system collection, nothing written")
+        void update_refused_forTenantScopedSystemCollection() throws Exception {
+            CollectionDefinition def = buildTenantScopedSystemCollection();
+            when(registry.get("workflow-rules")).thenReturn(def);
+
+            MvcResult result = advisedMvc.perform(patch("/api/workflow-rules/rule-1")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(jsonApiBody(Map.of("name", "Rule", "tenantId", OTHER_TENANT)))
+                            .header("X-Tenant-ID", TENANT))
+                    .andExpect(status().isBadRequest())
+                    .andReturn();
+
+            assertRefused(result);
+            verify(queryEngine, never()).update(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("is refused on create for a user collection, where tenantId is no field")
+        void create_refused_forUserCollection() throws Exception {
+            CollectionDefinition def = buildNonSystemCollection();
+            when(registry.get("products")).thenReturn(def);
+
+            MvcResult result = advisedMvc.perform(post("/api/products")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(jsonApiBody(Map.of("name", "Widget", "tenantId", OTHER_TENANT)))
+                            .header("X-Tenant-ID", TENANT))
+                    .andExpect(status().isBadRequest())
+                    .andReturn();
+
+            assertRefused(result);
+            verify(queryEngine, never()).create(any(), any());
+        }
+
+        @Test
+        @DisplayName("is refused on PUT for a user collection")
+        void update_refused_forUserCollection() throws Exception {
+            CollectionDefinition def = buildNonSystemCollection();
+            when(registry.get("products")).thenReturn(def);
+
+            MvcResult result = advisedMvc.perform(put("/api/products/prod-1")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(jsonApiBody(Map.of("name", "Widget", "tenantId", OTHER_TENANT)))
+                            .header("X-Tenant-ID", TENANT))
+                    .andExpect(status().isBadRequest())
+                    .andReturn();
+
+            assertRefused(result);
+            verify(queryEngine, never()).update(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a tenantId matching the request's tenant is kept on create")
+        void create_matchingTenantId_isKept() throws Exception {
+            CollectionDefinition def = buildTenantScopedSystemCollection();
+            when(registry.get("workflow-rules")).thenReturn(def);
+            when(queryEngine.create(eq(def), any())).thenReturn(new HashMap<>(Map.of(
+                    "id", "rule-1", "name", "Rule", "tenantId", TENANT)));
+
+            advisedMvc.perform(post("/api/workflow-rules")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(jsonApiBody(Map.of("name", "Rule", "tenantId", TENANT)))
+                            .header("X-Tenant-ID", TENANT))
+                    .andExpect(status().isCreated());
+
+            ArgumentCaptor<Map<String, Object>> dataCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).create(eq(def), dataCaptor.capture());
+            assertEquals(TENANT, dataCaptor.getValue().get("tenantId"));
+        }
+
+        @Test
+        @DisplayName("a tenantId matching the request's tenant passes on update")
+        void update_matchingTenantId_passes() throws Exception {
+            CollectionDefinition def = buildNonSystemCollection();
+            when(registry.get("products")).thenReturn(def);
+            when(queryEngine.update(eq(def), eq("prod-1"), any())).thenReturn(Optional.of(new HashMap<>(Map.of(
+                    "id", "prod-1", "name", "Widget"))));
+
+            advisedMvc.perform(patch("/api/products/prod-1")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(jsonApiBody(Map.of("name", "Widget", "tenantId", TENANT)))
+                            .header("X-Tenant-ID", TENANT))
+                    .andExpect(status().isOk());
+
+            verify(queryEngine).update(eq(def), eq("prod-1"), any());
+        }
+    }
 }

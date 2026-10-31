@@ -23,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -370,6 +371,50 @@ class AtomicOperationExecutorTest {
                     .satisfies(ex -> assertThat(((AtomicOperationExecutor.AtomicOperationException) ex)
                             .getOperationIndex()).isEqualTo(1));
             verify(queryEngine, times(1)).create(eq(def), anyMap());
+        }
+
+        private static AtomicOperation update(String type, String id, Map<String, Object> attributes) {
+            return new AtomicOperation("update", new AtomicOperation.ResourceRef(type, id, null),
+                    new AtomicOperation.ResourceData(type, null, null, attributes, null));
+        }
+
+        @Test
+        void addOnUserCollectionWithAnotherTenantsIdFails() {
+            CollectionDefinition def = register("projects", false, true);
+
+            assertThatThrownBy(() -> TenantContext.runWithTenant(TENANT, () -> executor.execute(List.of(
+                    add("projects", Map.of("name", "P", "tenantId", "22222222-2222-2222-2222-222222222222"))))))
+                    .isInstanceOf(AtomicOperationExecutor.AtomicOperationException.class)
+                    .hasMessageContaining("does not match the request's tenant");
+            verify(queryEngine, never()).create(eq(def), anyMap());
+        }
+
+        @Test
+        void updateWithAnotherTenantsIdFailsThatOperation() {
+            CollectionDefinition system = register("list-views", true, true);
+            CollectionDefinition user = register("projects", false, true);
+            when(queryEngine.update(eq(system), eq("lv-1"), anyMap())).thenReturn(Optional.of(Map.of("id", "lv-1")));
+            var ops = List.of(
+                    update("list-views", "lv-1", Map.of("name", "Mine")),
+                    update("projects", "p-1", Map.of("name", "P", "tenantId", "22222222-2222-2222-2222-222222222222")));
+
+            assertThatThrownBy(() -> TenantContext.runWithTenant(TENANT, () -> executor.execute(ops)))
+                    .isInstanceOf(AtomicOperationExecutor.AtomicOperationException.class)
+                    .hasMessageContaining("does not match the request's tenant")
+                    .satisfies(ex -> assertThat(((AtomicOperationExecutor.AtomicOperationException) ex)
+                            .getOperationIndex()).isEqualTo(1));
+            verify(queryEngine, never()).update(eq(user), anyString(), anyMap());
+        }
+
+        @Test
+        void updateWithMatchingTenantIdPasses() {
+            CollectionDefinition def = register("list-views", true, true);
+            when(queryEngine.update(eq(def), eq("lv-1"), anyMap())).thenReturn(Optional.of(Map.of("id", "lv-1")));
+
+            TenantContext.runWithTenant(TENANT, () -> executor.execute(
+                    List.of(update("list-views", "lv-1", Map.of("name", "Mine", "tenantId", TENANT)))));
+
+            verify(queryEngine).update(eq(def), eq("lv-1"), anyMap());
         }
 
         @Test

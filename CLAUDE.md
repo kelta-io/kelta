@@ -70,6 +70,10 @@ Then run the **Definition of Done** check (in Task Workflow) before declaring do
    `TenantContext.runWithTenant(...)` / `callWithTenant(...)` (ScopedValue, virtual-thread
    safe). Postgres RLS enforces it via the transaction-scoped `app.current_tenant_id`
    (PgBouncer-safe). Never bypass with raw queries that drop the tenant filter.
+   **The tenant of a write is the bound one:** the write path refuses a payload `tenantId` that
+   differs from the bound tenant (`400 systemMaintained`), and hooks and record events always run
+   for the bound tenant — so a writer acting for tenant B binds B; it never just puts B's id in
+   the data (`architecture.md` → The tenant of a write).
    **Cross-tenant work: loop `callWithTenant(<uuid>, …)` per tenant** — that is what
    `SandboxProvisioningService` / `MetadataPromotionService` do. There is no
    "run as platform" helper: the RLS bypass is keyed on an **empty** setting

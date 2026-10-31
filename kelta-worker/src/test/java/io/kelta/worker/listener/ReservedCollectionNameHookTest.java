@@ -50,12 +50,27 @@ class ReservedCollectionNameHookTest {
     }
 
     @Test
-    @DisplayName("system collection rows are left alone")
-    void systemCollectionIsIgnored() {
-        assertThat(hook.beforeCreate(record("name", "users", "systemCollection", true), "t1").isSuccess())
-                .isTrue();
+    @DisplayName("a stored system collection row is left alone on update")
+    void storedSystemCollectionIsIgnored() {
         assertThat(hook.beforeUpdate("c1", record("name", "reports"),
                 record("name", "old", "systemCollection", true), "t1").isSuccess()).isTrue();
+    }
+
+    @Test
+    @DisplayName("a body systemCollection flag does not exempt a create from the check")
+    void bodySystemCollectionFlagDoesNotExemptCreate() {
+        BeforeSaveResult result = hook.beforeCreate(record("name", "users", "systemCollection", true), "t1");
+
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.getErrors().getFirst().code())
+                .isEqualTo(ReservedCollectionNameHook.RESERVED_COLLECTION_NAME);
+    }
+
+    @Test
+    @DisplayName("a body systemCollection flag does not exempt a rename of a tenant collection")
+    void bodySystemCollectionFlagDoesNotExemptUpdate() {
+        assertThat(hook.beforeUpdate("c1", record("name", "reports", "systemCollection", true),
+                record("name", "orders", "systemCollection", false), "t1").isSuccess()).isFalse();
     }
 
     @Test
