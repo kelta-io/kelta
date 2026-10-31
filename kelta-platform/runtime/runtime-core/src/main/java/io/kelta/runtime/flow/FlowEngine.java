@@ -217,11 +217,45 @@ public class FlowEngine {
      * execution continues from its {@code Next} transition (or completes if the
      * Wait was terminal). A parked Task runs again with the outcome
      * {@link AwaitedTaskOutcomes#settle} gives for its resume key. The
-     * pending-resume row is deleted before the state loop restarts.
+     * pending-resume row is consumed before the state loop restarts.
+     *
+     * <p>Without a claim: consumes whatever pending row the execution has. For callers that
+     * hold no claim; a claimer uses {@link #resumeExecution(String, String)}.
      *
      * @param executionId the execution ID to resume
      */
     public void resumeExecution(String executionId) {
+        resumeExecution(executionId, null);
+    }
+
+    /**
+     * Resumes a waiting execution whose pending-resume row the caller claimed as
+     * {@code claimedBy}. The resume runs only if it can still consume that row: when the claim
+     * was taken over (the poller reclaims a claim left unconsumed past its lease) or the row is
+     * gone, it is a no-op, so a slow resume and the reclaim of it never both run the step.
+     * When the resume fails before it is queued, the claim is released, so the poller retries it.
+     *
+     * @param executionId the execution ID to resume
+     * @param claimedBy   the claim held on its pending-resume row, or null for none
+     */
+    public void resumeExecution(String executionId, String claimedBy) {
+        try {
+            submitResume(executionId, claimedBy);
+        } catch (RuntimeException e) {
+            if (claimedBy != null) {
+                try {
+                    flowStore.releasePendingResume(executionId, claimedBy);
+                } catch (RuntimeException releaseFailure) {
+                    // The claim's lease runs out instead, and the poller takes the row over then.
+                    log.warn("Could not release the resume claim of execution {}: {}", executionId,
+                        releaseFailure.getMessage());
+                }
+            }
+            throw e;
+        }
+    }
+
+    private void submitResume(String executionId, String claimedBy) {
         Optional<FlowExecutionData> executionOpt = flowStore.loadExecution(executionId);
         if (executionOpt.isEmpty()) {
             log.warn("Cannot resume execution {} — not found", executionId);
@@ -252,6 +286,18 @@ public class FlowEngine {
             long start = System.currentTimeMillis();
             String flowId = execution.flowId();
             try {
+                // Consume the row first: only the resume that holds it runs. A claimed resume
+                // that lost it (taken over after its lease, or already consumed) does nothing.
+                Optional<FlowStore.ConsumedResume> consumed =
+                    flowStore.consumePendingResume(resumeTenantId, executionId, claimedBy);
+                if (consumed.isEmpty() && claimedBy != null) {
+                    log.info("Execution {}: resume claim {} no longer holds its row, skipping",
+                        executionId, claimedBy);
+                    return;
+                }
+                // A parked Task resumes by the key its pending row carried.
+                String resumeKey = consumed.map(FlowStore.ConsumedResume::resumeEvent).orElse(null);
+
                 // Re-load under the tenant scope to get the current node + state data
                 FlowExecutionData fresh = flowStore.loadExecution(executionId).orElseThrow();
                 if (!FlowExecutionData.STATUS_WAITING.equals(fresh.status())) {
@@ -280,11 +326,6 @@ public class FlowEngine {
                     return;
                 }
 
-                // A parked Task resumes by the key its pending row carries; read it before the row goes.
-                String resumeKey = waitState instanceof StateDefinition.TaskState
-                    ? flowStore.findPendingResumeEvent(executionId).orElse(null)
-                    : null;
-                flowStore.deletePendingResume(executionId);
                 log.info("Resuming execution {} from state '{}'", executionId, fresh.currentNodeId());
 
                 // The Wait is satisfied — advance to its transition.
@@ -341,8 +382,9 @@ public class FlowEngine {
      *         parked on the key yet (the park will find the outcome) or another claimer won
      */
     public boolean resumeAwaitedTask(String tenantId, String resumeKey) {
-        Optional<String> executionId = flowStore.claimPendingResumeByEvent(tenantId, resumeKey, instanceId);
-        executionId.ifPresent(this::resumeExecution);
+        String claim = instanceId + ":" + UUID.randomUUID();
+        Optional<String> executionId = flowStore.claimPendingResumeByEvent(tenantId, resumeKey, claim);
+        executionId.ifPresent(id -> resumeExecution(id, claim));
         return executionId.isPresent();
     }
 
@@ -463,6 +505,15 @@ public class FlowEngine {
     public void cancelExecution(String executionId) {
         flowStore.cancelExecution(executionId);
         log.info("Cancelled execution {}", executionId);
+        // Close the execution's open awaited tasks, so their holders can no longer complete or
+        // heartbeat them. Best effort: a task left open still expires at its own time.
+        try {
+            flowStore.loadExecution(executionId)
+                .ifPresent(execution -> awaitedOutcomes.abandon(execution.tenantId(), executionId));
+        } catch (RuntimeException e) {
+            log.warn("Could not close the awaited tasks of cancelled execution {}: {}", executionId,
+                e.getMessage());
+        }
     }
 
     /**

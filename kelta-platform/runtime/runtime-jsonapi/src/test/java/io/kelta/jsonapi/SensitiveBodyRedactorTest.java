@@ -16,6 +16,7 @@ class SensitiveBodyRedactorTest {
 
     // Token-shaped fixtures built at runtime so the source never holds a literal token.
     private static final String PAT = "klt_" + "AbCdEf0123456789xyz";
+    private static final String TASK_TOKEN = "kmt_" + "Qw3rTy-_0123456789abcdefABCDEF0123456789xyz";
     private static final String JWT = "eyJ" + "hbGciOiJIUzI1NiJ9" + ".eyJ" + "zdWIiOiJ1c2VyIn0" + ".c2lnbmF0dXJlLXZhbHVl";
 
     private static String redact(String json) {
@@ -77,6 +78,18 @@ class SensitiveBodyRedactorTest {
         assertTrue(out.contains("\"note\":\"use Bearer [REDACTED] here\""), out);
         assertTrue(out.contains("\"value\":\"[REDACTED]\""), out);
         assertTrue(out.contains("\"plain\":\"eyJ is fine alone\""), out);
+    }
+
+    @Test
+    @DisplayName("an external module's task completion: its token is redacted by key and by shape, its output kept")
+    void moduleTaskToken() {
+        String out = redact("{\"token\":\"" + TASK_TOKEN + "\",\"success\":true,\"output\":{\"rows\":42,"
+                + "\"note\":\"retry with " + TASK_TOKEN + "\"}}");
+
+        assertNotContains(out, TASK_TOKEN);
+        assertTrue(out.contains("\"token\":\"[REDACTED]\""), out);
+        assertTrue(out.contains("\"note\":\"retry with [REDACTED]\""), out);
+        assertTrue(out.contains("\"rows\":42"), out);
     }
 
     @Test

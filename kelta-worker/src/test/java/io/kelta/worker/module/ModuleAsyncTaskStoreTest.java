@@ -210,4 +210,12 @@ class ModuleAsyncTaskStoreTest {
         store.discard(TENANT, new ModuleAsyncTaskStore.Issued(ID, TOKEN, Instant.now()));
         verify(jdbc).update("DELETE FROM module_async_task WHERE id = ? AND tenant_id = ?", ID, TENANT);
     }
+
+    @Test
+    @DisplayName("abandon expires the cancelled execution's pending tasks within the tenant")
+    void abandon() {
+        store.abandon(TENANT, "exec-1");
+        verify(jdbc).update("UPDATE module_async_task SET status = 'EXPIRED', completed_at = now() "
+                + "WHERE execution_id = ? AND tenant_id = ? AND status = 'PENDING'", "exec-1", TENANT);
+    }
 }

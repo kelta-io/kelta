@@ -312,7 +312,7 @@ pub struct Health {
     pub details: Option<Map<String, Value>>,
 }
 
-/// `TaskHeartbeat`: what `POST /api/modules/self/tasks/{token}/heartbeat` returns.
+/// `TaskHeartbeat`: what `POST /api/modules/self/tasks/heartbeat` returns.
 ///
 /// `Debug` never prints the access token.
 #[derive(Clone, PartialEq, Eq, Deserialize)]

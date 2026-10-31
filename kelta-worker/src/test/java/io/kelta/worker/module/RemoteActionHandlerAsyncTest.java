@@ -86,16 +86,19 @@ class RemoteActionHandlerAsyncTest {
     }
 
     @Test
-    @DisplayName("a declared long-running action gets a task, sent as task.token and task.expiresAt")
+    @DisplayName("a declared long-running action gets a task, sent as task.token and task.expiresAt, keyed per attempt")
     void sendsTheTask() throws Exception {
         when(http.invoke(any(), any(), any(), any())).thenReturn(json(202, ""));
 
         handler.execute(context(true));
 
         verify(tasks).issue(any(), eq("ping"), any(), eq(3600));
-        JsonNode task = mapper.readTree(sent().body()).get("task");
+        ModuleHttpClient.Call call = sent();
+        JsonNode task = mapper.readTree(call.body()).get("task");
         assertThat(task.get("token").stringValue()).isEqualTo(TASK.token());
         assertThat(task.get("expiresAt").stringValue()).isEqualTo(EXPIRES.toString());
+        // Each attempt brings a new task: a replayed answer to an earlier attempt must not match.
+        assertThat(call.headers()).containsEntry(RemoteActionHandler.IDEMPOTENCY_KEY_HEADER, "exec-1:Ingest:1");
     }
 
     @Test
@@ -163,7 +166,10 @@ class RemoteActionHandlerAsyncTest {
         assertThatThrownBy(() -> handler.execute(context(true)))
                 .isExactlyInstanceOf(ModuleUnavailableException.class);
         verifyNoInteractions(tasks);
-        assertThat(mapper.readTree(sent().body()).has("task")).isFalse();
+        ModuleHttpClient.Call call = sent();
+        assertThat(mapper.readTree(call.body()).has("task")).isFalse();
+        assertThat(call.headers()).as("a synchronous call keeps the key stable across retries")
+                .containsEntry(RemoteActionHandler.IDEMPOTENCY_KEY_HEADER, "exec-1:Ingest");
     }
 
     @Test

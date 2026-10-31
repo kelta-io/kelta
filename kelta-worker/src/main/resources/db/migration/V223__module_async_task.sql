@@ -5,18 +5,26 @@
 -- the worker writes one row here before the call and sends the module a task token. The module
 -- may answer 202; the flow step then parks WAITING (flow_pending_resume, resume_event =
 -- 'module-task:<id>', resume_at = expires_at) until the module completes the task through
--- POST /api/modules/self/tasks/{token}, or the resume poller fails the step at expires_at.
+-- POST /api/modules/self/tasks/complete, or the resume poller fails the step at expires_at.
 --
 -- token_hash is the SHA-256 (hex) of the token; the token itself is never stored. A row is bound
 -- to its tenant, install, execution, step and attempt. status moves once, PENDING to COMPLETED
 -- (outcome recorded) or PENDING to EXPIRED (the step resumed without one), and that one
 -- conditional UPDATE is what makes a token single use. A token the module never needed (it
--- answered synchronously, or the call failed) is deleted.
+-- answered synchronously, or the call failed) is deleted; cancelling the execution expires it.
 --
--- Additive only: a new table, its indexes and its RLS policies. Rows go with their install and
--- with their execution (ON DELETE CASCADE), so flow-log retention removes them too.
+-- flow_pending_resume.claimed_at: when a resume claimed the row. A claim that no resume consumed
+-- within kelta.flow.resume.claim-lease-seconds (its pod died, its queued resume was dropped, or
+-- it failed) is taken over by the resume poller. A row claimed before this column existed has
+-- none and is never taken over, as before.
+--
+-- Additive only: a new table, its indexes and its RLS policies; a nullable column and a partial
+-- index on flow_pending_resume. Rows go with their install and with their execution (ON DELETE
+-- CASCADE), so flow-log retention removes them too.
 -- To reverse:
 --   DROP TABLE IF EXISTS module_async_task;
+--   DROP INDEX IF EXISTS idx_flow_pending_resume_claimed;
+--   ALTER TABLE flow_pending_resume DROP COLUMN IF EXISTS claimed_at;
 
 CREATE TABLE IF NOT EXISTS module_async_task (
     id character varying(36) NOT NULL,
@@ -42,9 +50,10 @@ CREATE TABLE IF NOT EXISTS module_async_task (
         REFERENCES flow_execution (id) ON DELETE CASCADE
 );
 
--- An execution's tasks (the FK cascade from flow_execution, and an operator's look-up).
+-- An execution's tasks: the FK cascade from flow_execution looks them up by execution_id alone,
+-- and so does closing them when the execution is cancelled (with the tenant as a filter).
 CREATE INDEX IF NOT EXISTS idx_module_async_task_execution
-    ON module_async_task (tenant_id, execution_id);
+    ON module_async_task (execution_id);
 
 -- An install's tasks (the FK cascade from tenant_module).
 CREATE INDEX IF NOT EXISTS idx_module_async_task_module
@@ -63,3 +72,9 @@ CREATE POLICY tenant_isolation ON module_async_task
 DROP POLICY IF EXISTS admin_bypass ON module_async_task;
 CREATE POLICY admin_bypass ON module_async_task
     USING ((current_setting('app.current_tenant_id'::text, true) = ''::text));
+
+-- The resume claim lease (FlowResumePollerConfig, JdbcFlowStore.claimPendingResumes).
+ALTER TABLE flow_pending_resume ADD COLUMN IF NOT EXISTS claimed_at timestamp with time zone;
+
+CREATE INDEX IF NOT EXISTS idx_flow_pending_resume_claimed
+    ON flow_pending_resume (claimed_at) WHERE claimed_by IS NOT NULL;

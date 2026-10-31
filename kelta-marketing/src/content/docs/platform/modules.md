@@ -128,7 +128,8 @@ An external module is called only while its install is `ACTIVE` or `DEGRADED`:
 
 - **Flow actions.** A flow Task whose `Resource` is `<moduleId>:<key>` calls
   `POST /kelta/v1/actions/{key}`, with the manifest's `timeoutMs`. The request has
-  `Idempotency-Key: <executionId>:<stepName>`, the same on every retry of one step. A timeout fails the step
+  `Idempotency-Key: <executionId>:<stepName>`, the same on every retry of one step (a call that carries a
+  [task](#long-running-actions) adds `:<attempt>`). A timeout fails the step
   with the error code `ModuleTimeoutException`. Any other failure, or a disabled module, gives
   `ModuleUnavailableException`. A `Catch` can match either code. Work that takes longer than one call is a
   [long-running action](#long-running-actions).
@@ -220,41 +221,49 @@ The install review shows the duration. When a flow step calls the action, the re
 
 1. Answer `202 Accepted` within `timeoutMs` to take the work on. The flow step waits; the run shows as
    waiting. (Answering `200` with a result finishes the step at once, as for any action.)
-2. When the work is done, send the result, the same shape as a synchronous answer, with the module's
-   service-user token:
+2. When the work is done, send the result, the same shape as a synchronous answer plus the task's
+   `token`, with the module's service-user token:
 
    ```http
-   POST /api/modules/self/tasks/{token}
+   POST /api/modules/self/tasks/complete
    Authorization: Bearer <Kelta-Access-Token>
    Content-Type: application/json
 
-   { "success": true, "output": { "rows": 42 } }
+   { "token": "kmt_…", "success": true, "output": { "rows": 42 } }
    ```
 
    The answer is `202`, and the step continues with `output` under its `ResultPath`. A
    `"success": false` result fails the step with `ActionFailed`; its `Retry` and `Catch` apply, and a retry
-   calls the action again with a new task.
+   calls the action again with a new task. Each attempt has its own `Idempotency-Key`
+   (`<executionId>:<stepName>:<attempt>`), so a retry is never answered from a stored `202`.
 3. If no result arrives by `expiresAt`, the step fails with `ModuleTimeoutException` and the token stops
    working. `expiresAt` is `maxDurationSeconds` from the call, at most one day unless the operator sets
-   another limit.
+   another limit. Cancelling the flow run ends the task the same way.
 
 The `Kelta-Access-Token` lasts 15 minutes. While the work runs, renew it:
 
 ```http
-POST /api/modules/self/tasks/{token}/heartbeat
+POST /api/modules/self/tasks/heartbeat
 Authorization: Bearer <Kelta-Access-Token>
+Content-Type: application/json
+
+{ "token": "kmt_…" }
 ```
 
 The answer `{ "accessToken", "accessTokenExpiresAt", "taskExpiresAt" }` holds a token valid for at least
 10 more minutes. A heartbeat does not move `expiresAt`.
 
-- The task token is a secret and works once. Keep it only until the task is complete, and never log it.
+- The task token is a secret and works once. It goes in the request body, never in a URL, because paths
+  are recorded in traces and access logs. Keep it only until the task is complete, and never log it.
 - Only the module that received the task can complete it, with its own service-user token:
   - `403 NOT_MODULE_PRINCIPAL` or `403 MODULE_NOT_ACTIVE`: as for credential reads;
-  - `400 INVALID_TASK_RESULT`: the body is not a valid result (over 1 MiB, or `output` over 1000 keys). Nothing
-    is recorded, so correct it and send it again;
-  - `404 TASK_NOT_FOUND`: the token is unknown, belongs to another module, was already used, or expired. All
-    four get this one answer.
+  - `400 INVALID_TASK_RESULT`: the body is not a valid result (not a JSON object, over 1 MiB, or `output`
+    over 1000 keys). Nothing is recorded, so correct it and send it again;
+  - `404 TASK_NOT_FOUND`: the token is missing, unknown, belongs to another module, was already used, or
+    expired. All of these get this one answer.
+- If the answer to a completion is lost (a timeout or a dropped connection), send it again. A
+  `404 TASK_NOT_FOUND` on that retry can mean the first attempt was recorded, so treat it as possibly
+  delivered and check the flow run, not as a failure to report.
 - Only a top-level flow step can wait. Inside a parallel or map branch, a called sub-flow or a manifest
   schedule, the request has no `task`, and a `202` fails the step with `ModuleUnavailableException`.
 

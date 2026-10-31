@@ -12,7 +12,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -28,23 +27,27 @@ import java.util.Map;
  * §3.6.2):
  *
  * <ul>
- *   <li>{@code POST /api/modules/self/tasks/{token}} with an {@code ActionResponse}
- *       ({@code {success, output, error}}) → {@code 202}: recorded, and the parked flow step
- *       resumes with it.</li>
- *   <li>{@code POST /api/modules/self/tasks/{token}/heartbeat} → {@code 200}
+ *   <li>{@code POST /api/modules/self/tasks/complete} with an {@code ActionResponse} and the task's
+ *       token ({@code {token, success, output, error}}) → {@code 202}: recorded, and the parked
+ *       flow step resumes with it.</li>
+ *   <li>{@code POST /api/modules/self/tasks/heartbeat} with {@code {token}} → {@code 200}
  *       {@code {accessToken, accessTokenExpiresAt, taskExpiresAt}}: the task is still pending,
  *       and here is a service-principal token to keep working with.</li>
  * </ul>
  *
+ * <p>The token rides the body, never the path: request paths are recorded (span attributes and
+ * names, the gateway's audit log on a refusal, ingress access logs), and a body is recorded only
+ * after {@code SensitiveBodyRedactor} replaced its {@code token}.
+ *
  * <p><b>Authorization</b> is {@link ModuleTaskService}'s, exactly as the credential read's
  * ({@link ModuleCredentialController}): the gateway's {@code static-modules} route lets any
  * {@code API_ACCESS} holder through, and only the install's own service principal, through the
- * gateway-stamped {@code X-Connected-App-Id}, gets further. An unknown, foreign, reused or
+ * gateway-stamped {@code X-Connected-App-Id}, gets further. A missing, unknown, foreign, reused or
  * expired token is one answer, {@code 404 TASK_NOT_FOUND}; the token is never echoed or logged.
  * Every answer is {@code no-store}. A {@link SelfScopedController}: nothing here is a record.
  *
- * <p>Mapped as literal paths, never {@code /**}: {@code DynamicCollectionRouter}'s four- and
- * five-segment mappings would otherwise answer them ({@code ModuleTaskRouteMappingTest}). Not
+ * <p>Mapped as literal paths, never {@code /**}: {@code DynamicCollectionRouter}'s four-segment
+ * mappings would otherwise answer them ({@code ModuleTaskRouteMappingTest}). Not
  * conditional on module runtime support, so a module never meets a 404 it cannot explain; without
  * it every caller is refused.
  */
@@ -58,46 +61,45 @@ public class ModuleTaskController implements SelfScopedController {
         this.tasks = tasks;
     }
 
-    @PostMapping("/{token}")
+    @PostMapping("/complete")
     public ResponseEntity<Map<String, Object>> complete(
             @RequestHeader("X-Tenant-ID") String tenantId,
             @RequestHeader(value = ModuleCredentialController.CONNECTED_APP_HEADER, required = false)
             String connectedAppId,
-            @PathVariable String token,
             @RequestBody(required = false) byte[] body) {
         ModuleTaskService service = tasks.getIfAvailable();
         if (service == null) {
             return notModulePrincipal();
         }
         try {
-            service.complete(tenantId, connectedAppId, callerUserId(), token, body);
+            service.complete(tenantId, connectedAppId, callerUserId(), body);
         } catch (RefusedException e) {
             return refusal(e);
         }
         return noStore(HttpStatus.ACCEPTED, null);
     }
 
-    @PostMapping("/{token}/heartbeat")
+    @PostMapping("/heartbeat")
     public ResponseEntity<Map<String, Object>> heartbeat(
             @RequestHeader("X-Tenant-ID") String tenantId,
             @RequestHeader(value = ModuleCredentialController.CONNECTED_APP_HEADER, required = false)
             String connectedAppId,
-            @PathVariable String token) {
+            @RequestBody(required = false) byte[] body) {
         ModuleTaskService service = tasks.getIfAvailable();
         if (service == null) {
             return notModulePrincipal();
         }
         Heartbeat heartbeat;
         try {
-            heartbeat = service.heartbeat(tenantId, connectedAppId, callerUserId(), token);
+            heartbeat = service.heartbeat(tenantId, connectedAppId, callerUserId(), body);
         } catch (RefusedException e) {
             return refusal(e);
         }
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("accessToken", heartbeat.accessToken());
-        body.put("accessTokenExpiresAt", heartbeat.accessTokenExpiresAt().toString());
-        body.put("taskExpiresAt", heartbeat.taskExpiresAt().toString());
-        return noStore(HttpStatus.OK, body);
+        Map<String, Object> answer = new LinkedHashMap<>();
+        answer.put("accessToken", heartbeat.accessToken());
+        answer.put("accessTokenExpiresAt", heartbeat.accessTokenExpiresAt().toString());
+        answer.put("taskExpiresAt", heartbeat.taskExpiresAt().toString());
+        return noStore(HttpStatus.OK, answer);
     }
 
     private static String callerUserId() {

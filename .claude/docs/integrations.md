@@ -362,7 +362,13 @@ binds `runWithTenant(id, slug, …)` — an ID-only scope makes `PhysicalTableSt
 fall back to `public`, where tenant collections don't exist (#1577). A missing tenant
 fails the execution with `Cannot resume: tenant … no longer exists`. Event-based waits resume through
 `claimPendingResumeByEvent(tenantId, event, claimedBy)` when an event source calls it — tenant-scoped,
-because `flow_pending_resume` has no RLS. Waits inside Parallel/Map
+because `flow_pending_resume` has no RLS. **Claim lease:** every claim (poller cycle or event)
+has its own identifier and stamps `claimed_at`; the resume first consumes the row it holds
+(`FlowStore.consumePendingResume`, a `DELETE … WHERE claimed_by = ?`) and is a no-op if it no
+longer holds it; a resume that fails before it is queued releases its claim and makes the row due
+now; and the poller takes over any claim older than `kelta.flow.resume.claim-lease-seconds`
+(`KELTA_FLOW_RESUME_CLAIM_LEASE_SECONDS`, default 300) — its pod died or its queued resume was
+dropped at shutdown. A takeover racing a slow resume runs the step once. Waits inside Parallel/Map
 branch sub-definitions are **not** resumable (their state ids aren't in the top-level
 definition) — the resume fails the execution with a clear error instead of hanging.
 
@@ -379,6 +385,7 @@ Task with the outcome the `AwaitedTaskOutcomes` bean settles for the key (the wo
 call, the attempt count continuing — and then its `Catch`. A key no source knows resumes as
 `States.Timeout` with no retry. The park writes its row, then checks `delivered()`; the completer
 records, then claims: an outcome that arrives before the park still resumes exactly once.
+Cancelling the execution calls `AwaitedTaskOutcomes.abandon`, which expires its open tasks.
 
 ### Manual / MCP / HTTP invocation — the double-wrap rule
 
@@ -841,11 +848,13 @@ What a module receives and must handle:
 - **Long-running actions answer `202`** (part 9h). An action declaring `maxDurationSeconds`
   (1–604800, capped by `KELTA_MODULES_EXTERNAL_ASYNC_ACTION_MAX_DURATION_SECONDS`, default one
   day) gets `task: {token, expiresAt}` in its request when the step can wait. Answer `202` and the
-  flow step parks `WAITING`; send the `ActionResponse` to `POST /api/modules/self/tasks/{token}`
-  with the principal token (`202`) and the step resumes with it. A `200` finishes the step at
-  once. Renew the 15-minute access token while working with
-  `POST /api/modules/self/tasks/{token}/heartbeat`. A task not completed by `expiresAt` fails the
-  step with `ModuleTimeoutException`. Only top-level Task steps wait: in a `Parallel`/`Map` branch,
+  flow step parks `WAITING`; send the `ActionResponse` plus `token` to
+  `POST /api/modules/self/tasks/complete` with the principal token (`202`) and the step resumes with
+  it. The token goes in the body, never the URL. A `200` finishes the step at once. Renew the
+  15-minute access token while working with `POST /api/modules/self/tasks/heartbeat` (`{token}`).
+  A task not completed by `expiresAt` fails the step with `ModuleTimeoutException`; cancelling the
+  execution expires it. The call's `Idempotency-Key` is `<executionId>:<stepName>:<attempt>`, as
+  each attempt brings a new task. A `404` to a retried completion may mean the first one landed. Only top-level Task steps wait: in a `Parallel`/`Map` branch,
   an invoked sub-flow or a manifest schedule there is no `task`, and a `202` is
   `ModuleUnavailableException` (`architecture.md` → External module task completion).
 

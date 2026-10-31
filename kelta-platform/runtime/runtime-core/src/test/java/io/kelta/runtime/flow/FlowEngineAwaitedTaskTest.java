@@ -12,24 +12,28 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * A top-level Task whose handler answers {@link ActionResult#awaiting} parks its execution and
  * resumes with the outcome delivered for it (external modules part 9h): by a delivery claim, by the
  * expiry poller, or at once when the outcome arrived before the step parked. ResultPath, Retry and
- * Catch apply to the delivered outcome as to a synchronous one.
+ * Catch apply to the delivered outcome as to a synchronous one. A claim left unconsumed is taken
+ * over after its lease, and a resume that lost its claim does nothing.
  */
 @DisplayName("FlowEngine — awaited tasks")
 class FlowEngineAwaitedTaskTest {
@@ -40,6 +44,7 @@ class FlowEngineAwaitedTaskTest {
 
     private FlowEngine engine;
     private FlowEngineTest.InMemoryFlowStore flowStore;
+    private ActionHandlerRegistry registry;
     private FakeOutcomes outcomes;
     private final List<ActionContext> calls = new CopyOnWriteArrayList<>();
     /** What the AWAIT handler answers, per call. */
@@ -50,6 +55,12 @@ class FlowEngineAwaitedTaskTest {
         final Map<String, TaskOutcome> delivered = new ConcurrentHashMap<>();
         final Map<String, Integer> issuedAttempt = new ConcurrentHashMap<>();
         final Map<String, String> settled = new ConcurrentHashMap<>();
+        final List<String> abandoned = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void abandon(String tenantId, String executionId) {
+            abandoned.add(tenantId + "/" + executionId);
+        }
 
         @Override
         public boolean delivered(String tenantId, String resumeKey) {
@@ -75,7 +86,7 @@ class FlowEngineAwaitedTaskTest {
     void setUp() {
         flowStore = new FlowEngineTest.InMemoryFlowStore();
         outcomes = new FakeOutcomes();
-        ActionHandlerRegistry registry = new ActionHandlerRegistry();
+        registry = new ActionHandlerRegistry();
         registry.register(new ActionHandler() {
             @Override
             public String getActionTypeKey() {
@@ -101,8 +112,17 @@ class FlowEngineAwaitedTaskTest {
         });
         // Parks every call under a key per attempt, recording the attempt as the worker's store does.
         answer = context -> park(context, Instant.now().plusSeconds(3600));
-        engine = new FlowEngine(flowStore, registry, new ObjectMapper(), 2);
-        engine.setAwaitedTaskOutcomes(outcomes);
+        engine = engine(flowStore, 2);
+    }
+
+    private FlowEngine engine(FlowStore store, int threads) {
+        FlowEngine created = new FlowEngine(store, registry, new ObjectMapper(), threads);
+        created.setAwaitedTaskOutcomes(outcomes);
+        return created;
+    }
+
+    private void resumeAsPoller(List<String> executionIds) {
+        executionIds.forEach(id -> engine.resumeExecution(id, FlowEngineTest.InMemoryFlowStore.POLLER));
     }
 
     @AfterEach
@@ -254,7 +274,7 @@ class FlowEngineAwaitedTaskTest {
 
         List<String> due = flowStore.claimDuePendingResumes(Instant.now().plusSeconds(7200));
         assertEquals(List.of(executionId), due);
-        due.forEach(engine::resumeExecution);
+        resumeAsPoller(due);
 
         FlowExecutionData failed = awaitStatus(executionId, FlowExecutionData.STATUS_FAILED);
         assertEquals(FlowExecutionData.STATUS_FAILED, failed.status());
@@ -272,10 +292,83 @@ class FlowEngineAwaitedTaskTest {
             ,
                         "Catch": [ { "ErrorEquals": ["ModuleTimeoutException"], "ResultPath": "$.error", "Next": "Caught" } ]"""));
 
-        flowStore.claimDuePendingResumes(Instant.now().plusSeconds(7200)).forEach(engine::resumeExecution);
+        resumeAsPoller(flowStore.claimDuePendingResumes(Instant.now().plusSeconds(7200)));
 
         FlowExecutionData done = awaitStatus(executionId, FlowExecutionData.STATUS_COMPLETED);
         assertEquals("ModuleTimeoutException", ((Map<?, ?>) done.stateData().get("error")).get("Error"));
+    }
+
+    @Test
+    @DisplayName("a claim left unconsumed past its lease is taken over; the resume that lost it does nothing")
+    void staleClaimIsTakenOverOnce() throws Exception {
+        String executionId = start(flow(""));
+        outcomes.delivered.put(key(1), TaskOutcome.succeeded(Map.of("upserted", 7), 1));
+        // A pod claims the delivery, then dies (or its queued resume is dropped) before resuming.
+        assertEquals(Optional.of(executionId), flowStore.claimPendingResumeByEvent(TENANT, key(1), "slow"));
+
+        assertEquals(List.of(), flowStore.claimDue(Instant.now(), "poller-2", Duration.ofMinutes(5)),
+            "a claim within its lease is left alone, and the row is not due before its expiry");
+        flowStore.ageClaims(Duration.ofMinutes(6));
+        assertEquals(List.of(executionId), flowStore.claimDue(Instant.now(), "poller-2", Duration.ofMinutes(5)),
+            "past the lease the poller takes the claim over, before the expiry");
+
+        // The old claimer's resume runs late: it no longer holds the row, so it does nothing.
+        FlowEngine late = engine(flowStore, 1);
+        late.resumeExecution(executionId, "slow");
+        late.shutdown();
+        assertEquals(FlowExecutionData.STATUS_WAITING, flowStore.loadExecution(executionId).orElseThrow().status());
+        assertTrue(outcomes.settled.isEmpty(), "the lost claim settled nothing");
+        assertEquals(1, flowStore.getPendingResumes().size());
+
+        engine.resumeExecution(executionId, "poller-2");
+        FlowExecutionData done = awaitStatus(executionId, FlowExecutionData.STATUS_COMPLETED);
+        assertEquals(Map.of("upserted", 7), done.stateData().get("ingest"));
+        assertEquals(1, calls.size(), "the step ran once");
+        assertEquals(Map.of(key(1), "COMPLETED"), outcomes.settled);
+    }
+
+    @Test
+    @DisplayName("a claimed resume that fails before it is queued releases its claim; the poller resumes it")
+    void failedResumeReleasesItsClaim() throws Exception {
+        FlowEngineTest.InMemoryFlowStore flaky = new FlowEngineTest.InMemoryFlowStore() {
+            private final AtomicBoolean failed = new AtomicBoolean();
+
+            @Override
+            public Optional<String> findTenantSlug(String tenantId) {
+                if (getPendingResumes().stream().anyMatch(row -> row.containsKey("claimedBy"))
+                        && failed.compareAndSet(false, true)) {
+                    throw new IllegalStateException("database unavailable");
+                }
+                return super.findTenantSlug(tenantId);
+            }
+        };
+        engine.shutdown();
+        flowStore = flaky;
+        engine = engine(flaky, 2);
+        String executionId = start(flow(""));
+        outcomes.delivered.put(key(1), TaskOutcome.succeeded(Map.of(), 1));
+
+        assertThrows(IllegalStateException.class, () -> engine.resumeAwaitedTask(TENANT, key(1)));
+
+        Map<String, Object> row = flaky.getPendingResumes().getFirst();
+        assertFalse(row.containsKey("claimedBy"), "the claim is released");
+        assertFalse(((Instant) row.get("resumeAt")).isAfter(Instant.now()), "and the row is due now");
+        assertEquals(FlowExecutionData.STATUS_WAITING, flaky.loadExecution(executionId).orElseThrow().status());
+
+        resumeAsPoller(flaky.claimDuePendingResumes(Instant.now()));
+        assertEquals(FlowExecutionData.STATUS_COMPLETED,
+            awaitStatus(executionId, FlowExecutionData.STATUS_COMPLETED).status());
+    }
+
+    @Test
+    @DisplayName("cancelling an execution closes its open awaited tasks")
+    void cancelAbandonsTasks() throws Exception {
+        String executionId = start(flow(""));
+
+        engine.cancelExecution(executionId);
+
+        assertEquals(FlowExecutionData.STATUS_CANCELLED, flowStore.loadExecution(executionId).orElseThrow().status());
+        assertEquals(List.of(TENANT + "/" + executionId), outcomes.abandoned);
     }
 
     @Test
@@ -303,7 +396,7 @@ class FlowEngineAwaitedTaskTest {
             ,
                         "Retry": [ { "ErrorEquals": ["States.ALL"], "IntervalSeconds": 0, "MaxAttempts": 3 } ]"""));
 
-        flowStore.claimDuePendingResumes(Instant.now().plusSeconds(120)).forEach(engine::resumeExecution);
+        resumeAsPoller(flowStore.claimDuePendingResumes(Instant.now().plusSeconds(120)));
 
         FlowExecutionData failed = awaitStatus(executionId, FlowExecutionData.STATUS_FAILED);
         assertEquals(FlowExecutionData.STATUS_FAILED, failed.status());

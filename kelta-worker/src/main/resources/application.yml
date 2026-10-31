@@ -196,6 +196,13 @@ kelta:
     admin-username: ${SUPERSET_ADMIN_USERNAME:admin}
     admin-password: ${SUPERSET_ADMIN_PASSWORD:}
   flow:
+    resume:
+      # The Wait / awaited-Task resume poller (FlowResumePollerConfig). A pending-resume row
+      # that a resume claimed but never consumed (its pod died, its queued resume was dropped
+      # at shutdown, or it failed) is taken over by the poller after this many seconds, at least
+      # 1. Keep it longer than a resume waits in the flow engine's queue; a takeover racing a
+      # slow resume runs the step once either way, as only the current claim consumes the row.
+      claim-lease-seconds: ${KELTA_FLOW_RESUME_CLAIM_LEASE_SECONDS:300}
     # Retention for flow/job execution history. Nothing else deletes these tables,
     # so without this they grow without bound.
     # DESTRUCTIVE — dry-run is the DEFAULT: the sweep only logs what it WOULD

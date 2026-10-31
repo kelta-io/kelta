@@ -306,7 +306,7 @@ public class ModuleConfig {
     }
 
     /**
-     * {@code POST /api/modules/self/tasks/{token}} and its {@code /heartbeat}: a module's service
+     * {@code POST /api/modules/self/tasks/complete} and {@code .../heartbeat}: a module's service
      * principal completes, or keeps alive, the task of a long-running action.
      */
     @Bean

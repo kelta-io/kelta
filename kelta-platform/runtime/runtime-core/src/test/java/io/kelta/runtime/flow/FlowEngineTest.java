@@ -8,6 +8,7 @@ import io.kelta.runtime.workflow.ActionResult;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -1204,6 +1205,9 @@ class FlowEngineTest {
     }
 
     static class InMemoryFlowStore implements FlowStore {
+        /** The claim {@link #claimDuePendingResumes} takes rows under. */
+        static final String POLLER = "poller";
+
         private final Map<String, FlowExecutionData> executions = new ConcurrentHashMap<>();
         private final Map<String, List<FlowStepLogData>> stepLogs = new ConcurrentHashMap<>();
         private final Map<String, Map<String, Object>> pendingResumes = new ConcurrentHashMap<>();
@@ -1385,18 +1389,27 @@ class FlowEngineTest {
         }
 
         @Override
-        public List<String> claimPendingResumes(String claimedBy, int limit) {
-            return List.of();
+        public List<String> claimPendingResumes(String claimedBy, int limit, Duration claimLease) {
+            return claimDue(Instant.now(), claimedBy, claimLease);
         }
 
-        /** Due rows (resume_at passed), claimed as the worker's poller would. */
+        /** Due rows (resume_at passed), claimed as {@code "poller"} would claim them at {@code now}. */
         List<String> claimDuePendingResumes(Instant now) {
+            return claimDue(now, POLLER, Duration.ofMinutes(5));
+        }
+
+        /** As the worker's poller: unclaimed due rows, and claims older than the lease. */
+        List<String> claimDue(Instant now, String claimedBy, Duration claimLease) {
             List<String> claimed = new ArrayList<>();
             for (Map<String, Object> row : pendingResumes.values()) {
                 synchronized (row) {
-                    if (!row.containsKey("claimedBy") && row.get("resumeAt") instanceof Instant at
-                            && !at.isAfter(now)) {
-                        row.put("claimedBy", "poller");
+                    boolean due = !row.containsKey("claimedBy") && row.get("resumeAt") instanceof Instant at
+                            && !at.isAfter(now);
+                    boolean stale = row.containsKey("claimedBy") && row.get("claimedAt") instanceof Instant at
+                            && at.isBefore(now.minus(claimLease));
+                    if (due || stale) {
+                        row.put("claimedBy", claimedBy);
+                        row.put("claimedAt", now);
                         claimed.add((String) row.get("executionId"));
                     }
                 }
@@ -1411,6 +1424,7 @@ class FlowEngineTest {
                     if (!row.containsKey("claimedBy") && tenantId.equals(row.get("tenantId"))
                             && resumeEvent.equals(row.get("resumeEvent"))) {
                         row.put("claimedBy", claimedBy);
+                        row.put("claimedAt", Instant.now());
                         return Optional.of((String) row.get("executionId"));
                     }
                 }
@@ -1419,11 +1433,45 @@ class FlowEngineTest {
         }
 
         @Override
-        public Optional<String> findPendingResumeEvent(String executionId) {
-            return pendingResumes.values().stream()
-                .filter(row -> executionId.equals(row.get("executionId")) && row.get("resumeEvent") != null)
-                .map(row -> (String) row.get("resumeEvent"))
-                .findFirst();
+        public Optional<ConsumedResume> consumePendingResume(String tenantId, String executionId, String claimedBy) {
+            for (Map.Entry<String, Map<String, Object>> entry : pendingResumes.entrySet()) {
+                Map<String, Object> row = entry.getValue();
+                synchronized (row) {
+                    if (executionId.equals(row.get("executionId")) && tenantId.equals(row.get("tenantId"))
+                            && (claimedBy == null || claimedBy.equals(row.get("claimedBy")))
+                            && pendingResumes.remove(entry.getKey(), row)) {
+                        return Optional.of(new ConsumedResume((String) row.get("resumeEvent")));
+                    }
+                }
+            }
+            return Optional.empty();
+        }
+
+        @Override
+        public void releasePendingResume(String executionId, String claimedBy) {
+            Instant now = Instant.now();
+            for (Map<String, Object> row : pendingResumes.values()) {
+                synchronized (row) {
+                    if (executionId.equals(row.get("executionId")) && claimedBy.equals(row.get("claimedBy"))) {
+                        row.remove("claimedBy");
+                        row.remove("claimedAt");
+                        if (!(row.get("resumeAt") instanceof Instant at) || at.isAfter(now)) {
+                            row.put("resumeAt", now);
+                        }
+                    }
+                }
+            }
+        }
+
+        /** Backdates every claim, as if its lease had run out. */
+        void ageClaims(Duration by) {
+            for (Map<String, Object> row : pendingResumes.values()) {
+                synchronized (row) {
+                    if (row.get("claimedAt") instanceof Instant at) {
+                        row.put("claimedAt", at.minus(by));
+                    }
+                }
+            }
         }
 
         @Override

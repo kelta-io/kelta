@@ -31,6 +31,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -39,9 +40,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * {@code POST /api/modules/self/tasks/{token}} (four segments under {@code /api}) and
- * {@code .../{token}/heartbeat} (five) reach {@link ModuleTaskController}, with
- * {@code DynamicCollectionRouter}'s mappings registered beside it (CLAUDE.md pitfall), and each
+ * {@code POST /api/modules/self/tasks/complete} and {@code .../heartbeat} (four segments under
+ * {@code /api}) reach {@link ModuleTaskController}, with {@code DynamicCollectionRouter}'s mappings
+ * registered beside it (CLAUDE.md pitfall), with the raw body that carries the token, and each
  * refusal of {@link ModuleTaskService} reaches the module as its status and code, {@code no-store}.
  */
 @DisplayName("Module task endpoints vs the generic collection router")
@@ -49,8 +50,12 @@ class ModuleTaskRouteMappingTest {
 
     private static final String TENANT = "tenant-1";
     private static final String TOKEN = "kmt_" + "D".repeat(43);
-    private static final String PATH = "/api/modules/self/tasks/" + TOKEN;
-    private static final String BODY = "{\"success\":true,\"output\":{\"rows\":42}}";
+    private static final String COMPLETE = "/api/modules/self/tasks/complete";
+    private static final String HEARTBEAT = "/api/modules/self/tasks/heartbeat";
+    private static final String BODY = "{\"token\":\"" + TOKEN + "\",\"success\":true,\"output\":{\"rows\":42}}";
+    private static final String BEAT = "{\"token\":\"" + TOKEN + "\"}";
+    private static final byte[] BODY_BYTES = BODY.getBytes(StandardCharsets.UTF_8);
+    private static final byte[] BEAT_BYTES = BEAT.getBytes(StandardCharsets.UTF_8);
 
     /** Stands in for {@code DynamicCollectionRouter}'s GET and POST mappings, shape for shape. */
     @RestController
@@ -121,7 +126,11 @@ class ModuleTaskRouteMappingTest {
     }
 
     private static MockHttpServletRequestBuilder complete() {
-        return post(PATH).contentType(MediaType.APPLICATION_JSON).content(BODY).header("X-Connected-App-Id", "app-1");
+        return post(COMPLETE).contentType(MediaType.APPLICATION_JSON).content(BODY).header("X-Connected-App-Id", "app-1");
+    }
+
+    private static MockHttpServletRequestBuilder heartbeat() {
+        return post(HEARTBEAT).contentType(MediaType.APPLICATION_JSON).content(BEAT).header("X-Connected-App-Id", "app-1");
     }
 
     @Test
@@ -133,17 +142,16 @@ class ModuleTaskRouteMappingTest {
                 .andExpect(header().string("X-Content-Type-Options", "nosniff"))
                 .andExpect(content().string(""));
 
-        verify(service).complete(eq(TENANT), eq("app-1"), eq("svc-1"), eq(TOKEN),
-                eq(BODY.getBytes(StandardCharsets.UTF_8)));
+        verify(service).complete(eq(TENANT), eq("app-1"), eq("svc-1"), eq(BODY_BYTES));
     }
 
     @Test
     @DisplayName("a heartbeat reaches ModuleTaskController: 200 with a fresh access token, no-store")
     void heartbeatWinsOverTheRouter() throws Exception {
-        when(service.heartbeat(TENANT, "app-1", "svc-1", TOKEN)).thenReturn(new Heartbeat("fresh-token",
+        when(service.heartbeat(TENANT, "app-1", "svc-1", BEAT_BYTES)).thenReturn(new Heartbeat("fresh-token",
                 Instant.parse("2026-10-31T12:15:00Z"), Instant.parse("2026-11-01T12:00:00Z")));
 
-        perform(post(PATH + "/heartbeat").header("X-Connected-App-Id", "app-1"), "svc-1")
+        perform(heartbeat(), "svc-1")
                 .andExpect(status().isOk())
                 .andExpect(header().string("Cache-Control", containsString("no-store")))
                 .andExpect(jsonPath("$.accessToken").value("fresh-token"))
@@ -155,9 +163,9 @@ class ModuleTaskRouteMappingTest {
     @DisplayName("a caller with no app id and no resolved user is handed to the service as such, and refused")
     void noIdentity() throws Exception {
         doThrow(new RefusedException(Refusal.NOT_MODULE_PRINCIPAL, "refused"))
-                .when(service).complete(eq(TENANT), isNull(), isNull(), eq(TOKEN), any());
+                .when(service).complete(eq(TENANT), isNull(), isNull(), any());
 
-        perform(post(PATH).contentType(MediaType.APPLICATION_JSON).content(BODY), null)
+        perform(post(COMPLETE).contentType(MediaType.APPLICATION_JSON).content(BODY), null)
                 .andExpect(status().isForbidden())
                 .andExpect(header().string("Cache-Control", containsString("no-store")))
                 .andExpect(jsonPath("$.errors[0].code").value("NOT_MODULE_PRINCIPAL"));
@@ -174,15 +182,15 @@ class ModuleTaskRouteMappingTest {
                 Refusal.TOKEN_UNAVAILABLE, new Object[] {503, "TOKEN_UNAVAILABLE"});
         for (Map.Entry<Refusal, Object[]> entry : expected.entrySet()) {
             doThrow(new RefusedException(entry.getKey(), "refused"))
-                    .when(service).complete(eq(TENANT), eq("app-1"), eq("svc-1"), eq(TOKEN), any());
+                    .when(service).complete(eq(TENANT), eq("app-1"), eq("svc-1"), any());
             doThrow(new RefusedException(entry.getKey(), "refused"))
-                    .when(service).heartbeat(TENANT, "app-1", "svc-1", TOKEN);
+                    .when(service).heartbeat(eq(TENANT), eq("app-1"), eq("svc-1"), any());
 
             perform(complete(), "svc-1")
                     .andExpect(status().is((Integer) entry.getValue()[0]))
                     .andExpect(header().string("Cache-Control", containsString("no-store")))
                     .andExpect(jsonPath("$.errors[0].code").value(entry.getValue()[1]));
-            perform(post(PATH + "/heartbeat").header("X-Connected-App-Id", "app-1"), "svc-1")
+            perform(heartbeat(), "svc-1")
                     .andExpect(status().is((Integer) entry.getValue()[0]))
                     .andExpect(jsonPath("$.errors[0].code").value(entry.getValue()[1]));
         }
@@ -192,7 +200,7 @@ class ModuleTaskRouteMappingTest {
     @DisplayName("an answer never echoes the token")
     void tokenNotEchoed() throws Exception {
         doThrow(new RefusedException(Refusal.TASK_NOT_FOUND, "No pending task of this module has that token"))
-                .when(service).complete(eq(TENANT), eq("app-1"), eq("svc-1"), eq(TOKEN), any());
+                .when(service).complete(eq(TENANT), eq("app-1"), eq("svc-1"), any());
 
         perform(complete(), "svc-1")
                 .andExpect(status().isNotFound())
@@ -206,11 +214,23 @@ class ModuleTaskRouteMappingTest {
         ObjectProvider<ModuleTaskService> absent = mock(ObjectProvider.class);
         MockMvc off = MockMvcBuilders.standaloneSetup(new ModuleTaskController(absent), new RouterStub()).build();
 
-        off.perform(post(PATH).header("X-Tenant-ID", TENANT).header("X-Connected-App-Id", "app-1")
+        off.perform(post(COMPLETE).header("X-Tenant-ID", TENANT).header("X-Connected-App-Id", "app-1")
                         .contentType(MediaType.APPLICATION_JSON).content(BODY))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.errors[0].code").value("NOT_MODULE_PRINCIPAL"));
-        off.perform(post(PATH + "/heartbeat").header("X-Tenant-ID", TENANT))
+        off.perform(post(HEARTBEAT).header("X-Tenant-ID", TENANT))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("a token in the path is no task endpoint: refused before the controller")
+    void tokenInPathIsNotMapped() throws Exception {
+        perform(post("/api/modules/self/tasks/" + TOKEN).contentType(MediaType.APPLICATION_JSON).content(BODY)
+                .header("X-Connected-App-Id", "app-1"), "svc-1")
+                .andExpect(status().is4xxClientError());
+        perform(post("/api/modules/self/tasks/" + TOKEN + "/heartbeat").header("X-Connected-App-Id", "app-1"),
+                "svc-1")
+                .andExpect(status().is4xxClientError());
+        verifyNoInteractions(service);
     }
 }

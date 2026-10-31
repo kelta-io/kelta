@@ -278,8 +278,8 @@ not a supported integration surface and may change without notice.
 | POST | `/api/modules/install-jar` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#installing) |
 | POST | `/api/modules/plan` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#external-modules-installed-by-url) |
 | GET | `/api/modules/self/credentials/{name}` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#reading-tenant-credentials) |
-| POST | `/api/modules/self/tasks/{token}` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#long-running-actions) |
-| POST | `/api/modules/self/tasks/{token}/heartbeat` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#long-running-actions) |
+| POST | `/api/modules/self/tasks/complete` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#long-running-actions) |
+| POST | `/api/modules/self/tasks/heartbeat` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#long-running-actions) |
 | GET | `/api/modules/signing-keys` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#signing) |
 | POST | `/api/modules/signing-keys` | worker | API_ACCESS + MANAGE_CREDENTIALS | [platform/modules](/docs/platform/modules/#signing) |
 | DELETE | `/api/modules/signing-keys/{id}` | worker | API_ACCESS + MANAGE_CREDENTIALS | [platform/modules](/docs/platform/modules/#signing) |

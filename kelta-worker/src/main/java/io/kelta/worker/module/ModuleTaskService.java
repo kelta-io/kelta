@@ -13,11 +13,14 @@ import tools.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * An external module completes, or keeps alive, the task of a long-running action
  * ({@code specs/module-platform/9-external-modules.md} §3.6.2):
- * {@code POST /api/modules/self/tasks/{token}} and {@code POST /api/modules/self/tasks/{token}/heartbeat}.
+ * {@code POST /api/modules/self/tasks/complete} and {@code POST /api/modules/self/tasks/heartbeat},
+ * the task token in the JSON body's {@code token} (never in the path, which spans, logs and access
+ * logs record; {@code SensitiveBodyRedactor} redacts the body's {@code token}).
  * Security-sensitive: a completion resumes a tenant's flow with data the module supplies. Every
  * check runs in this order, and any failure is a refusal:
  *
@@ -32,15 +35,18 @@ import java.util.Objects;
  *       {@link ModuleHttpClient#MAX_RESPONSE_BYTES} bytes): {@link Refusal#INVALID_TASK_RESULT}.
  *       Checked before the token, so a module can correct its body and retry.</li>
  *   <li><b>The token is a {@code PENDING}, unexpired task of this tenant and install</b>
- *       ({@link ModuleAsyncTaskStore#complete}): an unknown, foreign, reused or expired token is
- *       {@link Refusal#TASK_NOT_FOUND}, the same answer for each, so a caller learns nothing about
- *       tokens it does not hold.</li>
+ *       ({@link ModuleAsyncTaskStore#complete}): a missing, malformed, unknown, foreign, reused or
+ *       expired token is {@link Refusal#TASK_NOT_FOUND}, the same answer for each, so a caller
+ *       learns nothing about tokens it does not hold. A module that gets it for a completion it
+ *       sent before (its first try's answer was lost) treats it as possibly delivered.</li>
  * </ol>
  *
  * <p>Then the outcome is recorded (one conditional update, which is what makes the token single
  * use) and the parked step is resumed through {@link FlowEngine#resumeAwaitedTask}: a database
  * claim, so it does not matter which pod receives the completion. If the step has not parked yet,
- * the park finds the outcome.
+ * the park finds the outcome. If the resume fails, the engine releases its claim and the resume
+ * poller resumes the step on its next cycle; if even the release fails, the claim's lease runs out
+ * and the poller takes the row over then.
  *
  * <p>A heartbeat runs checks 1, 2 and 4 without consuming the token, records
  * {@code last_heartbeat_at}, and answers a service-principal access token valid for at least
@@ -121,37 +127,46 @@ public class ModuleTaskService {
      * @param tenantId       the request's tenant
      * @param connectedAppId the token's {@code connected_app_id}, or null
      * @param callerUserId   the caller's resolved {@code platform_user.id}, or null
-     * @param token          the task token from the path
-     * @param body           the request body
+     * @param body           the request body: an {@code ActionResponse} plus the task's {@code token}
      * @throws RefusedException when any check fails, before anything is recorded
      */
-    public void complete(String tenantId, String connectedAppId, String callerUserId, String token, byte[] body) {
+    public void complete(String tenantId, String connectedAppId, String callerUserId, byte[] body) {
         TenantModuleData install = callingInstall(tenantId, connectedAppId, callerUserId);
-        ActionResult result = parse(body);
-        String resumeKey = tasks.complete(tenantId, install.id(), token, ModuleAsyncTaskStore.outcomeOf(
-                        result.successful(), result.outputData(), result.errorMessage()))
-                .orElseThrow(() -> refuse(Refusal.TASK_NOT_FOUND, tenantId, install,
-                        "No pending task of this module has that token"));
+        if (body != null && body.length > ModuleHttpClient.MAX_RESPONSE_BYTES) {
+            throw new RefusedException(Refusal.INVALID_TASK_RESULT, "The body is larger than "
+                    + ModuleHttpClient.MAX_RESPONSE_BYTES + " bytes");
+        }
+        JsonNode json = readObject(body).orElseThrow(() -> new RefusedException(Refusal.INVALID_TASK_RESULT,
+                "The body must be a JSON object: an ActionResponse and the task's token"));
+        ActionResult result = parse(json);
+        String token = token(json);
+        Optional<String> completed = token == null ? Optional.empty()
+                : tasks.complete(tenantId, install.id(), token, ModuleAsyncTaskStore.outcomeOf(
+                        result.successful(), result.outputData(), result.errorMessage()));
+        String resumeKey = completed.orElseThrow(() -> taskNotFound(tenantId, install));
         log.info("Module '{}' of tenant {} completed task {} ({})", install.moduleId(), tenantId, resumeKey,
                 result.successful() ? "success" : "failure");
         try {
             flowEngine.resumeAwaitedTask(tenantId, resumeKey);
         } catch (RuntimeException e) {
-            // Recorded: the step's own park, or the resume poller at the task's expiry, settles it.
+            // Recorded. The engine released its claim, so the resume poller resumes the step on its
+            // next cycle; if the release failed too, the poller takes the claim over after its lease.
             log.warn("Could not resume the step of task {} of tenant {} now: {}", resumeKey, tenantId, e.getMessage());
         }
     }
 
     /**
-     * Keeps the task {@code token} alive and renews the module's access token.
+     * Keeps the task named by the body's {@code token} alive and renews the module's access token.
      *
+     * @param body the request body, {@code {"token": "kmt_..."}}
      * @throws RefusedException when any check fails
      */
-    public Heartbeat heartbeat(String tenantId, String connectedAppId, String callerUserId, String token) {
+    public Heartbeat heartbeat(String tenantId, String connectedAppId, String callerUserId, byte[] body) {
         TenantModuleData install = callingInstall(tenantId, connectedAppId, callerUserId);
-        Instant taskExpiresAt = tasks.heartbeat(tenantId, install.id(), token)
-                .orElseThrow(() -> refuse(Refusal.TASK_NOT_FOUND, tenantId, install,
-                        "No pending task of this module has that token"));
+        String token = readObject(body).map(ModuleTaskService::token).orElse(null);
+        Instant taskExpiresAt = (token == null ? Optional.<Instant>empty()
+                : tasks.heartbeat(tenantId, install.id(), token))
+                .orElseThrow(() -> taskNotFound(tenantId, install));
         ModuleAccessTokenService.AccessToken accessToken;
         try {
             accessToken = tokens.accessToken(install, HEARTBEAT_TOKEN_VALIDITY);
@@ -173,29 +188,39 @@ public class ModuleTaskService {
         return install;
     }
 
-    /** The body as a synchronous {@code ActionResponse} would be read, with the same limits. */
-    private ActionResult parse(byte[] body) {
-        if (body == null || body.length == 0) {
-            throw new RefusedException(Refusal.INVALID_TASK_RESULT, "The body must be an ActionResponse object");
+    /**
+     * The body as a JSON object, within a synchronous answer's byte limit
+     * ({@link ModuleHttpClient#MAX_RESPONSE_BYTES}); empty for anything else.
+     */
+    private Optional<JsonNode> readObject(byte[] body) {
+        if (body == null || body.length == 0 || body.length > ModuleHttpClient.MAX_RESPONSE_BYTES) {
+            return Optional.empty();
         }
-        if (body.length > ModuleHttpClient.MAX_RESPONSE_BYTES) {
-            throw new RefusedException(Refusal.INVALID_TASK_RESULT, "The body is larger than "
-                    + ModuleHttpClient.MAX_RESPONSE_BYTES + " bytes");
-        }
-        JsonNode json;
         try {
-            json = objectMapper.readTree(body);
+            JsonNode json = objectMapper.readTree(body);
+            return json != null && json.isObject() ? Optional.of(json) : Optional.empty();
         } catch (RuntimeException e) {
-            throw new RefusedException(Refusal.INVALID_TASK_RESULT, "The body is not JSON");
+            return Optional.empty();
         }
-        if (json == null || !json.isObject()) {
-            throw new RefusedException(Refusal.INVALID_TASK_RESULT, "The body is not a JSON object");
-        }
+    }
+
+    /** The body's {@code token}, or null when it has no string one. */
+    private static String token(JsonNode json) {
+        JsonNode token = json.get("token");
+        return token != null && token.isString() ? token.stringValue() : null;
+    }
+
+    /** The body as a synchronous {@code ActionResponse} would be read, with the same limits. */
+    private ActionResult parse(JsonNode json) {
         try {
             return RemoteActionHandler.actionResult(objectMapper, json);
         } catch (ExternalModuleInvoker.InvalidResponseException e) {
             throw new RefusedException(Refusal.INVALID_TASK_RESULT, e.getMessage());
         }
+    }
+
+    private static RefusedException taskNotFound(String tenantId, TenantModuleData install) {
+        return refuse(Refusal.TASK_NOT_FOUND, tenantId, install, "No pending task of this module has that token");
     }
 
     private static RefusedException refuse(Refusal refusal, String tenantId, TenantModuleData install,

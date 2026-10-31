@@ -647,17 +647,23 @@ pinning do not guarantee:
 `architecture.md` → External module task completion; `integrations.md` → Wait states (Awaited
 Tasks). What the task-token design does not guarantee:
 
-- **The task token travels in the URL path.** `POST /api/modules/self/tasks/{token}` puts it where
-  access logs and span attributes (`http.url.path`) record paths. It is stored only as a hash, is
-  single use, expires, and is useless without the same install's principal token, so a token read
-  from a log can at most complete (or heartbeat) a still-pending task by someone already holding
-  that install's credentials. Moving it to a body field would close this; the path shape was kept
-  to match the contract.
-- **A claimed resume whose pod dies is never resumed.** A completion (or the expiry poller) claims
-  the `flow_pending_resume` row before it resumes the execution. If the claiming pod dies between
-  the claim and the resume, the row stays claimed and the execution stays `WAITING` — true of
-  every pending resume today (Wait states included); there is no claim lease. The module's
-  outcome is recorded (`COMPLETED`), so a manual resume would pick it up.
+- **The task token is redacted from recorded bodies, not encrypted in transit beyond TLS.** It
+  rides the request body (`POST /api/modules/self/tasks/complete` / `heartbeat`), never the path,
+  so access logs and span names do not carry it; `SensitiveBodyRedactor` replaces the `token`
+  member and any `kmt_…` value before a body becomes span data. The module receives it in the
+  action request body, which the platform does not record. It is stored only as a hash, works once,
+  expires, and is useless without the same install's principal token.
+- **A lost completion answer looks like a dead token.** A module whose completion `202` was lost
+  and that retries gets `404 TASK_NOT_FOUND`, exactly as for an unknown token: the platform keeps
+  no outcome to replay and does not say which. Modules must treat a `404` after a completion
+  attempt as possibly delivered (spec §3.6.2 step 7).
+- **A stuck resume claim waits out its lease.** A completion (or the poller) claims the
+  `flow_pending_resume` row before it resumes. If the claiming pod dies, or its queued resume is
+  dropped at shutdown, the poller takes the claim over once it is older than
+  `kelta.flow.resume.claim-lease-seconds` (300 s default) — so such a step resumes up to that late.
+  A lease shorter than a resume's wait in the engine's queue cannot run a step twice (only the
+  current claim consumes the row) but makes the slow resume a no-op. Rows claimed before V223 have
+  no `claimed_at` and stay as they were.
 - **Only top-level Task steps can wait.** `Parallel`/`Map` branch states and invoked sub-flows run
   in memory and are not persisted, so they cannot park; a long-running action there gets no task
   and its `202` fails the step (`ModuleUnavailableException`).

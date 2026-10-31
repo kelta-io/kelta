@@ -1,5 +1,6 @@
 package io.kelta.runtime.flow;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -218,14 +219,18 @@ public interface FlowStore {
                                Instant resumeAt, String resumeEvent);
 
     /**
-     * Claims pending resumes that are due for processing.
-     * Uses optimistic locking to prevent duplicate claims across pods.
+     * Claims pending resumes that are due for processing: unclaimed rows whose {@code resumeAt}
+     * has passed, and rows claimed longer than {@code claimLease} ago whose resume never consumed
+     * them (the claimer died, its queued resume was dropped, or it failed before releasing). A
+     * reclaim takes the row over with the new {@code claimedBy}, so the old claimer's late
+     * {@link #consumePendingResume} finds nothing. Atomic across pods.
      *
-     * @param claimedBy identifier of the claiming pod
-     * @param limit     max number to claim
+     * @param claimedBy  this claim's identifier, unique per claim (it is what consumes the row)
+     * @param limit      max number to claim
+     * @param claimLease how long a claim may stay unconsumed before another poller takes it over
      * @return the claimed execution IDs
      */
-    List<String> claimPendingResumes(String claimedBy, int limit);
+    List<String> claimPendingResumes(String claimedBy, int limit, Duration claimLease);
 
     /**
      * Claims an unclaimed pending resume of {@code tenantId} by event name. Tenant-scoped, because
@@ -233,18 +238,40 @@ public interface FlowStore {
      *
      * @param tenantId    the tenant the event belongs to
      * @param resumeEvent the event name
-     * @param claimedBy   identifier of the claiming pod
+     * @param claimedBy   this claim's identifier, unique per claim
      * @return the execution ID if found and claimed, empty otherwise
      */
     Optional<String> claimPendingResumeByEvent(String tenantId, String resumeEvent, String claimedBy);
 
     /**
-     * The event name (an awaited Task's resume key) of an execution's pending resume, claimed or
-     * not; empty when it has none or it is time-only.
+     * A pending resume a resuming execution consumed.
+     *
+     * @param resumeEvent its event name (an awaited Task's resume key), or null for a time-only row
+     */
+    record ConsumedResume(String resumeEvent) {
+    }
+
+    /**
+     * Deletes the execution's pending resume that {@code claimedBy} holds, and answers it. This is
+     * the step that makes a resume happen at most once per park: of two resumes racing for one row
+     * (a slow one and the poller's reclaim of it), only the current holder finds it.
+     *
+     * @param tenantId    the execution's tenant
+     * @param executionId the execution ID
+     * @param claimedBy   the claim the caller holds; null consumes the row whoever holds it (a
+     *                    resume without a claim)
+     * @return the consumed row, or empty when the caller does not hold it (any more)
+     */
+    Optional<ConsumedResume> consumePendingResume(String tenantId, String executionId, String claimedBy);
+
+    /**
+     * Gives up a claim whose resume failed before it started: the row is unclaimed again and due
+     * now, so the poller resumes it on its next cycle.
      *
      * @param executionId the execution ID
+     * @param claimedBy   the claim to give up; a row another claimer holds is left alone
      */
-    Optional<String> findPendingResumeEvent(String executionId);
+    void releasePendingResume(String executionId, String claimedBy);
 
     /**
      * Deletes a pending resume entry after the execution has resumed.

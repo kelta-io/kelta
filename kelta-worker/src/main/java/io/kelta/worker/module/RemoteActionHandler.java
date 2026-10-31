@@ -118,15 +118,19 @@ final class RemoteActionHandler implements ActionHandler {
     /**
      * A step that can wait: issues a task when the installed manifest declares the action
      * long-running, runs the call with it bound, and discards it unless the module took it up.
+     * A call that carries a task is keyed per attempt ({@code <executionId>:<stepName>:<attempt>}):
+     * each attempt brings a new task, and a module replaying its stored answer to an earlier
+     * attempt would never see the new token.
      */
     private ActionResult runAwaitable(ActionContext context, String idempotencyKey) {
         ModuleAsyncTaskStore.Issued task = issueTask(context);
         if (task == null) {
             return run(context, idempotencyKey);
         }
+        String attemptKey = idempotencyKey + ":" + Math.max(1, context.attempt());
         ActionResult result;
         try {
-            result = ScopedValue.where(AWAITED_TASK, task).call(() -> run(context, idempotencyKey));
+            result = ScopedValue.where(AWAITED_TASK, task).call(() -> run(context, attemptKey));
         } catch (RuntimeException e) {
             discard(task);
             throw e;

@@ -72,9 +72,19 @@ class ModuleTaskServiceTest {
         return json.getBytes(StandardCharsets.UTF_8);
     }
 
-    private Refusal completeRefusal(String connectedAppId, String caller, String token, byte[] body) {
+    /** An {@code ActionResponse} JSON with the task's token added in front. */
+    private static byte[] result(String actionResponse) {
+        String rest = actionResponse.substring(1);
+        return body("{\"token\":\"" + TOKEN + "\"" + (rest.equals("}") ? "" : ",") + rest);
+    }
+
+    private static byte[] beat(String token) {
+        return body("{\"token\":\"" + token + "\"}");
+    }
+
+    private Refusal completeRefusal(String connectedAppId, String caller, byte[] body) {
         try {
-            service.complete(TENANT, connectedAppId, caller, token, body);
+            service.complete(TENANT, connectedAppId, caller, body);
         } catch (RefusedException e) {
             return e.refusal();
         }
@@ -84,7 +94,7 @@ class ModuleTaskServiceTest {
     @Test
     @DisplayName("records a success with its output and resumes the parked step by the task's key")
     void completesSuccess() {
-        service.complete(TENANT, APP, SERVICE_USER, TOKEN, body("{\"success\":true,\"output\":{\"rows\":42}}"));
+        service.complete(TENANT, APP, SERVICE_USER, result("{\"success\":true,\"output\":{\"rows\":42}}"));
 
         verify(tasks).complete(TENANT, "install-1", TOKEN, Map.of("success", true, "output", Map.of("rows", 42)));
         verify(flowEngine).resumeAwaitedTask(TENANT, RESUME_KEY);
@@ -93,8 +103,8 @@ class ModuleTaskServiceTest {
     @Test
     @DisplayName("records a failure as the synchronous answer's message (code: message)")
     void completesFailure() {
-        service.complete(TENANT, APP, SERVICE_USER, TOKEN,
-                body("{\"success\":false,\"error\":{\"code\":\"EXPORT_GONE\",\"message\":\"source returned 404\"}}"));
+        service.complete(TENANT, APP, SERVICE_USER,
+                result("{\"success\":false,\"error\":{\"code\":\"EXPORT_GONE\",\"message\":\"source returned 404\"}}"));
 
         verify(tasks).complete(TENANT, "install-1", TOKEN,
                 Map.of("success", false, "errorMessage", "EXPORT_GONE: source returned 404"));
@@ -106,7 +116,7 @@ class ModuleTaskServiceTest {
     void resumeFailureIsSwallowed() {
         when(flowEngine.resumeAwaitedTask(any(), any())).thenThrow(new IllegalStateException("pool closed"));
 
-        service.complete(TENANT, APP, SERVICE_USER, TOKEN, body("{\"success\":true}"));
+        service.complete(TENANT, APP, SERVICE_USER, result("{\"success\":true}"));
 
         verify(tasks).complete(eq(TENANT), eq("install-1"), eq(TOKEN), anyMap());
     }
@@ -114,22 +124,22 @@ class ModuleTaskServiceTest {
     @Test
     @DisplayName("callers other than the install's own active service principal are NOT_MODULE_PRINCIPAL")
     void principalRefusals() {
-        byte[] ok = body("{\"success\":true}");
-        assertThat(completeRefusal(null, SERVICE_USER, TOKEN, ok)).as("no app id: a user token or PAT")
+        byte[] ok = result("{\"success\":true}");
+        assertThat(completeRefusal(null, SERVICE_USER, ok)).as("no app id: a user token or PAT")
                 .isEqualTo(Refusal.NOT_MODULE_PRINCIPAL);
-        assertThat(completeRefusal(" ", SERVICE_USER, TOKEN, ok)).isEqualTo(Refusal.NOT_MODULE_PRINCIPAL);
+        assertThat(completeRefusal(" ", SERVICE_USER, ok)).isEqualTo(Refusal.NOT_MODULE_PRINCIPAL);
         when(moduleStore.findByConnectedAppId(TENANT, "app-other")).thenReturn(Optional.empty());
-        assertThat(completeRefusal("app-other", SERVICE_USER, TOKEN, ok)).as("a plain connected app")
+        assertThat(completeRefusal("app-other", SERVICE_USER, ok)).as("a plain connected app")
                 .isEqualTo(Refusal.NOT_MODULE_PRINCIPAL);
-        assertThat(completeRefusal(APP, "user-1", TOKEN, ok)).as("the app id with another user's token")
+        assertThat(completeRefusal(APP, "user-1", ok)).as("the app id with another user's token")
                 .isEqualTo(Refusal.NOT_MODULE_PRINCIPAL);
-        assertThat(completeRefusal(APP, null, TOKEN, ok)).as("unauthenticated").isEqualTo(Refusal.NOT_MODULE_PRINCIPAL);
+        assertThat(completeRefusal(APP, null, ok)).as("unauthenticated").isEqualTo(Refusal.NOT_MODULE_PRINCIPAL);
         when(principals.isActivePrincipal(TENANT, APP, SERVICE_USER)).thenReturn(false);
-        assertThat(completeRefusal(APP, SERVICE_USER, TOKEN, ok)).as("a deactivated principal")
+        assertThat(completeRefusal(APP, SERVICE_USER, ok)).as("a deactivated principal")
                 .isEqualTo(Refusal.NOT_MODULE_PRINCIPAL);
         when(principals.isActivePrincipal(TENANT, APP, SERVICE_USER)).thenReturn(true);
         when(moduleStore.findByConnectedAppId(TENANT, APP)).thenReturn(Optional.of(install("ACTIVE", null)));
-        assertThat(completeRefusal(APP, SERVICE_USER, TOKEN, ok)).as("a JAR module's row")
+        assertThat(completeRefusal(APP, SERVICE_USER, ok)).as("a JAR module's row")
                 .isEqualTo(Refusal.NOT_MODULE_PRINCIPAL);
 
         verifyNoInteractions(tasks, flowEngine);
@@ -140,22 +150,39 @@ class ModuleTaskServiceTest {
     void inactiveInstall() {
         when(moduleStore.findByConnectedAppId(TENANT, APP))
                 .thenReturn(Optional.of(install(TenantModuleData.STATUS_DISABLED, "https://stub.example.test")));
-        assertThat(completeRefusal(APP, SERVICE_USER, TOKEN, body("{\"success\":true}")))
+        assertThat(completeRefusal(APP, SERVICE_USER, result("{\"success\":true}")))
                 .isEqualTo(Refusal.MODULE_NOT_ACTIVE);
         verifyNoInteractions(tasks);
 
         when(moduleStore.findByConnectedAppId(TENANT, APP))
                 .thenReturn(Optional.of(install(TenantModuleData.STATUS_DEGRADED, "https://stub.example.test")));
-        assertThat(completeRefusal(APP, SERVICE_USER, TOKEN, body("{\"success\":true}"))).isNull();
+        assertThat(completeRefusal(APP, SERVICE_USER, result("{\"success\":true}"))).isNull();
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"", "not json", "[]", "\"x\"", "{}", "{\"success\":\"yes\"}",
-            "{\"success\":true,\"output\":[1]}", "{\"success\":true,\"output\":\"x\"}"})
-    @DisplayName("a body that is not a valid ActionResponse is INVALID_TASK_RESULT, and the token is untouched")
-    void invalidBody(String json) {
-        assertThat(completeRefusal(APP, SERVICE_USER, TOKEN, body(json))).isEqualTo(Refusal.INVALID_TASK_RESULT);
-        assertThat(completeRefusal(APP, SERVICE_USER, TOKEN, null)).isEqualTo(Refusal.INVALID_TASK_RESULT);
+    @ValueSource(strings = {"", "not json", "[]", "\"x\""})
+    @DisplayName("a body that is not a JSON object is INVALID_TASK_RESULT")
+    void notAnObject(String json) {
+        assertThat(completeRefusal(APP, SERVICE_USER, body(json))).isEqualTo(Refusal.INVALID_TASK_RESULT);
+        assertThat(completeRefusal(APP, SERVICE_USER, null)).isEqualTo(Refusal.INVALID_TASK_RESULT);
+        verifyNoInteractions(tasks, flowEngine);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{}", "{\"success\":\"yes\"}", "{\"success\":true,\"output\":[1]}",
+            "{\"success\":true,\"output\":\"x\"}"})
+    @DisplayName("a result that is not a valid ActionResponse is INVALID_TASK_RESULT, and the token is untouched")
+    void invalidResult(String json) {
+        assertThat(completeRefusal(APP, SERVICE_USER, result(json))).isEqualTo(Refusal.INVALID_TASK_RESULT);
+        verifyNoInteractions(tasks, flowEngine);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"success\":true}", "{\"token\":42,\"success\":true}",
+            "{\"token\":null,\"success\":true}"})
+    @DisplayName("a valid result without a string token is TASK_NOT_FOUND, like an unknown one")
+    void missingToken(String json) {
+        assertThat(completeRefusal(APP, SERVICE_USER, body(json))).isEqualTo(Refusal.TASK_NOT_FOUND);
         verifyNoInteractions(tasks, flowEngine);
     }
 
@@ -167,7 +194,7 @@ class ModuleTaskServiceTest {
             output.append(i == 0 ? "" : ",").append("\"k").append(i).append("\":").append(i);
         }
         output.append('}');
-        assertThat(completeRefusal(APP, SERVICE_USER, TOKEN, body("{\"success\":true,\"output\":" + output + "}")))
+        assertThat(completeRefusal(APP, SERVICE_USER, result("{\"success\":true,\"output\":" + output + "}")))
                 .isEqualTo(Refusal.INVALID_TASK_RESULT);
         verifyNoInteractions(tasks);
     }
@@ -176,7 +203,7 @@ class ModuleTaskServiceTest {
     @DisplayName("a body over a synchronous answer's byte limit is INVALID_TASK_RESULT")
     void sizeLimit() {
         byte[] big = new byte[ModuleHttpClient.MAX_RESPONSE_BYTES + 1];
-        assertThat(completeRefusal(APP, SERVICE_USER, TOKEN, big)).isEqualTo(Refusal.INVALID_TASK_RESULT);
+        assertThat(completeRefusal(APP, SERVICE_USER, big)).isEqualTo(Refusal.INVALID_TASK_RESULT);
         verifyNoInteractions(tasks);
     }
 
@@ -186,7 +213,7 @@ class ModuleTaskServiceTest {
         when(tasks.complete(any(), any(), anyString(), anyMap())).thenReturn(Optional.empty());
 
         RefusedException refused = (RefusedException) org.assertj.core.api.Assertions.catchThrowable(() ->
-                service.complete(TENANT, APP, SERVICE_USER, TOKEN, body("{\"success\":true}")));
+                service.complete(TENANT, APP, SERVICE_USER, result("{\"success\":true}")));
 
         assertThat(refused.refusal()).isEqualTo(Refusal.TASK_NOT_FOUND);
         assertThat(refused.getMessage()).doesNotContain(TOKEN);
@@ -202,7 +229,7 @@ class ModuleTaskServiceTest {
         when(tokens.accessToken(any(TenantModuleData.class), eq(Duration.ofMinutes(10))))
                 .thenReturn(new ModuleAccessTokenService.AccessToken("fresh-token", tokenExpires));
 
-        Heartbeat heartbeat = service.heartbeat(TENANT, APP, SERVICE_USER, TOKEN);
+        Heartbeat heartbeat = service.heartbeat(TENANT, APP, SERVICE_USER, beat(TOKEN));
 
         assertThat(heartbeat.accessToken()).isEqualTo("fresh-token");
         assertThat(heartbeat.accessTokenExpiresAt()).isEqualTo(tokenExpires);
@@ -214,12 +241,12 @@ class ModuleTaskServiceTest {
     @Test
     @DisplayName("a heartbeat refuses as a completion does, and TOKEN_UNAVAILABLE when kelta-auth fails")
     void heartbeatRefusals() {
-        assertThatThrownBy(() -> service.heartbeat(TENANT, null, SERVICE_USER, TOKEN))
+        assertThatThrownBy(() -> service.heartbeat(TENANT, null, SERVICE_USER, beat(TOKEN)))
                 .isInstanceOfSatisfying(RefusedException.class,
                         e -> assertThat(e.refusal()).isEqualTo(Refusal.NOT_MODULE_PRINCIPAL));
 
         when(tasks.heartbeat(TENANT, "install-1", TOKEN)).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.heartbeat(TENANT, APP, SERVICE_USER, TOKEN))
+        assertThatThrownBy(() -> service.heartbeat(TENANT, APP, SERVICE_USER, beat(TOKEN)))
                 .isInstanceOfSatisfying(RefusedException.class,
                         e -> assertThat(e.refusal()).isEqualTo(Refusal.TASK_NOT_FOUND));
         verifyNoInteractions(tokens);
@@ -227,10 +254,22 @@ class ModuleTaskServiceTest {
         when(tasks.heartbeat(TENANT, "install-1", TOKEN)).thenReturn(Optional.of(Instant.now().plusSeconds(60)));
         when(tokens.accessToken(any(TenantModuleData.class), any(Duration.class)))
                 .thenThrow(new IllegalStateException("kelta-auth said 401"));
-        assertThatThrownBy(() -> service.heartbeat(TENANT, APP, SERVICE_USER, TOKEN))
+        assertThatThrownBy(() -> service.heartbeat(TENANT, APP, SERVICE_USER, beat(TOKEN)))
                 .isInstanceOfSatisfying(RefusedException.class, e -> {
                     assertThat(e.refusal()).isEqualTo(Refusal.TOKEN_UNAVAILABLE);
                     assertThat(e.getMessage()).doesNotContain("401");
                 });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "not json", "[]", "{}", "{\"token\":7}"})
+    @DisplayName("a heartbeat without a string token in a JSON body is TASK_NOT_FOUND, nothing looked up")
+    void heartbeatWithoutToken(String json) {
+        assertThatThrownBy(() -> service.heartbeat(TENANT, APP, SERVICE_USER, body(json)))
+                .isInstanceOfSatisfying(RefusedException.class,
+                        e -> assertThat(e.refusal()).isEqualTo(Refusal.TASK_NOT_FOUND));
+        assertThatThrownBy(() -> service.heartbeat(TENANT, APP, SERVICE_USER, null))
+                .isInstanceOf(RefusedException.class);
+        verifyNoInteractions(tasks, tokens);
     }
 }

@@ -88,10 +88,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>{@link #completesALongRunningAction()} covers part 9h: an action declaring
  * {@code maxDurationSeconds} is sent a task, answers {@code 202}, and the flow step parks WAITING
  * until the module's principal completes the task through the gateway
- * ({@code POST /api/modules/self/tasks/{token}}); the step resumes with the module's output. The
- * token is refused to a user token, to another install's principal and once used; a heartbeat
- * renews the principal's access token; a task nobody completes fails its step at expiry, through
- * the worker's resume poller.
+ * ({@code POST /api/modules/self/tasks/complete}, the token in the body); the step resumes with the
+ * module's output. The token is refused to a user token, to another install's principal and once
+ * used; a heartbeat renews the principal's access token; cancelling an execution closes its task;
+ * a task nobody completes fails its step at expiry, through the worker's resume poller.
  */
 @DisplayName("External module install scenario")
 class ExternalModuleInstallScenarioTest extends ScenarioBase {
@@ -500,7 +500,8 @@ class ExternalModuleInstallScenarioTest extends ScenarioBase {
     @DisplayName("a long-running action parks its step until the module completes the task; refusals; heartbeat; expiry")
     void completesALongRunningAction() throws Exception {
         String suffix = Long.toHexString(System.nanoTime());
-        String tasks = "/" + SLUG + "/api/modules/self/tasks/";
+        String complete = "/" + SLUG + "/api/modules/self/tasks/complete";
+        String heartbeat = "/" + SLUG + "/api/modules/self/tasks/heartbeat";
 
         // Another install's principal: it must not complete this module's tasks.
         String other = "harness-async-b-" + suffix;
@@ -527,8 +528,9 @@ class ExternalModuleInstallScenarioTest extends ScenarioBase {
         // The step calls the action with a task and parks WAITING on its 202.
         String executionId = executeFlow(createFlow(moduleId + ":ingest", suffix));
         assertThat(awaitStatus(executionId, "WAITING").get("status").stringValue()).isEqualTo("WAITING");
+        // A call that carries a task is keyed per attempt: each attempt brings a new task.
         JsonNode call = requests("POST", "/kelta/v1/actions/ingest").stream()
-                .filter(r -> header(r, "Idempotency-Key").equals(executionId + ":Ping"))
+                .filter(r -> header(r, "Idempotency-Key").equals(executionId + ":Ping:1"))
                 .findFirst().orElseThrow(() -> new AssertionError("no action call for " + executionId));
         JsonNode task = body(call).get("task");
         String token = task.get("token").stringValue();
@@ -538,36 +540,53 @@ class ExternalModuleInstallScenarioTest extends ScenarioBase {
                 + "AND status = 'PENDING'", executionId)).as("stored as its SHA-256 only")
                 .isEqualTo(sha256Hex(token.getBytes(StandardCharsets.UTF_8)));
 
-        String result = "{\"success\":true,\"output\":{\"rows\":42}}";
+        String result = completion(token, "{\"success\":true,\"output\":{\"rows\":42}}");
         // A user token, even naming the module's app; another install's principal; an unknown token.
-        assertRefused(postWith(adminToken, tasks + token, result, Map.of()), HttpStatus.FORBIDDEN,
+        assertRefused(postWith(adminToken, complete, result, Map.of()), HttpStatus.FORBIDDEN,
                 "NOT_MODULE_PRINCIPAL");
         String appId = queryString("SELECT connected_app_id FROM tenant_module WHERE tenant_id = ? AND module_id = ?",
                 tenantId, moduleId);
-        assertRefused(postWith(adminToken, tasks + token, result, Map.of("X-Connected-App-Id", appId)),
+        assertRefused(postWith(adminToken, complete, result, Map.of("X-Connected-App-Id", appId)),
                 HttpStatus.FORBIDDEN, "NOT_MODULE_PRINCIPAL");
-        assertRefused(postWith(otherToken, tasks + token, result, Map.of()), HttpStatus.NOT_FOUND, "TASK_NOT_FOUND");
-        assertRefused(postWith(moduleToken, tasks + "kmt_" + "x".repeat(43), result, Map.of()), HttpStatus.NOT_FOUND,
+        assertRefused(postWith(otherToken, complete, result, Map.of()), HttpStatus.NOT_FOUND, "TASK_NOT_FOUND");
+        assertRefused(postWith(moduleToken, complete, completion("kmt_" + "x".repeat(43), "{\"success\":true}"),
+                Map.of()), HttpStatus.NOT_FOUND, "TASK_NOT_FOUND");
+        assertRefused(postWith(moduleToken, complete, "{\"success\":true}", Map.of()), HttpStatus.NOT_FOUND,
                 "TASK_NOT_FOUND");
         // A body that is no ActionResponse is refused before the token is spent.
-        assertRefused(postWith(moduleToken, tasks + token, "{\"output\":{}}", Map.of()), HttpStatus.BAD_REQUEST,
-                "INVALID_TASK_RESULT");
+        assertRefused(postWith(moduleToken, complete, completion(token, "{\"output\":{}}"), Map.of()),
+                HttpStatus.BAD_REQUEST, "INVALID_TASK_RESULT");
+        // The token in the path is no task endpoint at all.
+        assertThat(postWith(moduleToken, "/" + SLUG + "/api/modules/self/tasks/" + token, result, Map.of())
+                .getStatusCode().is4xxClientError()).isTrue();
 
         // A heartbeat renews the principal's token; the module completes the task with it.
-        ResponseEntity<String> beat = postWith(moduleToken, tasks + token + "/heartbeat", "", Map.of());
+        ResponseEntity<String> beat = postWith(moduleToken, heartbeat, completion(token, "{}"), Map.of());
         assertThat(beat.getStatusCode()).as("heartbeat: %s", beat.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(beat.getHeaders().getCacheControl()).contains("no-store");
         JsonNode renewed = mapper.readTree(beat.getBody());
         assertThat(Instant.parse(renewed.get("taskExpiresAt").stringValue()))
                 .isEqualTo(Instant.parse(task.get("expiresAt").stringValue()));
         String renewedToken = renewed.get("accessToken").stringValue();
-        ResponseEntity<String> completed = postWith(renewedToken, tasks + token, result, Map.of());
+        ResponseEntity<String> completed = postWith(renewedToken, complete, result, Map.of());
         assertThat(completed.getStatusCode()).as("complete: %s", completed.getBody()).isEqualTo(HttpStatus.ACCEPTED);
 
         JsonNode resumed = awaitExecution(executionId);
         assertThat(resumed.get("status").stringValue()).as("execution: %s", resumed).isEqualTo("COMPLETED");
         assertThat(resumed.get("stateData").get("ping").get("rows").asInt()).isEqualTo(42);
-        assertRefused(postWith(moduleToken, tasks + token, result, Map.of()), HttpStatus.NOT_FOUND, "TASK_NOT_FOUND");
+        assertRefused(postWith(moduleToken, complete, result, Map.of()), HttpStatus.NOT_FOUND, "TASK_NOT_FOUND");
+
+        // Cancelling a waiting execution closes its task: no more completion or heartbeat.
+        String cancelledId = executeFlow(createFlow(moduleId + ":ingest", suffix + "c"));
+        awaitStatus(cancelledId, "WAITING");
+        String cancelledToken = body(requests("POST", "/kelta/v1/actions/ingest").stream()
+                .filter(r -> header(r, "Idempotency-Key").equals(cancelledId + ":Ping:1")).findFirst()
+                .orElseThrow()).get("task").get("token").stringValue();
+        admin("POST", "/" + SLUG + "/api/flows/executions/" + cancelledId + "/cancel", "{}", HttpStatus.OK);
+        assertThat(queryString("SELECT status FROM module_async_task WHERE execution_id = ?", cancelledId))
+                .isEqualTo("EXPIRED");
+        assertRefused(postWith(moduleToken, heartbeat, completion(cancelledToken, "{}"), Map.of()),
+                HttpStatus.NOT_FOUND, "TASK_NOT_FOUND");
 
         // Nobody completes expire's task: the resume poller fails the step at its expiry.
         String expiringId = executeFlow(createFlow(moduleId + ":expire", suffix + "x"));
@@ -577,8 +596,8 @@ class ExternalModuleInstallScenarioTest extends ScenarioBase {
                 .isEqualTo("EXPIRED");
         String lateToken = body(requests("POST", "/kelta/v1/actions/expire").getLast()).get("task").get("token")
                 .stringValue();
-        assertRefused(postWith(moduleToken, tasks + lateToken, result, Map.of()), HttpStatus.NOT_FOUND,
-                "TASK_NOT_FOUND");
+        assertRefused(postWith(moduleToken, complete, completion(lateToken, "{\"success\":true}"), Map.of()),
+                HttpStatus.NOT_FOUND, "TASK_NOT_FOUND");
 
         for (String id : List.of(moduleId, other)) {
             JsonNode uninstallPlan = admin("GET", "/" + SLUG + "/api/modules/" + id
@@ -586,6 +605,13 @@ class ExternalModuleInstallScenarioTest extends ScenarioBase {
             admin("DELETE", "/" + SLUG + "/api/modules/" + id + "?purgeData=true&planHash="
                     + uninstallPlan.get("planHash").stringValue(), null, HttpStatus.OK);
         }
+    }
+
+    /** A task completion (or heartbeat) body: {@code actionResponse} with the task's token added. */
+    private String completion(String token, String actionResponse) {
+        ObjectNode body = (ObjectNode) mapper.readTree(actionResponse);
+        body.put("token", token);
+        return body.toString();
     }
 
     private ResponseEntity<String> postWith(String token, String uri, String body, Map<String, String> headers) {

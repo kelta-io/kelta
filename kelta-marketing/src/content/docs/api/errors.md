@@ -44,7 +44,7 @@ Several problems in one request produce several entries (one per field).
 | `INVALID_QUERY` | 400 | bad filter grammar or a client-caused SQL error (`meta.sqlState`) |
 | `MISSING_PARAMETER` | 400 | a required query parameter is missing; `source.parameter` names it |
 | `INVALID_PARAMETER` | 400 | a query or path parameter has the wrong type; `source.parameter` names it |
-| `INVALID_TASK_RESULT` | 400 | [`POST /api/modules/self/tasks/{token}`](/docs/platform/modules/#long-running-actions) with a body that is not a valid action result (`success` not a boolean, `output` not an object or over 1000 keys, over 1 MiB); nothing is recorded, so send it again corrected |
+| `INVALID_TASK_RESULT` | 400 | [`POST /api/modules/self/tasks/complete`](/docs/platform/modules/#long-running-actions) with a body that is not a valid action result (not a JSON object, `success` not a boolean, `output` not an object or over 1000 keys, over 1 MiB); nothing is recorded, so send it again corrected |
 | `INVALID_ROW_LIMIT` | 400 | a list view `rowLimit` outside `{10, 25, 50, 100}` |
 | `INVALID_SINCE` | 400 | `GET /api/{collection}/_changes` with a `since` that is not an ISO-8601 instant |
 | `SEMANTIC_SEARCH_INVALID` | 400 | `POST /api/{collection}/semantic-search` without a `query`, or on a collection that is unknown or has no matching `VECTOR` field |
@@ -68,7 +68,7 @@ Several problems in one request produce several entries (one per field).
 | `TENANT_NOT_FOUND` | 404 | the tenant slug in the path does not resolve |
 | `TARGET_NOT_FOUND` | 404 | [`POST /api/admin/availability/synthetic-events`](/docs/platform/messaging/#synthetic-events) names a watch target that does not exist in the tenant |
 | `CREDENTIAL_NOT_FOUND` | 404 | a module reads a credential its manifest declares, but the tenant has no active credential of that name |
-| `TASK_NOT_FOUND` | 404 | a module completes or heartbeats a [long-running action's task](/docs/platform/modules/#long-running-actions) whose token is not a pending, unexpired task of that module: unknown, another module's, already completed or expired alike |
+| `TASK_NOT_FOUND` | 404 | a module completes or heartbeats a [long-running action's task](/docs/platform/modules/#long-running-actions) whose `token` (in the body) is not a pending, unexpired task of that module: missing, unknown, another module's, already completed or expired alike. After a completion whose answer was lost, this can mean the first attempt was recorded |
 | `METHOD_NOT_ALLOWED` | 405 | the endpoint does not support the HTTP method |
 | `UNIQUE_VIOLATION` | 409 | unique-constraint violation; one entry per field of the constraint |
 | `STALE_WRITE` | 409 | stale `If-Match`: the record changed since you read it |

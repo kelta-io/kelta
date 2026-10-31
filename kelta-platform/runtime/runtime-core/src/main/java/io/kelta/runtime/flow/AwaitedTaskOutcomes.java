@@ -7,14 +7,15 @@ import java.util.Optional;
  * Where the flow engine reads the outcome of a parked Task whose handler answered
  * {@link io.kelta.runtime.workflow.ActionResult#awaiting}: work that runs outside the call and is
  * delivered later (an external module's long-running action, completed through
- * {@code POST /api/modules/self/tasks/{token}}).
+ * {@code POST /api/modules/self/tasks/complete}).
  *
  * <p>The engine never holds an outcome in memory. Whoever records one durably then calls
  * {@code FlowEngine.resumeAwaitedTask}, which claims the parked execution's
  * {@code flow_pending_resume} row (tenant-scoped, {@code FOR UPDATE SKIP LOCKED}) on whichever pod
  * received it; the row's {@code resume_at} is the task's expiry, so the time-based resume poller
- * claims it instead once that passes. Either way the resuming pod calls {@link #settle} exactly
- * once per park.
+ * claims it instead once that passes, and takes over a claim no resume consumed within its lease.
+ * Only the resume holding the row's current claim consumes it, so the resuming pod calls
+ * {@link #settle} exactly once per park.
  *
  * <p>Implementations are tenant-scoped: every method runs under the tenant it is given (RLS) and
  * must answer only for a {@code resumeKey} it issued, empty or {@code false} for any other.
@@ -52,6 +53,16 @@ public interface AwaitedTaskOutcomes {
      * removed), which the engine treats as {@link #TIMEOUT_CODE} with no retry.
      */
     Optional<TaskOutcome> settle(String tenantId, String resumeKey);
+
+    /**
+     * Closes every open task of a cancelled execution, so whoever holds one can no longer
+     * complete or renew it. The default has none to close.
+     *
+     * @param tenantId    the execution's tenant
+     * @param executionId the cancelled execution
+     */
+    default void abandon(String tenantId, String executionId) {
+    }
 
     /**
      * What a parked Task resumes with.

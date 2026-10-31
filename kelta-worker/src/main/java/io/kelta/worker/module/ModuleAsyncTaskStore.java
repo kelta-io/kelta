@@ -42,7 +42,8 @@ import java.util.regex.Pattern;
  * 'PENDING'}: a completion moves the row to {@code COMPLETED} only while it is unexpired and
  * belongs to the calling install and tenant; the resuming step moves it to {@code EXPIRED} when no
  * completion came. Whichever runs first wins, so a token completes at most once and never after
- * its step gave up. Every statement filters on the tenant as well as RLS doing so.
+ * its step gave up, and cancelling the execution expires its pending tasks ({@link #abandon}).
+ * Every statement filters on the tenant as well as RLS doing so.
  *
  * <p><b>Resume key.</b> {@code module-task:<id>}, the {@code flow_pending_resume.resume_event}
  * of the parked step. {@link #delivered} and {@link #settle} answer only for keys of that shape.
@@ -213,6 +214,16 @@ public class ModuleAsyncTaskStore implements AwaitedTaskOutcomes {
             return Optional.of(timedOut(row));
         }
         return Optional.of(outcome(row));
+    }
+
+    /**
+     * Expires the cancelled execution's pending tasks: their module can no longer complete them or
+     * renew its access token with a heartbeat.
+     */
+    @Override
+    public void abandon(String tenantId, String executionId) {
+        jdbcTemplate.update("UPDATE module_async_task SET status = 'EXPIRED', completed_at = now() "
+                + "WHERE execution_id = ? AND tenant_id = ? AND status = 'PENDING'", executionId, tenantId);
     }
 
     private TaskOutcome outcome(Map<String, Object> row) {
