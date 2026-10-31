@@ -70,6 +70,7 @@ class FailedSignInLockoutIntegrationTest {
     static final String TENANT_B = "bbbbbbbb-0000-0000-0000-000000000001";
     static final String SHARED_EMAIL = "member@example.com";
     static final String INACTIVE_EMAIL = "former@example.com";
+    static final String SERVICE_EMAIL = "billing.ab12cd34@service.kelta.invalid";
     static final String PASSWORD_A = "Tenant-A-Password-1";
     static final String PASSWORD_B = "Tenant-B-Password-2";
     static final int THRESHOLD = PasswordPolicyService.PasswordPolicy.DEFAULTS.lockoutThreshold();
@@ -161,6 +162,10 @@ class FailedSignInLockoutIntegrationTest {
         insertUser("u-b", TENANT_B, SHARED_EMAIL, "ACTIVE", PASSWORD_B);
         insertUser("u-a-former", TENANT_A, INACTIVE_EMAIL, "INACTIVE", PASSWORD_A);
         insertUser("u-b-former", TENANT_B, INACTIVE_EMAIL, "ACTIVE", PASSWORD_B);
+        // A module service principal. Real ones never get a credential; this one does, so the
+        // test proves the user type alone keeps it off the sign-in form.
+        insertUser("u-a-service", TENANT_A, SERVICE_EMAIL, "ACTIVE", PASSWORD_A);
+        admin.update("UPDATE platform_user SET user_type = 'SERVICE' WHERE id = 'u-a-service'");
 
         admin.execute("CREATE ROLE auth_rls LOGIN PASSWORD 'auth_rls' NOBYPASSRLS");
         admin.execute("GRANT USAGE ON SCHEMA public TO auth_rls");
@@ -284,6 +289,17 @@ class FailedSignInLockoutIntegrationTest {
 
         assertThat(credential("u-a-former").get("failed_attempts")).isEqualTo(0);
         assertThat(credential("u-b-former").get("failed_attempts")).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("a SERVICE user cannot sign in interactively, even with a correct password, and is never counted")
+    void serviceUserCannotSignIn() throws Exception {
+        assertThat(signIn("tenant-a", SERVICE_EMAIL, PASSWORD_A)).isInstanceOf(BadCredentialsException.class);
+        for (int i = 0; i < THRESHOLD + 1; i++) {
+            assertThat(signIn("tenant-a", SERVICE_EMAIL, "wrong")).isInstanceOf(BadCredentialsException.class);
+        }
+
+        assertThat(credential("u-a-service").get("failed_attempts")).isEqualTo(0);
     }
 
     @Test

@@ -148,6 +148,12 @@ public class LoginTrackingFilter extends OncePerRequestFilter {
             if (userId == null) {
                 return;
             }
+        } else if (isServiceUser(userId)) {
+            // A module service principal calling the API is not a sign-in: no login history,
+            // no LOGIN audit event, no group-driven profile sync (its profile is generated
+            // from the module's approved permissions) and no welcome mail.
+            lastTrackedAt.put(cacheKey, now);
+            return;
         } else {
             // Existing user — sync profile from OIDC groups mapping
             syncProfileFromGroups(userId, tenantId, groups);
@@ -185,6 +191,16 @@ public class LoginTrackingFilter extends OncePerRequestFilter {
         } catch (Exception e) {
             log.debug("Could not resolve user '{}' in tenant '{}': {}", email, tenantId, e.getMessage());
             return null;
+        }
+    }
+
+    boolean isServiceUser(String userId) {
+        try {
+            return "SERVICE".equals(jdbcTemplate.queryForObject(
+                    "SELECT user_type FROM platform_user WHERE id = ?", String.class, userId));
+        } catch (Exception e) {
+            log.debug("Could not read the user type of '{}': {}", userId, e.getMessage());
+            return false;
         }
     }
 

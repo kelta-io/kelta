@@ -53,8 +53,12 @@ public class TenantProvisioningHook implements BeforeSaveHook {
      */
     static final String UNUSABLE_PASSWORD_HASH = "";
 
-    /** Visible for testing: the provisioning row count is derived from this. */
-    static final List<String> ALL_PERMISSIONS = List.of(
+    /**
+     * Every system permission a profile carries a row for. Visible for testing (the provisioning
+     * row count is derived from it) and to {@code ModuleServicePrincipalService}, which validates
+     * a module's requested permissions against it.
+     */
+    public static final List<String> ALL_PERMISSIONS = List.of(
             "VIEW_SETUP", "CUSTOMIZE_APPLICATION", "MANAGE_USERS", "MANAGE_GROUPS",
             "MANAGE_SHARING", "MANAGE_WORKFLOWS", "MANAGE_REPORTS", "MANAGE_EMAIL_TEMPLATES",
             "MANAGE_CONNECTED_APPS", "MANAGE_DATA", "API_ACCESS", "VIEW_ALL_DATA",

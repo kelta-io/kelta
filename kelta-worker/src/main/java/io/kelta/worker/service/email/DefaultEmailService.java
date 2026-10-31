@@ -348,6 +348,14 @@ public class DefaultEmailService implements EmailService {
                               java.util.List<EmailAttachment> attachments, EmailHeaders headers) {
         String smtpHost = resolveSmtpHost(tenantSettings);
 
+        if (isReservedRecipient(to)) {
+            // A module service principal's address lives under the reserved .invalid TLD; no
+            // address there can ever be delivered, so it never reaches the provider.
+            emailRepository.markFailed(logId, "Recipient is under the reserved .invalid domain", smtpHost);
+            log.info("Email not sent: logId={}, recipient is under the reserved .invalid domain", logId);
+            return SendResult.notDelivered();
+        }
+
         try {
             emailRepository.markSending(logId);
 
@@ -369,6 +377,27 @@ public class DefaultEmailService implements EmailService {
             log.error("Unexpected error during email delivery: logId={}, to={}", logId, to, e);
         }
         return SendResult.notDelivered();
+    }
+
+    /**
+     * Whether {@code to} is under the {@code .invalid} top-level domain, which RFC 2606 / RFC 6761
+     * reserve as never resolvable. SERVICE users (module service principals) are given such an
+     * address so that nothing ever mails them; this keeps it true at the transport too.
+     */
+    static boolean isReservedRecipient(String to) {
+        if (to == null) {
+            return false;
+        }
+        String address = to.trim().toLowerCase(java.util.Locale.ROOT);
+        if (address.endsWith(">")) {
+            address = address.substring(0, address.length() - 1).trim();
+        }
+        while (address.endsWith(".")) {
+            address = address.substring(0, address.length() - 1);
+        }
+        int at = address.lastIndexOf('@');
+        String domain = at >= 0 ? address.substring(at + 1) : address;
+        return domain.equals("invalid") || domain.endsWith(".invalid");
     }
 
     private TenantEmailSettings resolveTenantSettings(String tenantId) {

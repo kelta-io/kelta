@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS platform_user (
     first_name VARCHAR(100),
     last_name VARCHAR(100),
     status VARCHAR(20) DEFAULT 'ACTIVE',
+    user_type VARCHAR(20) NOT NULL DEFAULT 'INTERNAL',
     profile_id VARCHAR(36) REFERENCES profile(id),
     last_login_at TIMESTAMP,
     login_count INTEGER DEFAULT 0,

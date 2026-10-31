@@ -2502,7 +2502,7 @@ interface PlatformUser {
     lastName: string;
     username?: string;
     status: "ACTIVE" | "INACTIVE" | "LOCKED" | "PENDING_ACTIVATION";
-    userType?: "INTERNAL" | "PORTAL";
+    userType?: "INTERNAL" | "PORTAL" | "SERVICE";
     locale: string;
     timezone: string;
     profileId?: string;

@@ -69,6 +69,7 @@ public class DelegatedUserAdminController {
     private static final Set<String> UPDATE_FIELDS =
             Set.of("firstName", "lastName", "username", "locale", "timezone", "profileId", "status");
     private static final Set<String> ALLOWED_STATUS = Set.of("ACTIVE", "INACTIVE");
+    private static final String SERVICE_USER_TYPE = "SERVICE";
 
     private final DelegatedAdminService delegatedAdminService;
     private final DelegatedAdminScopeRepository scopeRepository;
@@ -132,7 +133,8 @@ public class DelegatedUserAdminController {
                 new Pagination(Math.max(1, page), Math.min(Math.max(1, limit), MAX_PAGE)),
                 List.of(SortField.asc("email")),
                 List.of(),
-                List.of(FilterCondition.in("profileId", caller.scope.manageableProfileIds()))));
+                List.of(FilterCondition.in("profileId", caller.scope.manageableProfileIds()),
+                        FilterCondition.neq("userType", SERVICE_USER_TYPE))));
         List<Map<String, Object>> records = result.data().stream().map(this::projectUser).toList();
         return ResponseEntity.ok(JsonApiResponseBuilder.collection("users", records));
     }
@@ -267,7 +269,10 @@ public class DelegatedUserAdminController {
         Map<String, Object> target = queryEngine.getById(usersDefinition(), targetId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
         String profileId = str(target.get("profileId"));
-        if (profileId == null || !caller.scope.canManageProfile(profileId)) {
+        // A SERVICE user is a module's machine principal, managed by its module, never by a
+        // delegated admin — even when its generated profile was put in the scope.
+        if (profileId == null || !caller.scope.canManageProfile(profileId)
+                || SERVICE_USER_TYPE.equals(str(target.get("userType")))) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found");
         }
         if (targetId.equals(caller.userId)) {

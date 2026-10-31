@@ -5,6 +5,7 @@ import io.kelta.worker.repository.BootstrapRepository;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -422,6 +423,16 @@ public class InternalBootstrapController {
         if (existingOpt.isPresent()) {
             Map<String, Object> existing = existingOpt.get();
             String status = (String) existing.get("status");
+
+            // A SERVICE user is a module's machine principal: it never signs in interactively,
+            // so an IdP asserting its (synthetic) address gets no session as it. Refused rather
+            // than treated as "not found" — JIT would otherwise create a second user with the
+            // same email, and email is how the platform resolves a caller to a user.
+            if ("SERVICE".equals(existing.get("user_type"))) {
+                log.warn("JIT login refused: {} is a SERVICE user in tenant {}", existing.get("id"), tenantId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Service principals cannot sign in"));
+            }
 
             // Update last login
             repository.getJdbcTemplate().update(

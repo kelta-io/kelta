@@ -619,6 +619,32 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   Both Cerbos principals (`CerbosPrincipalBuilder`, worker `CerbosAuthorizationService`) carry
   the UUID as **`P.attr.userId`**; `P.id` stays the email (integrations.md → Cerbos principal
   attributes).
+- **Run-as connected-app tokens — module service principals** (external modules part 9b,
+  V220). `connected_app.run_as_user_id` binds a `client_credentials` app to a `SERVICE`
+  `platform_user`; both it and `connected_app.client_secret_enc` are JDBC-only (not fields of the
+  `connected-apps` collection). For such an app kelta-auth's `KeltaTokenCustomizer` adds the user's
+  identity to the machine token — `run_as_user_id`, `user_type=SERVICE`, `profile_id`,
+  `profile_name`, `email` and `preferred_username` (the user's email) — next to the usual
+  `connected_app_id`/`auth_method=api_key`/`app_scopes`; `sub` stays the client id (RFC 9068). It
+  issues no token unless the bound user is an `ACTIVE` `SERVICE` user of the app's tenant with a
+  profile (`access_denied`). `ConnectedAppRegisteredClientRepository` builds a run-as app as a
+  confidential `client_credentials`-only client (no redirect URIs, no PKCE, no consent, whatever
+  its columns say) with a 15-minute access token. The gateway takes the profile and tenant from the
+  claims (`PrincipalExtractor`) and `UserIdentityResolutionFilter` sets the principal's `userId`
+  from `run_as_user_id` — only on a connected-app principal and only for a UUID — so
+  `RouteAuthorizationFilter` authorizes it, `RevokedUserFilter` honours a deactivation, and
+  `HeaderTransformationFilter` stamps `X-User-Id` = the email and `X-User-Type: SERVICE` (the
+  worker's `CallerContext` reads SERVICE as INTERNAL). A plain connected app's token is unchanged:
+  no profile, so `403 User identity not resolved`. **SERVICE users** never sign in
+  (`KeltaUserDetailsService`, the worker's JIT bootstrap, password reset and email verification
+  skip them), hold no PAT, are not counted by `GovernorLimitsRepository.COUNT_ACTIVE_USERS`, are
+  absent from SCIM and from the delegated-admin users list, cannot be updated or deleted through
+  the `users` collection by an API caller (`IdentityCollectionGuardHook`), are left out of
+  `AdminClient.users.list` / `kelta users list` (`filter[userType][neq]=SERVICE`), and carry an
+  email under the reserved `.invalid` TLD that `DefaultEmailService` refuses to send to. They are
+  created and deactivated only by `ModuleServicePrincipalService` (worker; records + JDBC, one
+  transaction under the tenant, then a Cerbos sync and `kelta.record.changed` for the profile and
+  connected-app collections). Spec: `specs/module-platform/9-external-modules.md` §3.3.
 - **Owner-scoped collections** (member-data-ownership slice 2, V206). A collection may declare
   `ownerField` (`createdBy` or a LOOKUP→`users`), `ownerScope` (`NONE|PORTAL|ALL`) and
   `ownerScopeReads` (default true) — `collection.owner_field/owner_scope/owner_scope_reads`, on

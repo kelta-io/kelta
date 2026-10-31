@@ -697,6 +697,7 @@ describe('users', () => {
     expect(url).toContain('filter[search][contains]=ada');
     expect(url).toContain('filter[status][eq]=ACTIVE');
     expect(url).toContain('page[number]=2');
+    expect(url).toContain('filter[userType][neq]=SERVICE');
   });
 
   it('portal-invite posts a raw (non-JSON:API) body', async () => {

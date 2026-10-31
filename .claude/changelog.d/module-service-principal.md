@@ -1,0 +1,1 @@
+- 2026-10-30 feat(modules): add the module service principal — SERVICE users, run-as connected-app tokens resolved by kelta-auth and the gateway, and ModuleServicePrincipalService (external modules part 9b)

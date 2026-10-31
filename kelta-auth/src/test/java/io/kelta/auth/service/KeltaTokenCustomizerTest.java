@@ -156,7 +156,7 @@ class KeltaTokenCustomizerTest {
         appRow.put("tenant_id", "tenant-1");
         appRow.put("scopes", "[\"api\"]");
         when(jdbcTemplate.queryForList(
-                eq("SELECT id, tenant_id, scopes FROM connected_app WHERE client_id = ? AND active = true"),
+                eq(KeltaTokenCustomizer.SELECT_CLIENT_CREDENTIALS_APP),
                 eq("couchpicks-web")
         )).thenReturn(List.of(appRow));
 
@@ -180,6 +180,101 @@ class KeltaTokenCustomizerTest {
                 eq(claims.getId()), any());
         // client_credentials must not touch the user-principal path
         verify(context, never()).getPrincipal();
+        // No run-as user: the plain machine token of today — no identity, no profile.
+        assertNull(claims.getClaim("run_as_user_id"));
+        assertNull(claims.getClaim("profile_id"));
+        assertNull(claims.getClaim("user_type"));
+        assertNull(claims.getClaim("email"));
+        verify(jdbcTemplate, never()).queryForList(eq(KeltaTokenCustomizer.SELECT_RUN_AS_USER), any(Object[].class));
+    }
+
+    private static final String SERVICE_USER_ID = "5e1f1c3a-9d7b-4c2e-8f60-0a1b2c3d4e5f";
+
+    @Test
+    void customize_clientCredentialsRunAsApp_carriesTheServiceUsersIdentityAndProfile() {
+        RegisteredClient registeredClient = clientCredentialsClient("klt_module", "api");
+        stubClientCredentialsAccessToken(registeredClient);
+        Map<String, Object> appRow = new HashMap<>();
+        appRow.put("id", "connected-app-svc");
+        appRow.put("tenant_id", "tenant-1");
+        appRow.put("scopes", "[\"api\"]");
+        appRow.put("run_as_user_id", SERVICE_USER_ID);
+        when(jdbcTemplate.queryForList(eq(KeltaTokenCustomizer.SELECT_CLIENT_CREDENTIALS_APP), eq("klt_module")))
+                .thenReturn(List.of(appRow));
+        Map<String, Object> userRow = new HashMap<>();
+        userRow.put("id", SERVICE_USER_ID);
+        userRow.put("email", "billing.ab12cd34@service.kelta.invalid");
+        userRow.put("profile_id", "profile-svc");
+        userRow.put("profile_name", "Module: billing");
+        when(jdbcTemplate.queryForList(KeltaTokenCustomizer.SELECT_RUN_AS_USER, SERVICE_USER_ID, "tenant-1"))
+                .thenReturn(List.of(userRow));
+        JwtClaimsSet.Builder claimsBuilder = JwtClaimsSet.builder()
+                .issuer("http://localhost")
+                .subject("klt_module")
+                .issuedAt(Instant.now());
+        when(context.getClaims()).thenReturn(claimsBuilder);
+
+        customizer.customize(context);
+
+        JwtClaimsSet claims = claimsBuilder.build();
+        assertEquals("tenant-1", claims.getClaim("tenant_id"));
+        assertEquals("connected-app-svc", claims.getClaim("connected_app_id"));
+        assertEquals("api_key", claims.getClaim("auth_method"));
+        assertEquals(SERVICE_USER_ID, claims.getClaim("run_as_user_id"));
+        assertEquals("SERVICE", claims.getClaim("user_type"));
+        assertEquals("profile-svc", claims.getClaim("profile_id"));
+        assertEquals("Module: billing", claims.getClaim("profile_name"));
+        assertEquals("billing.ab12cd34@service.kelta.invalid", claims.getClaim("email"));
+        assertEquals("billing.ab12cd34@service.kelta.invalid", claims.getClaim("preferred_username"));
+        // sub stays the client id (RFC 9068 client_credentials shape)
+        assertEquals("klt_module", claims.getSubject());
+        verify(tokenRecorder).recordIssuedToken(
+                eq("connected-app-svc"), eq("tenant-1"), eq("[\"api\"]"), eq(claims.getId()), any());
+    }
+
+    @Test
+    void customize_clientCredentialsRunAsUserNotAnActiveServiceUserOfTheTenant_refusesToken() {
+        // The lookup only matches an ACTIVE SERVICE user of the app's own tenant, so an INTERNAL
+        // admin, another tenant's user, or a deactivated principal all come back empty.
+        RegisteredClient registeredClient = clientCredentialsClient("klt_hijack", "api");
+        stubClientCredentialsAccessToken(registeredClient);
+        Map<String, Object> appRow = new HashMap<>();
+        appRow.put("id", "connected-app-x");
+        appRow.put("tenant_id", "tenant-1");
+        appRow.put("scopes", "[\"api\"]");
+        appRow.put("run_as_user_id", SERVICE_USER_ID);
+        when(jdbcTemplate.queryForList(eq(KeltaTokenCustomizer.SELECT_CLIENT_CREDENTIALS_APP), eq("klt_hijack")))
+                .thenReturn(List.of(appRow));
+        when(jdbcTemplate.queryForList(KeltaTokenCustomizer.SELECT_RUN_AS_USER, SERVICE_USER_ID, "tenant-1"))
+                .thenReturn(List.of());
+
+        assertThrows(OAuth2AuthenticationException.class, () -> customizer.customize(context));
+
+        verify(context, never()).getClaims();
+        verify(tokenRecorder, never()).recordIssuedToken(anyString(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void customize_clientCredentialsRunAsUserWithoutProfile_refusesToken() {
+        RegisteredClient registeredClient = clientCredentialsClient("klt_noprofile", "api");
+        stubClientCredentialsAccessToken(registeredClient);
+        Map<String, Object> appRow = new HashMap<>();
+        appRow.put("id", "connected-app-y");
+        appRow.put("tenant_id", "tenant-1");
+        appRow.put("scopes", "[\"api\"]");
+        appRow.put("run_as_user_id", SERVICE_USER_ID);
+        when(jdbcTemplate.queryForList(eq(KeltaTokenCustomizer.SELECT_CLIENT_CREDENTIALS_APP), eq("klt_noprofile")))
+                .thenReturn(List.of(appRow));
+        Map<String, Object> userRow = new HashMap<>();
+        userRow.put("id", SERVICE_USER_ID);
+        userRow.put("email", "svc@service.kelta.invalid");
+        userRow.put("profile_id", null);
+        when(jdbcTemplate.queryForList(KeltaTokenCustomizer.SELECT_RUN_AS_USER, SERVICE_USER_ID, "tenant-1"))
+                .thenReturn(List.of(userRow));
+
+        assertThrows(OAuth2AuthenticationException.class, () -> customizer.customize(context));
+
+        verify(tokenRecorder, never()).recordIssuedToken(anyString(), anyString(), anyString(), anyString(), any());
     }
 
     @Test
@@ -187,7 +282,7 @@ class KeltaTokenCustomizerTest {
         RegisteredClient registeredClient = clientCredentialsClient("ghost-client", "api");
         stubClientCredentialsAccessToken(registeredClient);
         when(jdbcTemplate.queryForList(
-                eq("SELECT id, tenant_id, scopes FROM connected_app WHERE client_id = ? AND active = true"),
+                eq(KeltaTokenCustomizer.SELECT_CLIENT_CREDENTIALS_APP),
                 eq("ghost-client")
         )).thenReturn(List.of());
 

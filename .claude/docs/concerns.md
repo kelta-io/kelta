@@ -510,6 +510,28 @@ deletes the credential/MFA/preference/device rows, but personal data about the u
   refresh tokens issued under the old email alive, as for any deactivation. An SSO sign-in with the
   old email later JIT-provisions a new, unrelated user.
 
+### Module service principals — what still sees a SERVICE user (part 9b, accepted)
+
+A module's `SERVICE` user (`architecture.md` → Run-as connected-app tokens) is kept out of sign-in,
+mail, seat counts, SCIM, PATs, the delegated-admin list and API writes to `users`, but:
+
+- **Generic reads of `users` still return it.** `GET /api/users` without
+  `filter[userType][neq]=SERVICE` (the SDK's `users.list` and `kelta users list` add it), lookup
+  pickers on a `users` LOOKUP (`useLookupOptions`), reports and exports over `users` list it. It is
+  hidden only from the default Users list.
+- **Its profile is editable through the API.** The generated profile is `is_system`, which only makes
+  the admin UI read-only; an admin with the permission collections can still change its
+  `profile-object/field/system-permissions` rows, and the module then runs with the edited grants.
+- **A module can be granted anything in `TenantProvisioningHook.ALL_PERMISSIONS`**, including
+  `MANAGE_USERS` or `MODIFY_ALL_DATA`, if the admin approves it; the consent screen (part 9c) is the
+  only check. `API_ACCESS` is always granted.
+- **Mail by recipient id.** `AlertDispatchService`, the support mailbox and appointment reminders
+  resolve a recipient's email from a user id; for a SERVICE user they hit `DefaultEmailService`'s
+  `.invalid` guard and the `email_log` row ends `FAILED`. Nothing is delivered.
+- **Its connected app is an ordinary `connected-apps` row.** An admin can deactivate or delete it
+  through the API (the module then gets no token); `run_as_user_id` and `client_secret_enc` are
+  JDBC-only and never served.
+
 ### Outbound requests to tenant-supplied URLs
 
 `OutboundUrlGuard` + `OutboundHttpClient` (runtime-core `io.kelta.runtime.outbound`) refuse

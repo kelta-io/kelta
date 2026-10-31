@@ -34,6 +34,14 @@
           "expr" : "P.attr.profileId == \"nobody-profile\" && P.attr.tenantId == \"tenant-golden\""
         }
       }
+    }, {
+      "name" : "profile_module-profile",
+      "parentRoles" : [ "user" ],
+      "condition" : {
+        "match" : {
+          "expr" : "P.attr.profileId == \"module-profile\" && P.attr.tenantId == \"tenant-golden\""
+        }
+      }
     } ]
   }
 }

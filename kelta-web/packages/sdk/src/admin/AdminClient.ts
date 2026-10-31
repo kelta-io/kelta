@@ -501,13 +501,17 @@ export class AdminClient {
   // ---------------------------------------------------------------------------
 
   readonly users = {
+    /**
+     * Lists the tenant's people. SERVICE users (module service principals) are machines, not
+     * people, so this list leaves them out.
+     */
     list: async (
       filter?: string,
       status?: string,
       page = 0,
       size = 20
     ): Promise<Page<PlatformUser>> => {
-      const params: Record<string, string> = {};
+      const params: Record<string, string> = { 'filter[userType][neq]': 'SERVICE' };
       if (filter) params['filter[search][contains]'] = filter;
       if (status) params['filter[status][eq]'] = status;
       const qs = buildJsonApiParams({ page, size, filters: params });
