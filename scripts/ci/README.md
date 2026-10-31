@@ -2,7 +2,7 @@
 
 Helpers for using the **`kelta-ci-db` PostgreSQL pool** from GitHub Actions
 and other CI contexts. Pool lives in the homelab cluster as 4 PG StatefulSet
-replicas pinned to node `fc17` — see [`homelab-argo/kelta-ci-db/`](https://github.com/cklinker/homelab-argo/tree/main/kelta-ci-db).
+replicas pinned to node `fc17` — see [`homelab-argo/kelta-ci-db/`](https://github.com/RZWare/homelab-argo/tree/main/kelta-ci-db).
 
 ## Lifecycle
 

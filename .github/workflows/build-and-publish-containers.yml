@@ -617,7 +617,7 @@ jobs:
       - name: Checkout ArgoCD repo
         uses: actions/checkout@v7
         with:
-          repository: cklinker/homelab-argo
+          repository: RZWare/homelab-argo
           token: ${{ secrets.ARGOCD_REPO_TOKEN }}
           path: homelab-argo
 
@@ -1220,7 +1220,7 @@ jobs:
       - name: Checkout homelab-argo
         uses: actions/checkout@v7
         with:
-          repository: cklinker/homelab-argo
+          repository: RZWare/homelab-argo
           token: ${{ secrets.ARGOCD_REPO_TOKEN }}
           path: homelab-argo
           # CRITICAL: fetch full history. `git revert HEAD` needs the parent
