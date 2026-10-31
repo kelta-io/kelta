@@ -24,6 +24,16 @@ with acceptance criteria, exact contracts, DB migrations (or "none"), file-by-fi
 test plan — per the child-spec template in `specs/_archive/app-surfacing/README.md` (sections 1–8; sections
 that don't apply state "N/A — reason"). Read this parent first; every child references it.
 
+> **Direction change (2026-10-30): modules move out of process.** Slice 9,
+> [`9-external-modules.md`](9-external-modules.md), replaces the in-process JAR path with modules
+> that run as separate HTTP services in any language, called over the protocol in
+> [`docs/module-protocol/openapi.yaml`](../../../../docs/module-protocol/openapi.yaml). It
+> reverses this spec's security model (module code no longer runs in the worker JVM, and
+> permissions become enforceable), supersedes slice 3's manifest v2 (3a) while reusing its plan /
+> `planHash` / uninstall contracts (3b, 3c), meets slice 4's goal through a generated service
+> profile, and folds the minimal form of slice 5 into the manifest. The JAR path, and the security
+> model below, stay accurate until slice 9's part 9g deletes it.
+
 ---
 
 ## Security model — read this before designing anything
@@ -162,6 +172,7 @@ This is the exact defect fixed in #1390; it is a contract, not a preference.
 | 6 — Module HTTP routes | `6-module-routes.md` (not written) | **backend, security** | 🟡 **Partial, built ahead of its spec.** `ModuleManifest.RouteManifest` (`path`, `methods`, `handlerKey`), `ModuleRouteRegistry` (registered on load, after the code loaded) and `ModuleHttpController` (`/api/modules/{moduleId}/x/**`, depth-1..3 patterns) dispatch module routes; the health endpoint reports `routesRegisteredOnThisPod`. Not done: a route declares no permission, so the only check is the gateway's `API_ACCESS` on the static `/api/modules/**` route |
 | 7 — Capability gating | `7-capability-gating.md` (not written) | **security** (closes an open hole) | 🟡 **Partial.** `RuntimeModuleManager.registerTenantServices` refuses any port in `getServices()` the manifest's `services` list does not declare, and withdraws the module's already-accepted ports. Not done: no capability list and no admin approval of declared ports at install |
 | 8 — Billing removal | `8-billing-removal.md` (not written) | **the proving slice** — ends with a Flyway drop | ✅ **Done 2026-10-12.** Code removed 2026-10-11; Deleted from the worker: `service/billing/` (`EntitlementServiceImpl`, `ModuleAwareEntitlementService`, `BillingPassExpirySweep`, `BillingEntitlementRuleCache`), every `repository/Billing*` class, `MemberEntitlementQuotaHook`, `BillingPlanRefreshHook`, `BillingEntitlementRuleRefreshHook`, `BillingEntitlementCacheListener` and its NATS subscription; from runtime: `BillingEntitlementChangedPayload` and the `KELTA_BILLING` stream; from the gateway: the `/api/billing/**` static route and its authoritative-path entry. `V207__drop_billing_webhook_event.sql` drops the orphan dedupe table. The worker's only `EntitlementService` is `service/entitlement/ModuleEntitlementService`: the tenant's module `EntitlementProvider`, else `MemberEntitlements.EMPTY` — what a tenant without billing always got (watches uncapped, push/email ungated, SMS never sent). `V209__drop_legacy_billing_tables.sql` drops the five V178 `billing_*` tables and their `billing-*` system collection rows, and the definitions are gone from `SystemCollectionDefinitions` |
+| 9 — External modules | [`9-external-modules.md`](9-external-modules.md) | **backend + UI, security** — modules as out-of-process HTTP services, any language | 🔴 **Not started — spec written** (2026-10-30), with the protocol contract in `docs/module-protocol/openapi.yaml`. Parts 9a–9h: contract, service principal, install by URL, invocation layer, events + UI pin, Rust billing module, JAR-path removal, async actions |
 
 Slice 8 exercises every earlier slice: routes (checkout/portal), webhooks (Stripe), settings
 (`credential-ref` to the Stripe key), permissions (`MANAGE_BILLING`), provisioning (five

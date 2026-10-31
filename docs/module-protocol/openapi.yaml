@@ -1,0 +1,824 @@
+openapi: 3.1.0
+info:
+  title: Kelta Module Protocol
+  version: 1.0.0-draft
+  summary: Endpoints an external Kelta module implements. The Kelta platform is the client.
+  description: |
+    A Kelta module is an HTTPS service, written in any language, that a tenant admin installs by
+    URL. The platform reads the module's manifest, then calls the endpoints below for every piece
+    of module logic: flow actions, before-save hooks, record events, service ports, HTTP routes,
+    inbound webhooks, schedules and lifecycle notifications.
+
+    **Status: draft.** Design and slice plan:
+    `.claude/docs/specs/module-platform/9-external-modules.md`. Nothing on the platform side is
+    implemented yet; the shapes may change until protocol version 1 ships.
+
+    ## Authenticating the platform
+
+    Every request except `GET /.well-known/kelta-module.json` carries
+    `Authorization: Bearer <assertion>`, an ES256-signed JWT. A module MUST verify it and reject
+    the request with `401` otherwise:
+
+    1. Verify the signature with the key named by `kid` in the platform JWKS
+       (`{issuer}/.well-known/jwks.json`). Cache the JWKS; refetch on an unknown `kid`.
+    2. `iss` equals the configured issuer, `aud` equals the module id, `exp` is in the future
+       (allow 30 s of clock skew).
+    3. `htm` and `htu` equal this request's method and full URL.
+    4. `body_sha256` equals the base64url (unpadded) SHA-256 of the raw request body bytes, read
+       before any parsing. For a request without a body, it is the hash of the empty string.
+
+    Claims available after verification: `tenant_id`, `tenant_slug`, `sub` (the install id) and,
+    when a user triggered the call, `act` = `{ sub, user_type, profile_id }`.
+
+    ## Calling the platform
+
+    Every request also carries `Kelta-Access-Token`: a short-lived bearer token for the install's
+    service principal. Use it as `Authorization: Bearer <token>` against the tenant's public
+    JSON:API (`/api/...`) to read or write data during this request. It carries only the
+    permissions the admin approved at install. Do not store it; every call brings a fresh one.
+
+    ## Errors
+
+    A module answers a business failure with `200` and the endpoint's failure shape
+    (`success: false`, `allowed: false`). A non-2xx status, a timeout or an unparseable body is
+    treated as the module being unavailable. Keep within the manifest's `timeoutMs`.
+servers:
+  - url: '{baseUrl}'
+    description: The module's base URL, as registered at install.
+    variables:
+      baseUrl:
+        default: https://module.example.com
+security:
+  - platformAssertion: []
+tags:
+  - name: discovery
+    description: The manifest the platform reads to plan an install.
+  - name: actions
+    description: Flow actions, invoked from flow Task states and schedules.
+  - name: hooks
+    description: Synchronous before-save validation and field updates.
+  - name: events
+    description: Asynchronous record-change deliveries.
+  - name: services
+    description: Platform-defined service ports a module can implement.
+  - name: routes
+    description: Module HTTP routes, proxied from `/api/modules/{moduleId}/x/**`.
+  - name: webhooks
+    description: Third-party webhooks, proxied from `/api/modules/webhooks/{tenantId}/{moduleId}`.
+  - name: lifecycle
+    description: Install lifecycle notifications and health.
+paths:
+  /.well-known/kelta-module.json:
+    get:
+      tags: [discovery]
+      operationId: getManifest
+      summary: The module manifest
+      description: Fetched at plan, install and upgrade time. Unauthenticated; must not contain secrets.
+      security: []
+      responses:
+        '200':
+          description: The manifest.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleManifest'
+  /kelta/v1/actions/{key}:
+    post:
+      tags: [actions]
+      operationId: executeAction
+      summary: Run a flow action
+      description: |
+        Called when a flow Task state references the action, or a schedule fires. Synchronous:
+        answer within the action's `timeoutMs`. Retries are driven by the flow's `Retry` policy
+        and reuse the same `Idempotency-Key`.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/AccessToken'
+        - $ref: '#/components/parameters/TraceParent'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: '`<executionId>:<stepName>` for flow calls, `<jobId>:<fireTime>` for schedules. Stable across retries of one step.'
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionRequest'
+      responses:
+        '200':
+          description: The action ran. `success` says whether it succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionResponse'
+        default:
+          $ref: '#/components/responses/Unavailable'
+  /kelta/v1/hooks:
+    post:
+      tags: [hooks]
+      operationId: beforeSave
+      summary: Validate or modify a record before it is written
+      description: |
+        Called synchronously on the write path for every hook registration that matches the
+        collection and operation. Keep it fast: the platform caps hook timeouts at 5 s and may
+        hold a database transaction open while it waits. Shape follows Kubernetes admission
+        webhooks. On `delete`, only `allowed` is honored.
+      parameters:
+        - $ref: '#/components/parameters/AccessToken'
+        - $ref: '#/components/parameters/TraceParent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HookRequest'
+      responses:
+        '200':
+          description: The hook's decision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HookResponse'
+        default:
+          $ref: '#/components/responses/Unavailable'
+  /kelta/v1/events:
+    post:
+      tags: [events]
+      operationId: receiveEvent
+      summary: Receive a record change
+      description: |
+        Delivered asynchronously after a write, for each subscription in the manifest's `events`.
+        At least once, in no guaranteed order: deduplicate on `eventId`. Any 2xx acknowledges;
+        anything else is retried with backoff (5 s, 30 s, 2 min, 10 min, 1 h), then dead-lettered.
+      parameters:
+        - $ref: '#/components/parameters/AccessToken'
+        - $ref: '#/components/parameters/TraceParent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordEvent'
+      responses:
+        '204':
+          description: Acknowledged.
+        default:
+          $ref: '#/components/responses/Unavailable'
+  /kelta/v1/services/entitlements/resolve:
+    post:
+      tags: [services]
+      operationId: resolveEntitlements
+      summary: Entitlements service port
+      description: |
+        Implemented by a module that declares `services: [{ port: entitlements }]`. The platform
+        uses the answer to gate per-member limits (for example watch counts and alert channels).
+        Must never fail for an unknown member: answer with null `planCode` and empty `values`.
+        On any failure or timeout the platform falls back to "no entitlements" (restrictive).
+      parameters:
+        - $ref: '#/components/parameters/AccessToken'
+        - $ref: '#/components/parameters/TraceParent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId:
+                  type: string
+                settings:
+                  $ref: '#/components/schemas/Settings'
+      responses:
+        '200':
+          description: The member's effective entitlements.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberEntitlements'
+        default:
+          $ref: '#/components/responses/Unavailable'
+  /kelta/v1/routes/{path}:
+    parameters:
+      - name: path
+        in: path
+        required: true
+        description: A route path declared in the manifest. Callers reach it at `/api/modules/{moduleId}/x/{path}`.
+        schema:
+          type: string
+      - $ref: '#/components/parameters/AccessToken'
+      - $ref: '#/components/parameters/TraceParent'
+    get:
+      tags: [routes]
+      operationId: routeGet
+      summary: Module HTTP route (GET)
+      description: |
+        Pass-through proxy. The platform forwards the caller's method, query string, body and
+        `Content-Type`; the caller (when authenticated) is in the assertion's `act` claim. Your
+        status code and JSON body go back to the caller unchanged, up to 1 MiB. A 5xx or timeout
+        becomes `502` for the caller.
+      responses:
+        default:
+          description: Any status and JSON body; passed back to the caller.
+          content:
+            application/json:
+              schema: {}
+    post:
+      tags: [routes]
+      operationId: routePost
+      summary: Module HTTP route (POST)
+      description: Same contract as GET. PUT, PATCH and DELETE are proxied the same way when the manifest declares them.
+      requestBody:
+        content:
+          application/json:
+            schema: {}
+      responses:
+        default:
+          description: Any status and JSON body; passed back to the caller.
+          content:
+            application/json:
+              schema: {}
+  /kelta/v1/webhooks:
+    post:
+      tags: [webhooks]
+      operationId: receiveWebhook
+      summary: Inbound third-party webhook
+      description: |
+        Third parties (for example Stripe) post to
+        `/api/modules/webhooks/{tenantId}/{moduleId}` on the platform, which forwards the raw body
+        unchanged plus these request headers, lower-cased: any starting with `x-`, `stripe-`,
+        `signature` or `digest`, and `content-type`, `user-agent`. Verify the provider's own
+        signature over the raw bytes. Your status code goes back to the provider, so answer
+        non-2xx when you want it to retry.
+      parameters:
+        - $ref: '#/components/parameters/AccessToken'
+        - $ref: '#/components/parameters/TraceParent'
+      requestBody:
+        required: true
+        content:
+          '*/*':
+            schema:
+              type: string
+              format: binary
+      responses:
+        default:
+          description: Any status; passed back to the provider.
+  /kelta/v1/lifecycle:
+    post:
+      tags: [lifecycle]
+      operationId: lifecycle
+      summary: Install lifecycle notification
+      description: |
+        Sent after the platform has applied each lifecycle step for a tenant. A non-2xx answer to
+        `installed` or `upgraded` marks the install `FAILED` (the admin can retry by enabling it);
+        answers to the other events are logged only. Must be idempotent.
+      parameters:
+        - $ref: '#/components/parameters/AccessToken'
+        - $ref: '#/components/parameters/TraceParent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LifecycleEvent'
+      responses:
+        '204':
+          description: Accepted.
+        default:
+          $ref: '#/components/responses/Unavailable'
+  /kelta/v1/health:
+    get:
+      tags: [lifecycle]
+      operationId: health
+      summary: Health check
+      description: Called on demand by the platform's module health endpoint.
+      responses:
+        '200':
+          description: The module is serving.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        default:
+          $ref: '#/components/responses/Unavailable'
+components:
+  securitySchemes:
+    platformAssertion:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: ES256 JWT signed by the platform. See "Authenticating the platform" above.
+  parameters:
+    AccessToken:
+      name: Kelta-Access-Token
+      in: header
+      required: true
+      description: Bearer token for the install's service principal, for calls back to the platform API during this request.
+      schema:
+        type: string
+    TraceParent:
+      name: traceparent
+      in: header
+      required: false
+      description: W3C trace context. Propagate it to join the platform's trace.
+      schema:
+        type: string
+  responses:
+    Unavailable:
+      description: Any non-2xx status. The platform treats it as the module being unavailable.
+  schemas:
+    PlatformAssertionClaims:
+      description: Claims of the `Authorization` bearer JWT, for reference. Not sent as a body.
+      type: object
+      required: [iss, aud, sub, tenant_id, tenant_slug, htm, htu, body_sha256, iat, exp, jti]
+      properties:
+        iss:
+          type: string
+          format: uri
+        aud:
+          type: string
+          description: The module id.
+        sub:
+          type: string
+          description: The install id.
+        tenant_id:
+          type: string
+        tenant_slug:
+          type: string
+        act:
+          $ref: '#/components/schemas/Actor'
+        htm:
+          type: string
+        htu:
+          type: string
+          format: uri
+        body_sha256:
+          type: string
+        iat:
+          type: integer
+        exp:
+          type: integer
+        jti:
+          type: string
+    Actor:
+      description: The user whose action caused this call (RFC 8693 `act` claim).
+      type: object
+      required: [sub, user_type]
+      properties:
+        sub:
+          type: string
+          description: User id.
+        user_type:
+          type: string
+          enum: [INTERNAL, PORTAL]
+        profile_id:
+          type: string
+    Settings:
+      description: The install's settings, validated against the manifest's `settings` schema. Never contains secrets.
+      type: object
+      additionalProperties: true
+    Record:
+      description: |
+        A record's attributes, keyed by field name. Server-only fields are never included; fields
+        the module's profile may not read are removed or masked.
+      type: object
+      additionalProperties: true
+    ActionRequest:
+      type: object
+      required: [tenantId, input]
+      properties:
+        tenantId:
+          type: string
+        input:
+          type: object
+          additionalProperties: true
+          description: The step's resolved input parameters.
+        config:
+          type: object
+          additionalProperties: true
+          description: The step's static configuration, validated against the action's `configSchema`.
+        collection:
+          type: [string, 'null']
+          description: The triggering record's collection, when the flow has one.
+        recordId:
+          type: [string, 'null']
+        record:
+          oneOf:
+            - $ref: '#/components/schemas/Record'
+            - type: 'null'
+        previousRecord:
+          oneOf:
+            - $ref: '#/components/schemas/Record'
+            - type: 'null'
+        changedFields:
+          type: array
+          items:
+            type: string
+        execution:
+          type: object
+          properties:
+            executionId:
+              type: string
+            flowId:
+              type: string
+            stepName:
+              type: string
+            attempt:
+              type: integer
+              minimum: 1
+            triggerDepth:
+              type: integer
+        settings:
+          $ref: '#/components/schemas/Settings'
+    ActionResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        output:
+          type: object
+          additionalProperties: true
+          description: Merged into the flow state per the step's `ResultPath`. At most 1000 top-level keys.
+        error:
+          $ref: '#/components/schemas/ModuleError'
+    ModuleError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+    HookRequest:
+      type: object
+      required: [tenantId, collection, operation]
+      properties:
+        tenantId:
+          type: string
+        collection:
+          type: string
+        operation:
+          type: string
+          enum: [create, update, delete]
+        recordId:
+          type: [string, 'null']
+          description: Null on create.
+        record:
+          $ref: '#/components/schemas/Record'
+        previousRecord:
+          oneOf:
+            - $ref: '#/components/schemas/Record'
+            - type: 'null'
+        changedFields:
+          type: array
+          items:
+            type: string
+        settings:
+          $ref: '#/components/schemas/Settings'
+    HookResponse:
+      type: object
+      required: [allowed]
+      properties:
+        allowed:
+          type: boolean
+        fieldUpdates:
+          type: object
+          additionalProperties: true
+          description: Fields to set before the write (create/update only). Fields the module may not write are refused.
+        errors:
+          type: array
+          description: Validation errors, returned to the caller as a 400. Required when `allowed` is false and `conflict` is absent.
+          items:
+            $ref: '#/components/schemas/ValidationError'
+        conflict:
+          description: Reject with 409 instead of 400 (for example a uniqueness or state conflict).
+          allOf:
+            - $ref: '#/components/schemas/ValidationError'
+    ValidationError:
+      type: object
+      required: [message]
+      properties:
+        field:
+          type: [string, 'null']
+          description: Field name, or null for a record-level error.
+        message:
+          type: string
+        code:
+          type: string
+    RecordEvent:
+      type: object
+      required: [eventId, type, tenantId, collection, recordId, timestamp]
+      properties:
+        eventId:
+          type: string
+          description: Unique per event; deduplicate on it.
+        type:
+          type: string
+          enum: [created, updated, deleted]
+        tenantId:
+          type: string
+        collection:
+          type: string
+        recordId:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        data:
+          oneOf:
+            - $ref: '#/components/schemas/Record'
+            - type: 'null'
+        previousData:
+          oneOf:
+            - $ref: '#/components/schemas/Record'
+            - type: 'null'
+        changedFields:
+          type: array
+          items:
+            type: string
+        payloadOmitted:
+          type: boolean
+          description: True when the event was too large to carry `data`; re-read the record by id.
+    MemberEntitlements:
+      type: object
+      required: [values]
+      properties:
+        planCode:
+          type: [string, 'null']
+        subscriptionStatus:
+          type: [string, 'null']
+        values:
+          type: object
+          additionalProperties: true
+          description: Limits and flags, for example `maxWatches` (integer) or `channels` (array of strings).
+    LifecycleEvent:
+      type: object
+      required: [event, tenantId, moduleVersion]
+      properties:
+        event:
+          type: string
+          enum: [installed, upgraded, enabled, disabled, uninstalled]
+        tenantId:
+          type: string
+        moduleVersion:
+          type: string
+        fromVersion:
+          type: string
+          description: Set on `upgraded`.
+        purgeData:
+          type: boolean
+          description: Set on `uninstalled`.
+        settings:
+          $ref: '#/components/schemas/Settings'
+    Health:
+      type: object
+      required: [status, version]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        version:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+    ModuleManifest:
+      type: object
+      required: [manifestVersion, protocolVersion, id, name, version]
+      properties:
+        manifestVersion:
+          const: 2
+        protocolVersion:
+          const: 1
+        id:
+          type: string
+          pattern: '^[a-z][a-z0-9-]{1,62}$'
+          description: Stable forever; the JWT `aud`.
+        name:
+          type: string
+        version:
+          type: string
+          description: Semantic version. An upgrade requires a strictly higher version.
+        description:
+          type: string
+        author:
+          type: string
+        minPlatformVersion:
+          type: string
+        permissions:
+          $ref: '#/components/schemas/ManifestPermissions'
+        metadata:
+          type: object
+          description: |
+            A Kelta metadata package (`formatVersion: 2`, as `POST /api/packages/export` produces).
+            Allowed item types: COLLECTION, FIELD, GLOBAL_PICKLIST, PICKLIST_VALUE,
+            VALIDATION_RULE, UI_PAGE, UI_MENU, UI_MENU_ITEM.
+          required: [formatVersion, items]
+          properties:
+            formatVersion:
+              const: 2
+            items:
+              type: array
+              items:
+                type: object
+                required: [type, data]
+                properties:
+                  type:
+                    type: string
+                    enum: [COLLECTION, FIELD, GLOBAL_PICKLIST, PICKLIST_VALUE, VALIDATION_RULE, UI_PAGE, UI_MENU, UI_MENU_ITEM]
+                  data:
+                    type: object
+                    additionalProperties: true
+        settings:
+          type: object
+          description: JSON Schema for per-install settings. Never put secrets here; declare credentials instead.
+          additionalProperties: true
+        actions:
+          type: array
+          items:
+            type: object
+            required: [key, name]
+            properties:
+              key:
+                type: string
+                pattern: '^[a-z][a-z0-9-]{0,62}$'
+              name:
+                type: string
+              description:
+                type: string
+              category:
+                type: string
+              icon:
+                type: string
+              timeoutMs:
+                type: integer
+                minimum: 1
+                maximum: 120000
+                default: 30000
+              configSchema:
+                type: object
+                additionalProperties: true
+              inputSchema:
+                type: object
+                additionalProperties: true
+              outputSchema:
+                type: object
+                additionalProperties: true
+        hooks:
+          type: array
+          items:
+            type: object
+            required: [collection, events]
+            properties:
+              collection:
+                type: string
+                description: A collection name, or `*` for every collection.
+              events:
+                type: array
+                items:
+                  type: string
+                  enum: [beforeCreate, beforeUpdate, beforeDelete]
+              order:
+                type: integer
+                default: 1000
+              timeoutMs:
+                type: integer
+                minimum: 100
+                maximum: 5000
+                default: 2000
+              failurePolicy:
+                type: string
+                enum: [fail, ignore]
+                default: fail
+        events:
+          type: array
+          items:
+            type: object
+            required: [collection, types]
+            properties:
+              collection:
+                type: string
+              types:
+                type: array
+                items:
+                  type: string
+                  enum: [created, updated, deleted]
+        services:
+          type: array
+          items:
+            type: object
+            required: [port]
+            properties:
+              port:
+                type: string
+                enum: [entitlements]
+              cacheTtlSeconds:
+                type: integer
+                minimum: 0
+                maximum: 300
+                default: 60
+        routes:
+          type: array
+          items:
+            type: object
+            required: [path]
+            properties:
+              path:
+                type: string
+                description: Relative path under `/api/modules/{moduleId}/x/`, at most 3 segments.
+              methods:
+                type: array
+                items:
+                  type: string
+                  enum: [GET, POST, PUT, PATCH, DELETE]
+                default: [GET]
+              permission:
+                type: [string, 'null']
+                description: An existing system permission the caller must hold. Null means any authenticated user of the tenant.
+        schedules:
+          type: array
+          items:
+            type: object
+            required: [action, cron]
+            properties:
+              action:
+                type: string
+                description: An action key declared in `actions`.
+              cron:
+                type: string
+                description: Spring 6-field cron expression, evaluated in the tenant's timezone.
+        webhook:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+              default: false
+        ui:
+          type: object
+          required: [bundlePath, sha256]
+          properties:
+            bundlePath:
+              type: string
+              description: Path on the module to fetch the bundle from at install and upgrade.
+            sha256:
+              type: string
+              pattern: '^[0-9a-f]{64}$'
+              description: Hex SHA-256 of the bundle. The platform refuses an install whose fetched bundle does not match.
+    ManifestPermissions:
+      type: object
+      description: |
+        What the module's service principal may do through the platform API, shown to the admin
+        for consent. Collections the module provisions through `metadata` get full access
+        implicitly. No wildcards.
+      properties:
+        objects:
+          type: array
+          items:
+            type: object
+            required: [collection]
+            properties:
+              collection:
+                type: string
+              read:
+                type: boolean
+                default: false
+              create:
+                type: boolean
+                default: false
+              edit:
+                type: boolean
+                default: false
+              delete:
+                type: boolean
+                default: false
+        fields:
+          type: array
+          items:
+            type: object
+            required: [collection, field, visibility]
+            properties:
+              collection:
+                type: string
+              field:
+                type: string
+              visibility:
+                type: string
+                enum: [VISIBLE, READ_ONLY, HIDDEN, MASKED]
+        system:
+          type: array
+          description: Existing system permission names, for example `MANAGE_USERS`.
+          items:
+            type: string
+        credentials:
+          type: array
+          description: Names of tenant credentials the module may read via `GET /api/modules/self/credentials/{name}`.
+          items:
+            type: string
