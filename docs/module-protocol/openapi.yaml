@@ -3,6 +3,9 @@ info:
   title: Kelta Module Protocol
   version: 1.0.0-draft
   summary: Endpoints an external Kelta module implements. The Kelta platform is the client.
+  license:
+    name: MIT
+    identifier: MIT
   description: |
     A Kelta module is an HTTPS service, written in any language, that a tenant admin installs by
     URL. The platform reads the module's manifest, then calls the endpoints below for every piece
