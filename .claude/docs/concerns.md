@@ -1039,24 +1039,32 @@ works — which reads as a method-specific bug.
 stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 `CollectionSchemaControllerTest`).
 
-### Module-platform 9g rollout — old worker pods read dropped columns (V225)
+### Module-platform 9g rollout — expand (V225), then contract (separate migration)
+
+9g removes the JAR module path in two steps, because the previous worker image keeps serving while
+the rolling update replaces it, and that image reads every JAR column on every module path.
 
 - **V225 refuses to run while a JAR install is left.** Its `DO` block raises if any `tenant_module`
   row has `base_url IS NULL` or status `QUARANTINED`/`STUB`, which fails the migrate Job (the ArgoCD
   PreSync hook, `backoffLimit: 0`) and stops the rollout before a worker pod changes. Move each such
   module out of process (install the external service by URL, uninstall the JAR row), then re-sync.
-- **During the rolling update, old pods' module reads fail.** V225 drops `tenant_module` columns
-  (`jar_checksum`, `module_class`, `s3_key`, `jar_signature`, `last_loaded_at`, `load_attempts`, …)
-  that the previous release's `JdbcModuleStore` still reads: it selects `*` and maps
-  `rs.getString("jar_checksum")` and friends, which now throws. Until each old pod is replaced, a
-  request it answers that reads `tenant_module` is a `500`: `GET /api/modules` and every other
-  `/api/modules` admin read, the module self-calls that resolve the install by its connected app
-  (`/api/modules/self/credentials/{name}`, task complete/heartbeat), and its `module.changed`
-  refreshes and 60 s reconcile (logged, not fatal). Flow actions, hooks, the entitlements port,
-  routes and webhooks keep working on old pods: they go through the in-memory
-  `ExternalModuleRegistry` built before the migration. The window is the rollout's length; a module
-  that reads a credential per request (billing reads its Stripe key) can see a few failed calls
-  from it. Don't install, upgrade or uninstall a module until the rollout finishes.
+- **V225 (expand) drops nothing.** It sets `base_url NOT NULL` and narrows `chk_module_status` to
+  the external statuses. The previous image's `JdbcModuleStore` maps `jar_checksum`,
+  `jar_size_bytes`, `module_class` and `s3_key` by name after `SELECT *` on every `tenant_module`
+  read, lists them in its install `INSERT`, and reads `last_loaded_at`/`load_attempts` for the module
+  list and health; its signing-key endpoints read `tenant_module_signing_key`. All of that keeps
+  working, so old and new pods both serve during the rollout, and rolling back to the previous image
+  stays possible. The previous image writes `base_url NULL` only on its JAR installs
+  (`POST /api/modules/install` without a `baseUrl`, `POST /api/modules/install-jar`), and those now
+  fail on the constraint: on purpose, since a JAR row created mid-rollout would be orphaned. It
+  writes `QUARANTINED`/`STUB` only from its JAR loader, which returns early for external rows.
+- **This release neither reads nor writes the JAR columns.** They, their
+  `idx_tenant_module_signature_key` index and the `tenant_module_signing_key` table are dead
+  until the contract migration. They are nullable or defaulted, so the new `INSERT` omits them.
+- **The contract migration ships as its own PR** and drops them. Merge it only after the 9g release
+  is deployed and no worker pod still runs the previous image. Once it has run, the previous image
+  fails every module read (its row mapper throws), so a rollback past it means reverting the 9g
+  code and restoring the columns and table from V1, V186 and V189.
 
 ### Gateway routing
 

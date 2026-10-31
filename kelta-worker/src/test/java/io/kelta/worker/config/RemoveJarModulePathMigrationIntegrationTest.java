@@ -25,8 +25,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * silently orphaned — and it must see every tenant's rows even when the migrating session carries a
  * tenant, since {@code tenant_module} has FORCE ROW LEVEL SECURITY.
  *
+ * <p>V225 is the expand half of a two-step change: the previous worker image keeps serving during
+ * the rollout and reads every JAR column, so V225 drops nothing. The last test checks that the
+ * statements that image runs on an external module still work afterwards.
+ *
  * <p>Runs the real migrations against Postgres as the application role (no BYPASSRLS), the way the
- * deploy-time migrate Job does. The methods share one database and run in order.
+ * deploy-time migrate Job does. The methods share one database and run in order. Flyway stops at
+ * V225, so a later contract migration does not change what this test sees.
  */
 @Testcontainers(disabledWithoutDocker = true)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -79,7 +84,7 @@ class RemoveJarModulePathMigrationIntegrationTest {
         // tenant A's rows and pass for the wrong reason.
         admin.execute("ALTER ROLE app_rls SET app.current_tenant_id = '" + TENANT_B + "'");
         try {
-            assertThatThrownBy(() -> flyway(null).migrate())
+            assertThatThrownBy(() -> flyway("225").migrate())
                     .isInstanceOf(FlywayException.class)
                     .hasMessageContaining("V225: 1 tenant_module row(s) are still JAR module installs")
                     .hasMessageContaining(TENANT_A + "/sample-jar");
@@ -100,7 +105,7 @@ class RemoveJarModulePathMigrationIntegrationTest {
         admin.update("UPDATE tenant_module SET base_url = 'https://module.example.test', status = 'QUARANTINED' "
                 + "WHERE id = ?", JAR_ROW);
 
-        assertThatThrownBy(() -> flyway(null).migrate())
+        assertThatThrownBy(() -> flyway("225").migrate())
                 .isInstanceOf(FlywayException.class)
                 .hasMessageContaining("V225: 1 tenant_module row(s) hold a JAR-only status")
                 .hasMessageContaining(TENANT_A + "/sample-jar (QUARANTINED)");
@@ -109,21 +114,22 @@ class RemoveJarModulePathMigrationIntegrationTest {
 
     @Test
     @Order(3)
-    @DisplayName("with no JAR install left it drops the JAR-only schema and keeps every external install")
-    void dropsTheJarSchema() {
+    @DisplayName("with no JAR install left it adds the guarantees, drops nothing, and keeps every external install")
+    void addsTheGuaranteesAndDropsNothing() {
         admin.update("DELETE FROM tenant_module WHERE id = ?", JAR_ROW);
 
-        flyway(null).migrate();
+        flyway("225").migrate();
 
+        // Deferred to the contract migration: the previous image still reads all of these.
         for (String column : new String[]{"jar_checksum", "jar_size_bytes", "module_class", "s3_key",
-                "jar_signature", "jar_signature_key_fingerprint", "last_loaded_at", "load_attempts"}) {
-            assertThat(columnExists(column)).as(column).isFalse();
-        }
-        for (String column : new String[]{"base_url", "source_url", "last_error", "last_error_at",
-                "connected_app_id", "service_user_id", "ui_bundle_sha256"}) {
+                "jar_signature", "jar_signature_key_fingerprint", "last_loaded_at", "load_attempts",
+                "base_url", "source_url", "last_error", "last_error_at", "connected_app_id",
+                "service_user_id", "ui_bundle_sha256"}) {
             assertThat(columnExists(column)).as(column).isTrue();
         }
-        assertThat(admin.queryForObject("SELECT to_regclass('public.tenant_module_signing_key') IS NULL",
+        assertThat(admin.queryForObject("SELECT to_regclass('public.tenant_module_signing_key') IS NOT NULL",
+                Boolean.class)).isTrue();
+        assertThat(admin.queryForObject("SELECT to_regclass('public.idx_tenant_module_signature_key') IS NOT NULL",
                 Boolean.class)).isTrue();
         assertThat(admin.queryForObject("SELECT is_nullable FROM information_schema.columns "
                 + "WHERE table_name = 'tenant_module' AND column_name = 'base_url'", String.class)).isEqualTo("NO");
@@ -132,8 +138,51 @@ class RemoveJarModulePathMigrationIntegrationTest {
 
         assertThatThrownBy(() -> admin.update("UPDATE tenant_module SET status = 'QUARANTINED' WHERE id = ?",
                 EXTERNAL_ROW)).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> admin.update("UPDATE tenant_module SET status = 'STUB' WHERE id = ?",
+                EXTERNAL_ROW)).isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> admin.update("UPDATE tenant_module SET base_url = NULL WHERE id = ?",
                 EXTERNAL_ROW)).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @Order(4)
+    @DisplayName("the previous image's statements on an external module still run after V225; its JAR install does not")
+    void previousImageStatementsStillRun() {
+        JdbcTemplate app = new JdbcTemplate(dataSource("app_rls", "app_rls"));
+        String installed = "aaaaaaaa-0000-0000-0000-00000000d003";
+
+        // Its install INSERT lists the JAR columns (null for an external module).
+        app.update("""
+                INSERT INTO tenant_module
+                    (id, tenant_id, module_id, name, version, description, source_url,
+                     jar_checksum, jar_size_bytes, module_class, manifest, status,
+                     installed_by, s3_key, base_url, protocol_version, connected_app_id,
+                     service_user_id, installed_at, updated_at)
+                VALUES (?, ?, 'sample-second', 'Second', '1.0.0', null, 'https://module.example.test',
+                        null, null, null, '{}'::jsonb, 'INSTALLING', 'admin', null,
+                        'https://module.example.test', 1, null, null, NOW(), NOW())
+                """, installed, TENANT_A);
+        // Its row mapper reads every JAR column by name after SELECT *.
+        app.query("SELECT * FROM tenant_module WHERE id = ?", rs -> {
+            for (String column : new String[]{"jar_checksum", "jar_size_bytes", "module_class", "s3_key"}) {
+                rs.getString(column);
+            }
+        }, installed);
+        // Its module list and health read the load diagnostics.
+        assertThat(app.queryForList("SELECT last_error, last_error_at, last_loaded_at, load_attempts "
+                + "FROM tenant_module WHERE id = ?", installed)).hasSize(1);
+        // The statuses it writes for an external module are all still allowed.
+        for (String status : new String[]{"ACTIVE", "DEGRADED", "FAILED", "DISABLED", "UNINSTALLING"}) {
+            app.update("UPDATE tenant_module SET status = ? WHERE id = ?", status, installed);
+        }
+
+        // Its JAR install writes base_url NULL, which V225 now refuses: no new JAR row mid-rollout.
+        assertThatThrownBy(() -> app.update("INSERT INTO tenant_module (id, tenant_id, module_id, name, version, "
+                + "source_url, jar_checksum, module_class, s3_key, manifest, status, installed_by) VALUES (?, ?, "
+                + "'sample-jar-late', 'Late JAR', '1.0.0', 'local://upload', 'abc', 'x.Sample', "
+                + "'modules/sample.jar', '{}'::jsonb, 'INSTALLED', 'admin')",
+                "aaaaaaaa-0000-0000-0000-00000000d004", TENANT_A))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     private static boolean columnExists(String column) {
@@ -141,18 +190,16 @@ class RemoveJarModulePathMigrationIntegrationTest {
                 + "WHERE table_name = 'tenant_module' AND column_name = ?)", Boolean.class, column));
     }
 
-    /** Flyway as the application role, the way the migrate Job runs it; {@code target} null = latest. */
+    /** Flyway as the application role, the way the migrate Job runs it, stopping at {@code target}. */
     private static Flyway flyway(String target) {
-        var configuration = Flyway.configure()
+        return Flyway.configure()
                 .dataSource(dataSource("app_rls", "app_rls"))
                 .locations("classpath:db/migration")
                 .baselineOnMigrate(true)
                 .baselineVersion("0")
-                .placeholderReplacement(false);
-        if (target != null) {
-            configuration.target(target);
-        }
-        return configuration.load();
+                .placeholderReplacement(false)
+                .target(target)
+                .load();
     }
 
     private static DriverManagerDataSource dataSource(String user, String password) {

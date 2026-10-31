@@ -4,29 +4,36 @@
 -- classloader, a JAR store, a signature verifier or a load-retry loop, so it has nothing that can
 -- run a JAR row.
 --
+-- This is the EXPAND half of a two-step change. It only adds guarantees; it drops nothing,
+-- because the previous worker image is still serving while the rollout replaces it, and that
+-- image reads every JAR column on every module path (its row mapper reads them by name after
+-- SELECT *, its install INSERT lists them, and its module list and health read last_loaded_at
+-- and load_attempts). The contract migration that drops them ships separately, once no
+-- old-image worker pod is left (concerns.md -> Module-platform 9g rollout).
+--
 -- 1. Refuse to run while any row is still a JAR install (base_url IS NULL), or still holds a
 --    JAR-only status (QUARANTINED, STUB). Such a row would be silently orphaned: still listed,
 --    its flow actions unregistered, and nothing able to load it. Move it out of process first
 --    (install the external service by URL, then uninstall the JAR row), then re-run the deploy.
 --    The migrate Job is the ArgoCD PreSync hook with backoffLimit 0, so this exception stops the
 --    rollout before any worker pod starts.
--- 2. base_url becomes NOT NULL, so the invariant holds from now on.
--- 3. Drop what only the JAR path read or wrote:
---      tenant_module.jar_checksum, jar_size_bytes, module_class, s3_key, jar_signature,
---      jar_signature_key_fingerprint (and its index), last_loaded_at, load_attempts
---      (per-pod JAR load diagnostics; external installs record last_error / last_error_at);
---      tenant_module_signing_key (V186), with its RLS policies.
---    Kept: every other tenant_module column (source_url holds the install URL), last_error and
---    last_error_at, and tenant_module_action.
--- 4. chk_module_status loses QUARANTINED and STUB, which only the JAR loader wrote (V189).
+-- 2. base_url becomes NOT NULL, so no JAR row can be created again, not even by an old pod during
+--    the rollout. The previous image writes base_url NULL only on its JAR install paths
+--    (POST /api/modules/install without a baseUrl, POST /api/modules/install-jar); this release
+--    refuses both anyway. Its external install always sets base_url.
+-- 3. chk_module_status loses QUARANTINED and STUB. The previous image writes them only from its
+--    JAR loader, which returns before writing anything for an external row; with step 1 and
+--    step 2 no JAR row can reach it.
+--
+-- Left in place for the contract migration, unread and unwritten by this release:
+--   tenant_module.jar_checksum, jar_size_bytes, module_class, s3_key, jar_signature,
+--   jar_signature_key_fingerprint (and idx_tenant_module_signature_key), last_loaded_at,
+--   load_attempts; the tenant_module_signing_key table (V186). All are nullable or defaulted,
+--   so this release's INSERT, which no longer lists them, still succeeds.
 --
 -- tenant_module has FORCE ROW LEVEL SECURITY. The checks select the admin_bypass sentinel
 -- explicitly (as V204 and V208 do) so they see every tenant's rows whatever the session carried
 -- in; a check that saw no rows would pass for the wrong reason.
---
--- Not reversible in place: the dropped columns held JAR bytes' locations, checksums and
--- signatures that no code reads any more. To restore the JAR path, revert slice 9g's code and
--- re-add the columns and table from V1, V186 and V189.
 
 DO $$
 DECLARE
@@ -61,20 +68,6 @@ BEGIN
 END $$;
 
 ALTER TABLE tenant_module ALTER COLUMN base_url SET NOT NULL;
-
-DROP INDEX IF EXISTS idx_tenant_module_signature_key;
-
-ALTER TABLE tenant_module
-    DROP COLUMN IF EXISTS jar_checksum,
-    DROP COLUMN IF EXISTS jar_size_bytes,
-    DROP COLUMN IF EXISTS module_class,
-    DROP COLUMN IF EXISTS s3_key,
-    DROP COLUMN IF EXISTS jar_signature,
-    DROP COLUMN IF EXISTS jar_signature_key_fingerprint,
-    DROP COLUMN IF EXISTS last_loaded_at,
-    DROP COLUMN IF EXISTS load_attempts;
-
-DROP TABLE IF EXISTS tenant_module_signing_key;
 
 ALTER TABLE tenant_module DROP CONSTRAINT IF EXISTS chk_module_status;
 ALTER TABLE tenant_module ADD CONSTRAINT chk_module_status

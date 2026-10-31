@@ -52,7 +52,8 @@ class JdbcModuleStoreInstalledByWidthTest {
         jdbcTemplate.execute("CREATE DOMAIN IF NOT EXISTS JSONB AS VARCHAR(100000)");
         // Mirrors the shipped schema after V225 (installed_by widened in V187). If installed_by is
         // ever narrowed back toward a UUID width, this test fails rather than the next long-named
-        // actor discovering it.
+        // actor discovering it. The JAR columns V225 leaves for the contract migration are kept,
+        // nullable as shipped, so the INSERT is shown to succeed without listing them.
         jdbcTemplate.execute("""
                 CREATE TABLE tenant_module (
                     id VARCHAR(36) PRIMARY KEY,
@@ -62,9 +63,17 @@ class JdbcModuleStoreInstalledByWidthTest {
                     version VARCHAR(64) NOT NULL,
                     description VARCHAR(1000),
                     source_url VARCHAR(2000) NOT NULL,
+                    jar_checksum VARCHAR(64),
+                    jar_size_bytes BIGINT,
+                    module_class VARCHAR(500),
                     manifest VARCHAR(100000),
                     status VARCHAR(20) NOT NULL,
                     installed_by VARCHAR(255) NOT NULL,
+                    s3_key VARCHAR(2000),
+                    jar_signature VARCHAR(10000),
+                    jar_signature_key_fingerprint VARCHAR(64),
+                    last_loaded_at TIMESTAMP,
+                    load_attempts INTEGER DEFAULT 0 NOT NULL,
                     base_url VARCHAR(2000) NOT NULL,
                     protocol_version INTEGER,
                     connected_app_id VARCHAR(36),

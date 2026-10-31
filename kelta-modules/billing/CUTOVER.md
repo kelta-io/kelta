@@ -3,9 +3,10 @@
 > **Complete — kept as history.** Every tenant that ran the JAR build was cut over on 2026-10-31
 > (results in [`VERIFICATION.md`](VERIFICATION.md) §4). Module-platform part 9g then deleted the JAR
 > build (`kelta-modules/billing-jar`) and the platform's JAR module path (install endpoint, signing
-> keys, loader; migration V225 drops the JAR columns), so **there is no JAR build to roll back to**.
-> Rolling back now means redeploying a platform release from before 9g (and restoring the columns
-> and table V225 dropped) together with a JAR artifact built from that era's source — neither is in
+> keys, loader; V225 refuses JAR installs and the 9g contract migration drops the JAR columns), so
+> **there is no JAR build to roll back to**. Rolling back now means redeploying a platform release
+> from before 9g (and, once the contract migration has run, restoring the columns and table it
+> dropped) together with a JAR artifact built from that era's source — neither is in
 > this repository any more. The [Rollback](#rollback) section below applied only before 9g.
 
 Moves one tenant from the Java JAR build of `kelta-billing` (formerly `kelta-modules/billing-jar`) to the

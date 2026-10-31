@@ -1,1 +1,1 @@
-- 2026-10-31 refactor(modules): remove the in-process JAR module path; every module is an external HTTP service (V225 refuses to run while a JAR install remains) (module-platform 9g)
+- 2026-10-31 refactor(modules): remove the in-process JAR module path; every module is an external HTTP service (V225 refuses to run while a JAR install remains, makes `base_url` NOT NULL and drops nothing; a separate contract migration drops the JAR columns once no old-image worker pod is left) (module-platform 9g)
