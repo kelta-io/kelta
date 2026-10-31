@@ -26,9 +26,8 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * Install, upgrade, enable, disable and uninstall for <b>external</b> modules — HTTPS services
- * installed by URL ({@code specs/module-platform/9-external-modules.md} §3.5). JAR modules keep
- * going through {@link RuntimeModuleManager}; nothing here loads code.
+ * Install, upgrade, enable, disable and uninstall for modules — HTTPS services installed by URL
+ * ({@code specs/module-platform/9-external-modules.md} §3.5). Nothing here loads code.
  *
  * <p><b>Install</b> re-plans and refuses a stale {@code planHash} (409) or a plan with blockers
  * (422), then: writes the {@code tenant_module} row ({@code INSTALLING}, with {@code base_url}),
@@ -134,8 +133,8 @@ public class ExternalModuleService {
         ExternalModuleManifest manifest = plan.manifest();
         String id = UUID.randomUUID().toString();
         TenantModuleData row = new TenantModuleData(id, tenantId, manifest.id(), manifest.name(),
-                manifest.version(), manifest.description(), plan.baseUrl(), null, null, null,
-                plan.manifestJson(), TenantModuleData.STATUS_INSTALLING, userId, null, null, null, List.of(),
+                manifest.version(), manifest.description(), plan.baseUrl(), plan.manifestJson(),
+                TenantModuleData.STATUS_INSTALLING, userId, null, null, List.of(),
                 plan.baseUrl(), manifest.protocolVersion(), null, null);
         moduleStore.createModule(row);
         log.info("Installing external module '{}' v{} from {} for tenant {}", manifest.id(), manifest.version(),
@@ -146,7 +145,7 @@ public class ExternalModuleService {
 
     /** {@code POST /api/modules/{id}/upgrade}: same checks, from the stored base URL. */
     public TenantModuleData upgrade(String tenantId, String moduleId, String planHash, String userId) {
-        TenantModuleData row = external(tenantId, moduleId);
+        TenantModuleData row = installed(tenantId, moduleId);
         if (planHash == null || planHash.isBlank()) {
             throw new IllegalArgumentException("planHash is required: POST /api/modules/plan with the module's "
                     + "baseUrl and send its planHash");
@@ -171,7 +170,7 @@ public class ExternalModuleService {
      * the install steps from the stored manifest. {@code ACTIVE} is left alone.
      */
     public TenantModuleData enable(String tenantId, String moduleId, String userId) {
-        TenantModuleData row = external(tenantId, moduleId);
+        TenantModuleData row = installed(tenantId, moduleId);
         if (TenantModuleData.STATUS_ACTIVE.equals(row.status())) {
             return row;
         }
@@ -191,7 +190,7 @@ public class ExternalModuleService {
 
     /** {@code POST /api/modules/{id}/disable}: no invocations from now on; {@code lifecycle disabled}. */
     public TenantModuleData disable(String tenantId, String moduleId) {
-        TenantModuleData row = external(tenantId, moduleId);
+        TenantModuleData row = installed(tenantId, moduleId);
         moduleStore.updateStatus(row.id(), TenantModuleData.STATUS_DISABLED);
         TenantModuleData disabled = reload(row);
         refreshLocally(disabled);
@@ -420,14 +419,10 @@ public class ExternalModuleService {
         return resolved != null && UUID_SHAPE.matcher(resolved).matches() ? resolved : null;
     }
 
-    private TenantModuleData external(String tenantId, String moduleId) {
-        TenantModuleData row = moduleStore.findByTenantAndModuleId(tenantId, moduleId)
+    private TenantModuleData installed(String tenantId, String moduleId) {
+        return moduleStore.findByTenantAndModuleId(tenantId, moduleId)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Module '" + moduleId + "' not found for tenant " + tenantId));
-        if (!row.isExternal()) {
-            throw new IllegalStateException("Module '" + moduleId + "' is a JAR module");
-        }
-        return row;
     }
 
     /**

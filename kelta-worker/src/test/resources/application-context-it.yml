@@ -40,9 +40,6 @@ kelta:
   record-version:
     retention:
       enabled: false
-  modules:
-    load-retry:
-      enabled: false
   auth:
     # The baseline issuer, so BaselineIdentityProviderReconciler finds nothing to repair. Nothing
     # fetches it: the /internal/** JWT chain stays off (kelta.worker.internal-auth.enabled unset).

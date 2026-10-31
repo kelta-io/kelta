@@ -4,7 +4,8 @@ What proves `kelta-billing` (the Rust external module) works, and how to repeat 
 Moving a live tenant from the JAR build to this one is [`CUTOVER.md`](CUTOVER.md).
 
 The JAR build's live rollout record (2026-08-31, including the one-off email→UUID rewrite of
-`billing_*.userId` rows) stays in [`../billing-jar/VERIFICATION.md`](../billing-jar/VERIFICATION.md).
+`billing_*.userId` rows) was `kelta-modules/billing-jar/VERIFICATION.md`, deleted with the JAR
+build in module-platform part 9g; read it from git history.
 
 **Steps marked 🔑 handle secrets. Do not delegate them to an agent.**
 
@@ -103,8 +104,8 @@ kubectl -n default run np-probe --image=curlimages/curl:8.11.1 --rm -it --restar
 ## 4. Live end to end — a non-production tenant, Stripe TEST mode
 
 Run this on a sandbox tenant (never a tenant with paying members) before any production cutover.
-Use only Stripe **test-mode** keys (`sk_test_…`). If the sandbox has the JAR build installed, this
-is also the cutover rehearsal: follow [`CUTOVER.md`](CUTOVER.md) steps 1–6 on it.
+Use only Stripe **test-mode** keys (`sk_test_…`). (Before part 9g, on a sandbox with the JAR build
+installed, this was also the cutover rehearsal: [`CUTOVER.md`](CUTOVER.md) steps 1–6.)
 
 1. 🔑 Create the credential `stripe` (type `stripe`) on the sandbox with the test-mode
    `secretKey`, a test endpoint's `webhookSecret`, and `allowedReturnOrigins`.

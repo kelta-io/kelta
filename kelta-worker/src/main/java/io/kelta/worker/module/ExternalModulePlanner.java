@@ -54,7 +54,6 @@ public class ExternalModulePlanner {
     static final String PLATFORM_TOO_OLD = "PLATFORM_TOO_OLD";
     static final String DOWNGRADE = "DOWNGRADE";
     static final String SAME_VERSION_DIFFERENT_MANIFEST = "SAME_VERSION_DIFFERENT_MANIFEST";
-    static final String INSTALLED_AS_JAR = "INSTALLED_AS_JAR";
     static final String BASE_URL_MISMATCH = "BASE_URL_MISMATCH";
     static final String SIGNING_NOT_CONFIGURED = "SIGNING_NOT_CONFIGURED";
     static final String METADATA_INVALID = "METADATA_INVALID";
@@ -196,7 +195,7 @@ public class ExternalModulePlanner {
                     entry.put("action", item.action());
                     return entry;
                 }).toList());
-        if (installed != null && installed.isExternal()) {
+        if (installed != null) {
             attributes.put("changes", changes(installed, manifest));
             attributes.put("orphanedByUpgrade", orphaned(ownedKeys, metadata));
         }
@@ -275,11 +274,6 @@ public class ExternalModulePlanner {
                                String baseUrl, List<Map<String, Object>> blockers) {
         if (installed == null) {
             return ExternalModulePlan.MODE_INSTALL;
-        }
-        if (!installed.isExternal()) {
-            blockers.add(blocker(INSTALLED_AS_JAR, "Module '" + manifest.id() + "' is installed as a JAR "
-                    + "module in this tenant; uninstall it first"));
-            return ExternalModulePlan.MODE_UPGRADE;
         }
         if (!baseUrl.equals(installed.baseUrl())) {
             blockers.add(blocker(BASE_URL_MISMATCH, "Module '" + manifest.id() + "' is installed from "
@@ -542,7 +536,7 @@ public class ExternalModulePlanner {
     String planHash(Map<String, Object> attributes) {
         Map<String, Object> copy = new TreeMap<>(attributes);
         copy.remove("planHash");
-        return ModuleJarService.sha256(objectMapper.writeValueAsBytes(canonical(copy)));
+        return ModuleHashes.sha256(objectMapper.writeValueAsBytes(canonical(copy)));
     }
 
     private static Object canonical(Object value) {
@@ -558,7 +552,7 @@ public class ExternalModulePlanner {
     }
 
     static String sha256(String text) {
-        return text == null ? null : ModuleJarService.sha256(text.getBytes(StandardCharsets.UTF_8));
+        return text == null ? null : ModuleHashes.sha256(text.getBytes(StandardCharsets.UTF_8));
     }
 
     private static Map<String, Object> blocker(String code, String message) {

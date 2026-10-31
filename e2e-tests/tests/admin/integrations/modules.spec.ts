@@ -165,7 +165,7 @@ test.describe("Modules", () => {
 
     await page.getByTestId("module-approve-install").click();
 
-    await expect(page.getByTestId("module-external-e2e-billing")).toBeVisible();
+    await expect(page.getByTestId("module-card-e2e-billing")).toBeVisible();
     expect(installBody).toEqual({ baseUrl, planHash });
   });
 });

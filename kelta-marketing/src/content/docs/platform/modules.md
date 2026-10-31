@@ -1,105 +1,88 @@
 ---
 title: Runtime modules
-description: Install signed JARs into a tenant at runtime — the manifest, install and signing, lifecycle and quarantine, what a module can contribute, and its limits.
+description: Install a module into a tenant by URL — an HTTPS service in any language. The manifest, plan and consent, what the platform calls, credentials, long-running actions, lifecycle, and limits.
 section: platform
 order: 60
 ---
 
-A **module** is one JAR plus a `kelta-module.json` manifest, uploaded into a tenant. It runs inside the worker
-without a platform redeploy and can contribute flow action handlers, before-save hooks, collections, a webhook
-handler, authenticated HTTP routes, a browser UI bundle, and implementations of platform service ports.
+A **module** is an HTTPS service, written in any language, that a tenant installs **by URL** without a platform
+redeploy. Its code never runs inside Kelta: the platform calls the module over HTTP, and the module calls the
+platform back through the public API with its own service user. A module can contribute flow actions, before-save
+hooks, collections and fields, record-event subscriptions, scheduled actions, an entitlements service, a webhook
+receiver, authenticated HTTP routes, and an admin UI bundle.
 
 ## The manifest
 
-```json
+The module serves its manifest, unauthenticated, at `{baseUrl}/.well-known/kelta-module.json`. Only
+`"manifestVersion": 2` is accepted.
+
+```jsonc
 {
-  "id": "acme-erp-sync",
+  "manifestVersion": 2,
+  "protocolVersion": 1,
+  "id": "acme-erp-sync",                 // stable forever
   "name": "ERP sync",
-  "version": "1.2.0",
+  "version": "1.2.0",                    // an upgrade needs a strictly higher version
   "description": "…",
   "author": "Acme",
-  "moduleClass": "com.acme.kelta.ErpSyncModule",
-  "minPlatformVersion": "1.0.0",
-  "permissions": ["MANAGE_DATA"],
-  "webhookHandlerKey": "erp:webhook",
-  "uiBundlePath": "static/ui-bundle.js",
-  "actionHandlers": [
-    { "key": "erp:push-order", "name": "Push order to ERP", "category": "ERP", "description": "…", "icon": "upload" }
-  ],
-  "collections": [
-    { "name": "erp-sync-log", "displayName": "ERP sync log", "fields": [ { "name": "order", "type": "LOOKUP", "referenceTarget": "orders" } ] }
-  ]
+  "minPlatformVersion": "0.4.0",
+  "permissions": {
+    "objects": [ { "collection": "orders", "read": true } ],
+    "fields":  [],
+    "system":  [],
+    "credentials": [ "erp" ]
+  },
+  "metadata": { "formatVersion": 2, "items": [ /* collections and fields it provisions */ ] },
+  "actions":  [ { "key": "push-order", "name": "Push order to ERP", "timeoutMs": 15000 } ],
+  "hooks":    [ { "collection": "orders", "events": ["beforeUpdate"], "timeoutMs": 2000, "failurePolicy": "fail" } ],
+  "events":   [ { "collection": "orders", "types": ["created", "updated"] } ],
+  "routes":   [ { "path": "status", "methods": ["GET"], "permission": null } ],
+  "schedules":[ { "action": "push-order", "cron": "0 0 * * * *" } ],
+  "webhook":  { "enabled": true },
+  "ui":       { "bundlePath": "/kelta/v1/ui-bundle.js", "sha256": "…" }
 }
 ```
+
+The contract for every field and endpoint is
+[`docs/module-protocol/openapi.yaml`](https://github.com/kelta-io/kelta/blob/main/docs/module-protocol/openapi.yaml).
 
 ## Installing
 
 Setup → Integration → Modules (`MANAGE_CONNECTED_APPS`), or:
 
 ```http
-POST /api/modules/install-jar   (multipart: jar, manifest, signature?)
-POST /api/modules/install       (manifest only, no JAR)
-POST /api/modules/{id}/enable | /disable
-DELETE /api/modules/{id}
-GET  /api/modules, /api/modules/{id}/actions, /api/modules/{id}/health
-GET  /api/modules/{id}/provisioned-resources   (collections and fields it created or adopted)
-```
-
-Install, enable, disable and uninstall check `CUSTOMIZE_APPLICATION` in the API.
-
-Installing **loads** the module immediately on every pod; enable/disable are bookkeeping around that. The JAR is
-stored in object storage with its SHA-256 checksum.
-
-## Signing
-
-Set `KELTA_MODULES_SIGNING_REQUIRED=true` in production: a module runs arbitrary Java inside the worker, so the
-signature is the trust boundary.
-
-- Trust anchors are **per tenant**: `POST /api/modules/signing-keys` (`MANAGE_CREDENTIALS`) registers a public key;
-  several keys may be active so rotation is additive; keys can be retired and reactivated
-  (`POST /api/modules/signing-keys/{id}/retire`, `/activate`), and a retired key deleted
-  (`DELETE /api/modules/signing-keys/{id}`). `GET /api/modules/signing-keys` lists them.
-- Algorithms: Ed25519 (default), SHA256withRSA, ECDSA.
-- The detached signature over the JAR bytes is verified at install and **re-verified on every load**, together
-  with the checksum.
-- With signing required, a tenant with no active key cannot install any JAR.
-
-A legacy platform-wide key (`KELTA_MODULES_SIGNING_PUBLIC_KEY`) is still honoured but logs a warning; prefer
-per-tenant keys.
-
-## Lifecycle and failure
-
-A JAR that fails signature, checksum or class loading is **quarantined**: the module records `QUARANTINED` with the
-reason, and its handlers throw a clear "module unavailable" error so a flow step fails attributably instead of
-silently succeeding. Re-enabling a quarantined module (from the Modules page or `POST /api/modules/{id}/enable`)
-reloads it on every worker without a restart, re-verifying it first. If object storage or the database is briefly
-unreachable, the module is not quarantined: its actions refuse on that worker while the load is retried
-automatically with backoff. `GET /api/modules/{id}/health` reports whether the module is loaded on the answering pod.
-Stub mode (`KELTA_MODULES_STUB_MODE`) exists for development only.
-
-Uninstall unloads the module but keeps the collections and data it created; reinstalling skips collections that
-already exist.
-
-## External modules (installed by URL)
-
-An **external module** is an HTTPS service instead of a JAR. It publishes a v2 manifest at
-`{baseUrl}/.well-known/kelta-module.json` and is installed by URL, in two steps: review a plan, then approve it by
-its hash. On the **Modules** page, choose **Install Module → From URL**, enter the base URL, and select **Review**.
-The page shows what the module will be granted and what it adds, then **Approve and install**. On a module's card,
-**Upgrade** shows the same review as a diff and warns when the upgrade asks for more access. The uninstall
-(trash) button shows what will be removed and what is kept.
-
-```http
 POST   /api/modules/plan                      { "baseUrl": "https://…" }   (the plan and its planHash; writes nothing)
 POST   /api/modules/install                   { "baseUrl": "https://…", "planHash": "…" }
 POST   /api/modules/{id}/upgrade              { "planHash": "…" }
+POST   /api/modules/{id}/enable | /disable
 GET    /api/modules/{id}/uninstall-plan?purgeData=false
 DELETE /api/modules/{id}?planHash=…&purgeData=false
+GET    /api/modules, /api/modules/{id}/actions, /api/modules/{id}/health
+GET    /api/modules/{id}/provisioned-resources   (collections and fields it created or adopted)
 ```
 
+Plan, install, upgrade, enable, disable and uninstall check `CUSTOMIZE_APPLICATION` in the API. Install needs a
+`baseUrl`; a request without one is `400 baseUrl is required`.
+
+A successful install is **active at once** on every worker. If the module answers something the platform
+already answers (an entitlements service, for example), create and fill its collections **before** installing:
+install adopts a collection that already exists and leaves it and its fields alone.
+
+The operator must configure the platform's module signing key (`KELTA_MODULE_SIGNING_KEY`, see
+[Configuration](/docs/deploy/configuration/)). Without it every plan is blocked with `SIGNING_NOT_CONFIGURED`.
+
+## External modules (installed by URL)
+
+Every module is an external service. Installing one takes two steps: review a plan, then approve it by its hash.
+On the **Modules** page, choose **Install Module**, enter the base URL, and select **Review**. The page shows
+what the module will be granted and what it adds, then **Approve and install**. On a module's card,
+**Upgrade** shows the same review as a diff and warns when the upgrade asks for more access. The uninstall
+(trash) button shows what will be removed and what is kept.
+
 - The plan lists what the module asks for and anything that blocks it:
-  - object, field and system permissions;
-  - the collections and fields its metadata creates or adopts.
+  - object, field and system permissions, and the credentials it reads;
+  - the collections and fields its metadata creates or adopts;
+  - its actions, hooks, events, routes, schedules, services and UI bundle.
 
   The status codes are:
   - `200`: the plan itself, even when it has blockers.
@@ -124,7 +107,7 @@ DELETE /api/modules/{id}?planHash=…&purgeData=false
 
 The contract is
 [`docs/module-protocol/openapi.yaml`](https://github.com/kelta-io/kelta/blob/main/docs/module-protocol/openapi.yaml).
-An external module is called only while its install is `ACTIVE` or `DEGRADED`:
+A module is called only while its install is `ACTIVE` or `DEGRADED`:
 
 - **Flow actions.** A flow Task whose `Resource` is `<moduleId>:<key>` calls
   `POST /kelta/v1/actions/{key}`, with the manifest's `timeoutMs`. The request has
@@ -267,35 +250,52 @@ The answer `{ "accessToken", "accessTokenExpiresAt", "taskExpiresAt" }` holds a 
 - Only a top-level flow step can wait. Inside a parallel or map branch, a called sub-flow or a manifest
   schedule, the request has no `task`, and a `202` fails the step with `ModuleUnavailableException`.
 
+## Lifecycle and failure
+
+An install moves through these states:
+
+| Status | Meaning |
+|---|---|
+| `INSTALLING` | the plan is being applied |
+| `ACTIVE` | installed and called |
+| `DEGRADED` | calls kept failing, so a worker opened its circuit breaker; the module is still called, its health is probed every minute, and the first success makes it `ACTIVE` again |
+| `DISABLED` | not called; its hooks and entitlements service are off. Enable it again from its card or `POST /api/modules/{id}/enable` |
+| `FAILED` | an install step failed (the reason is in `lastError`); `POST /api/modules/{id}/enable` retries it |
+| `UNINSTALLING` | removal in progress |
+
+A failing module never looks like a working one: a flow step that calls it fails with `ModuleUnavailableException`
+or `ModuleTimeoutException`. `GET /api/modules/{id}/health` reports the stored status, the last error, the
+module's own answer to its health endpoint, and the circuit breaker of the worker that answered (named in
+`podName`).
+
 ## What a module can contribute
 
 | Contribution | Mechanism |
 |---|---|
-| Flow action handlers | listed in the manifest; appear in the designer palette under the module's category and are referenced by `key` |
-| Before-save hooks | registered per installing tenant, ahead of platform hooks |
-| Collections and fields | created at install through the standard collection API (so they broadcast, get tables and appear in the schema) |
-| Inbound webhook | `POST /api/modules/webhooks/{tenantId}/{moduleId}` dispatches the raw body and headers to the manifest's `webhookHandlerKey`. **Unauthenticated; the module verifies the signature itself** |
-| Authenticated HTTP routes | served under `/api/modules/{moduleId}/x/**` (`API_ACCESS` enforced by the gateway); an inactive module or unknown route answers a uniform 404 |
-| UI bundle | `GET /api/modules/{id}/ui-bundle.js` — a browser bundle that registers page-builder components and field renderers; runs same-origin, protected only by the JAR signature |
-| Platform services | `getServices()` returns implementations of platform-defined ports (for example an entitlement provider), registered per tenant |
+| Flow actions | the manifest's `actions`; they appear in the designer palette and are referenced by `<moduleId>:<key>` |
+| Before-save hooks | the manifest's `hooks`, for the installing tenant only, each with a timeout and a `failurePolicy` |
+| Collections and fields | the manifest's `metadata`, applied at install through the standard metadata import (so they broadcast, get tables and appear in the schema); an existing collection is adopted, never changed |
+| Record events | the manifest's `events`, delivered after the write with retries |
+| Scheduled actions | the manifest's `schedules`, run by the platform scheduler |
+| Entitlements | the manifest's `services` entry for the `entitlements` port, asked when the platform gates on a member's plan |
+| Inbound webhook | `POST /api/modules/webhooks/{tenantId}/{moduleId}` forwards the raw body and signature headers to the module. **Unauthenticated; the module verifies the signature itself**. An unknown tenant, a module that is not installed or not callable, and a module without a webhook all answer a uniform 404 |
+| Authenticated HTTP routes | served under `/api/modules/{moduleId}/x/**` (`API_ACCESS` enforced by the gateway, plus the route's optional `permission`); an undeclared route or a module that is not callable answers 404 |
+| UI bundle | `GET /api/modules/{id}/ui-bundle.js` — a browser bundle that registers page-builder components and field renderers. It runs same-origin with the admin's session, so it is fully trusted code: the admin's approval of its pinned SHA-256 is the only protection |
 
 ## What a module cannot do
 
-No Spring beans, no `@RestController`, no scheduler (use a scheduled flow), no NATS subscriptions, no
-transactions of its own (writes go through the query engine), no DDL beyond the manifest's collections, no
-request context (a hook cannot read the caller's user type), and no access to platform internals outside the
-allow-listed packages. Populate collections **before** installing a module that answers platform queries.
+A module reaches tenant data only through the public API with its service user, so it gets exactly the
+permissions the admin approved and no database access of its own. It cannot add credential types or field types,
+run DDL beyond its manifest's metadata, open gateway paths outside `/api/modules/{moduleId}/x/**`, or subscribe to
+platform messaging (record events come over HTTP instead). A hook cannot hold the write's transaction: it answers
+within its timeout, and a hook that writes the same record back through the API deadlocks or fails.
 
 ## Building one
 
-**An external module** is any HTTPS service that implements the protocol. In Rust, the
+A module is any HTTPS service that implements the protocol. In Rust, the
 [`kelta-module`](https://github.com/kelta-io/kelta/tree/main/kelta-modules/sdk-rust) SDK crate verifies the
 platform's assertion, serves the protocol endpoints and calls the platform API. The
 [`kelta-modules/billing`](https://github.com/kelta-io/kelta/tree/main/kelta-modules/billing) service is built
-on it and is the reference implementation.
-
-**A JAR module** is a Maven project outside the platform build with `runtime-core` and
-`runtime-module-integration` as `provided` dependencies: implement `KeltaModule`, package the JAR, sign it,
-and install. The legacy
-[`kelta-modules/billing-jar`](https://github.com/kelta-io/kelta/tree/main/kelta-modules/billing-jar) build of
-billing is the example, including its `README.md` on the trade-offs of the module boundary.
+on it and is the reference implementation. In another language, implement the same checks by hand: verify the
+assertion's signature against the JWKS, its audience, expiry, method, URL and body hash, and reject a replayed
+`jti`.

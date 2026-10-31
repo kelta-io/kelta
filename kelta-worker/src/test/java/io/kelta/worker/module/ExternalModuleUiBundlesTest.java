@@ -26,7 +26,7 @@ import static org.mockito.Mockito.when;
 class ExternalModuleUiBundlesTest {
 
     private static final byte[] BUNDLE = "console.log('ui')".getBytes(StandardCharsets.UTF_8);
-    private static final String SHA = ModuleJarService.sha256(BUNDLE);
+    private static final String SHA = ModuleHashes.sha256(BUNDLE);
     private static final String KEY = "modules/tenant-1/stub/1.0.0/ui-bundle." + SHA + ".js";
 
     private final ModuleHttpClient http = mock(ModuleHttpClient.class);
@@ -42,10 +42,10 @@ class ExternalModuleUiBundlesTest {
     private static TenantModuleData pinned(String sha256, String key) {
         TenantModuleData base = ExternalModuleFixtures.row(TenantModuleData.STATUS_ACTIVE);
         return new TenantModuleData(base.id(), base.tenantId(), base.moduleId(), base.name(), base.version(), null,
-                base.sourceUrl(), null, null, null,
+                base.sourceUrl(),
                 "{\"manifestVersion\":2,\"protocolVersion\":1,\"id\":\"stub\",\"name\":\"Stub\",\"version\":\"1.0.0\","
                         + "\"ui\":{\"bundlePath\":\"/ui/bundle.js\",\"sha256\":\"" + SHA + "\"}}",
-                base.status(), "admin", Instant.EPOCH, Instant.EPOCH, null, List.of(), base.baseUrl(), 1, "app-1",
+                base.status(), "admin", Instant.EPOCH, Instant.EPOCH, List.of(), base.baseUrl(), 1, "app-1",
                 "svc-1", sha256, key);
     }
 

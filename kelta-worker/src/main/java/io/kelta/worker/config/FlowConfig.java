@@ -76,8 +76,8 @@ public class FlowConfig {
 
     /**
      * Empty at creation; filled by {@link BeforeSaveHookRegistrar} (platform hook beans),
-     * {@code ModuleRegistry} (compile-time module hooks) and {@code RuntimeModuleManager}
-     * (tenant-scoped runtime-module hooks). It cannot take the hooks as a constructor argument:
+     * {@code ModuleRegistry} (compile-time module hooks) and {@code ExternalModuleRegistry}
+     * (tenant-scoped module hooks). It cannot take the hooks as a constructor argument:
      * {@code QueryEngine} depends on this registry and several hooks depend on {@code QueryEngine}.
      */
     @Bean

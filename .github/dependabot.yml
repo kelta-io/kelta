@@ -20,7 +20,6 @@ updates:
       - /kelta-ai
       - /kelta-mcp
       - /kelta-test-harness
-      - /kelta-modules/billing-jar
     schedule:
       interval: weekly
     # Platform upgrades are planned work, not Dependabot batches: a Spring Boot bump (even

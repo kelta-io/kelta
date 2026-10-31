@@ -89,8 +89,8 @@ class ModuleAccessTokenServiceTest {
 
     private static TenantModuleData module(String connectedAppId) {
         return new TenantModuleData("install-1", "tenant-1", "acme-billing", "Billing", "1.0.0", null,
-                "https://billing.example.test", null, null, null, "{}", TenantModuleData.STATUS_ACTIVE, "user-1",
-                null, null, null, List.of(), "https://billing.example.test", 1, connectedAppId, "svc-1");
+                "https://billing.example.test", "{}", TenantModuleData.STATUS_ACTIVE, "user-1",
+                null, null, List.of(), "https://billing.example.test", 1, connectedAppId, "svc-1");
     }
 
     @Test

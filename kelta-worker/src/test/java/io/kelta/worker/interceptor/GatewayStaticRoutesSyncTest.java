@@ -82,7 +82,7 @@ class GatewayStaticRoutesSyncTest {
     }
 
     @Test
-    @DisplayName("the per-route special cases in RouteAuthorizationFilter are the two mirrored ones")
+    @DisplayName("the per-route special case in RouteAuthorizationFilter is the mirrored one")
     void specialCases() throws IOException {
         String source = read("authz/RouteAuthorizationFilter.java");
         Matcher m = Pattern.compile("\"(static-[a-z-]+)\"\\.equals\\(").matcher(source);
@@ -94,11 +94,7 @@ class GatewayStaticRoutesSyncTest {
         // static-ai (/api/ai/config writes need MANAGE_TENANTS) is routed to kelta-ai, never to
         // the worker, so no child-resource request here can be authorized by it.
         specialCased.remove("static-ai");
-        assertThat(specialCased).containsExactly(
-                "static-" + GatewayStaticRoutes.MODULES, "static-" + GatewayStaticRoutes.TENANTS);
-        assertThat(source)
-                .contains("\"" + GatewayStaticRoutes.TENANTS_PERMISSION + "\"")
-                .contains("\"/api/modules/" + GatewayStaticRoutes.MODULE_SIGNING_KEYS_PREFIX + "\"")
-                .contains("\"" + GatewayStaticRoutes.MODULE_SIGNING_KEYS_PERMISSION + "\"");
+        assertThat(specialCased).containsExactly("static-" + GatewayStaticRoutes.TENANTS);
+        assertThat(source).contains("\"" + GatewayStaticRoutes.TENANTS_PERMISSION + "\"");
     }
 }

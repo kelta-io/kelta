@@ -14,15 +14,16 @@ io.kelta.worker/
   handler/         ← Action handlers (e.g., SubmitForApprovalActionHandler)
   interceptor/     ← Cerbos authorization advice
   listener/        ← NATS event listeners + BeforeSaveHooks (config event publishing)
-  module/          ← Runtime module management
+  module/          ← External modules (HTTP services installed by URL): install/plan,
+                     registry, signed invocation, proxies, event delivery, tasks
   repository/      ← JDBC repositories (raw SQL, NOT JPA)
   scim/            ← SCIM 2.0 protocol (controller, model, service, filter)
   service/         ← Business logic (45+ services)
     email/         ← Email providers (SMTP, templates)
     entitlement/   ← EntitlementService → the tenant's module EntitlementProvider; no module ⇒
                      MemberEntitlements.EMPTY. Billing is NOT compiled in — it is the
-                     kelta-billing module: the Rust external service kelta-modules/billing,
-                     or the legacy JAR kelta-modules/billing-jar (there is no service/billing/)
+                     kelta-billing module: the Rust external service kelta-modules/billing
+                     (there is no service/billing/)
     push/          ← Push notification providers (FCM, APNs, Web Push)
     sms/           ← SMS providers
 ```
@@ -142,7 +143,6 @@ A presence-gated hook (secret/integration configured) uses `@ConditionalOnProper
 | Action handler | `handler/SubmitForApprovalActionHandler.java` |
 | Write-only secret input (not a field) encrypted into a server-only field; plaintext removed before anything else sees it; blank keeps the stored value; refuse, never drop, when encryption is unconfigured | `listener/OidcProviderSecretHook.java` |
 | Fetching a tenant-supplied URL (runtime-core `OutboundHttpClient` + the `OutboundUrlGuard` bean from `config/OutboundConfig`: non-public addresses refused unless allow-listed, redirects re-validated per hop, overall deadline, size cap, tree-model JSON) | `listener/OidcDiscoveryHook.java`, `service/api/ApiSpecService.java` (`fetchSpec`), `service/storage/RestClientExecutor.java`, `service/push/WebPushProvider.java` |
-| Transient vs permanent failure (fail closed on the pod, never persist a terminal status for an infrastructure error, per-pod `@Scheduled` retry with capped backoff, runtime-checked enable flag) | `module/ModuleLoadFailureClassifier.java`, `module/ModuleLoadRetryScheduler.java` |
 | Calling an external service per tenant install (one call path: status gate → token → per-pod circuit breaker → signed HTTP; timeout vs unavailable exceptions; compare-and-set status writes off the caller's transaction; metrics) | `module/ExternalModuleInvoker.java`, `module/ModuleCircuitBreaker.java` |
 | Per-pod registry rebuilt from DB rows (NATS refresh + local read-after-write refresh + periodic reconcile with no tenant bound; re-register only on a fingerprint change; register new before removing old) | `module/ExternalModuleRegistry.java`, `module/ExternalModuleReconcileScheduler.java` |
 | At-least-once JetStream → HTTP delivery (queue-group `EventSubscription.queueGroupWithRedelivery`; throw to nak with the next backoff; on the last attempt write a dead-letter row and return so the message is acked; never on the write path) | `module/ModuleEventDeliveryListener.java`, `module/ModuleEventDeadLetterStore.java` |

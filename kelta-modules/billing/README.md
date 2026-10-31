@@ -7,14 +7,15 @@ admin installs by URL. The platform calls it with a signed assertion (module pro
 
 It is the reference implementation for external modules and is built on the
 [`kelta-module` SDK](../sdk-rust/). Read it with
-[`.claude/docs/playbooks.md`](../../.claude/docs/playbooks.md) → *Ship a module*.
+[`.claude/docs/playbooks.md`](../../.claude/docs/playbooks.md) → *Ship a runtime-installable module*.
 
 License: **AGPL-3.0-only** (the same as the Java module it replaces).
 
-The legacy Java JAR build of the same module is in [`../billing-jar/`](../billing-jar/). It has the
-same module id, collections and behaviour, except as listed under
-[Differences from the JAR module](#differences-from-the-jar-module). It is kept for rollback until
-part 9g. Moving a tenant from the JAR to this service is [`CUTOVER.md`](CUTOVER.md).
+It replaced an in-process Java JAR build of the same module (same module id, collections and
+behaviour, except as listed under
+[Differences from the JAR module](#differences-from-the-jar-module)). Every tenant moved to this
+service on 2026-10-31 ([`CUTOVER.md`](CUTOVER.md)), and module-platform part 9g deleted the JAR
+build and the platform's JAR module path.
 
 ## What the service declares and serves
 
@@ -53,7 +54,7 @@ Stripe keys are the tenant's credential, read per request.
 | `KELTA_MODULE_JWKS_URL` | no | `{issuer}/.well-known/jwks.json` | Fetch the platform keys from here instead, such as the in-cluster gateway. |
 | `BIND_ADDRESS` | no | `0.0.0.0:8080` | Listen address. |
 | `STRIPE_API_BASE` | no | `https://api.stripe.com/v1` | Point at a stub in tests. |
-| `BILLING_ENTITLEMENTS_CACHE_SECONDS` | no | `0` (off) | Per-member entitlements cache. Off, as in the JAR: a stale entitlement is worse than a slow one, and a record event reaches only one replica. |
+| `BILLING_ENTITLEMENTS_CACHE_SECONDS` | no | `0` (off) | Per-member entitlements cache. Off by default: a stale entitlement is worse than a slow one, and a record event reaches only one replica. |
 | `BILLING_RULES_CACHE_SECONDS` | no | `60` | Quota-rules cache, invalidated by rule events. `0` turns it off. |
 | `RUST_LOG` | no | `info` | Log filter. `kelta_module=debug` adds one access line per request. |
 | `LOG_FORMAT` | no | JSON | `text` for human-readable logs. |
@@ -139,7 +140,10 @@ cannot do. See `.claude/docs/concerns.md` → *External modules — in-cluster m
 
 ## Differences from the JAR module
 
-| JAR module (`billing-jar`) | This service | Why |
+History of the port: what changed when tenants moved from the JAR build (deleted in part 9g) to
+this service.
+
+| JAR module (deleted) | This service | Why |
 |---|---|---|
 | Action keys `billing:<key>` | `kelta-billing:<key>` | External actions are addressed `<moduleId>:<key>`. Flows that call billing actions must be updated at cutover. |
 | `appliesTo=PORTAL` rules **skipped** | **Enforced** for portal members | The JAR could not read the caller's user type. The assertion's `act.user_type` carries it. |
@@ -153,7 +157,7 @@ The same in both: entitlements are uncached by default; webhook idempotency conv
 granted once per checkout session; a subscription is upserted by its Stripe id); money is never
 computed here.
 
-Stricter than the JAR, in the webhook:
+Stricter than the JAR build was, in the webhook:
 
 - **A pass needs a collected payment.** `checkout.session.completed` grants it only when
   `payment_status` is `paid` or `no_payment_required`. A session completed unpaid (a delayed
@@ -162,7 +166,7 @@ Stricter than the JAR, in the webhook:
 - **One pass per checkout, even under concurrent deliveries.** `stripeCheckoutSessionId` is a
   unique field; the platform refuses a second create (`400` `unique`, or `409` when two creates
   race past that check), and the module reads that as already granted. This
-  holds only where the install **created** that field: a collection adopted from the JAR keeps
+  holds only where the install **created** that field: a collection adopted from the JAR build keeps
   its fields as they are, so `CUTOVER.md` sets the flag after install.
 - **Out-of-order subscription events are ignored.** The row stores the Stripe event's `created`
   time in `lastStripeEventAt`, and an older event is not applied. A row in `canceled` or

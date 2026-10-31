@@ -133,7 +133,7 @@ class IpRateLimitFilterTest {
             assertThat(f.matchPath("/api/modules/webhooks/stripe/t1"))
                     .isEqualTo("/api/modules/webhooks");
             // A sibling under the shorter prefix still matches the shorter budget.
-            assertThat(f.matchPath("/api/modules/install-jar")).isEqualTo("/api/modules");
+            assertThat(f.matchPath("/api/modules/install")).isEqualTo("/api/modules");
         }
 
         @Test

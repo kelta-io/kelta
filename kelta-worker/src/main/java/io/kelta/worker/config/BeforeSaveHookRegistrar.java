@@ -22,7 +22,7 @@ import org.springframework.stereotype.Component;
  * ({@code BeforeSaveHookWiringTest} enforces it), since bean discovery order is unspecified.
  *
  * <p>Only global (platform) hooks come through here. Compile-time module hooks are registered by
- * {@code ModuleRegistry}, and tenant-scoped runtime-module hooks by {@code RuntimeModuleManager}
+ * {@code ModuleRegistry}, and tenant-scoped module hooks by {@code ExternalModuleRegistry}
  * ({@link BeforeSaveHookRegistry#registerTenantHook}); neither kind is a Spring bean.
  *
  * <p>The registry is looked up lazily so this post-processor, which Spring creates before

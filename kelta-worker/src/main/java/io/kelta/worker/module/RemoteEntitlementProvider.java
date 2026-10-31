@@ -22,9 +22,8 @@ import java.util.Objects;
  * {@code ModuleServiceRegistry} for its tenant while the install is callable, and answered by
  * {@code POST {baseUrl}/kelta/v1/services/entitlements/resolve}.
  *
- * <p><b>Cached, per the manifest.</b> A JAR provider is never cached by the platform
- * ({@code ModuleEntitlementService}); an external one is called over the network on the alert and
- * watch paths, so the module opts in to a cache with {@code services[].cacheTtlSeconds}
+ * <p><b>Cached, per the manifest.</b> The provider is called over the network on the alert
+ * and watch paths, so the module opts in to a cache with {@code services[].cacheTtlSeconds}
  * (0–300, default 60; 0 = none). Only answers are cached, per member, on this pod — never a
  * failure — and the cache is dropped when the install is re-registered (an upgrade). A module that
  * needs a change to take effect sooner declares a shorter TTL.

@@ -161,7 +161,7 @@ Platform-managed metadata (not a user collection) — e.g. `feature_announcement
 **Docs**: [`status.md`](status.md). Keep each section class focused — if one grows past ~500 lines, split the area rather than letting a new single-file hotspot form.
 
 > **This recipe is for platform-owned metadata only.** A collection that belongs to one tenant's
-> installed module is declared in that module's `kelta-module.json` instead — see recipe 5b. It
+> installed module is declared in that module's manifest (`metadata` package) instead — see recipe 5b. It
 > needs no code in this repo, no Flyway migration, and no redeploy.
 
 ---
@@ -170,7 +170,8 @@ Platform-managed metadata (not a user collection) — e.g. `feature_announcement
 
 A platform (global) hook on a system or wildcard collection — validation, defaults, a
 config-change NATS broadcast (Critical Rule 1). A hook that belongs to one tenant's module is
-returned from that module's `getBeforeSaveHooks()` instead (recipe 5b).
+declared in that module's manifest (`hooks`) and answered by the module over HTTP instead
+(recipe 5b).
 
 1. **Write the class** in `kelta-worker/.../listener/` implementing `BeforeSaveHook`, annotated
    `@Component`, with **exactly one constructor** (a `@Component` with two and no `@Autowired`
@@ -201,11 +202,10 @@ returned from that module's `getBeforeSaveHooks()` instead (recipe 5b).
 ## 5b. Ship a runtime-installable module (collections + hooks + handlers)
 
 A module is installed **per tenant at runtime**. Nothing in this repo is recompiled or redeployed.
-Build new modules as **external modules**: an HTTP service in any language, installed by URL. The
-JAR path further down is legacy; part 9g removes it
-(`specs/module-platform/9-external-modules.md`).
-
-### External module (an HTTP service)
+Every module is an **external module**: an HTTP service in any language, installed by URL. There is
+no in-process path — part 9g removed the JAR upload, its signature/trusted-key store and the
+sandboxed classloader (`specs/module-platform/9-external-modules.md`). Compiled-in `KeltaModule`s
+(`runtime-module-core`, `runtime-module-integration`) are platform code, not installable modules.
 
 The contract is `docs/module-protocol/openapi.yaml`; what each call carries and when it comes is
 `integrations.md` → External modules — the module protocol.
@@ -215,8 +215,9 @@ AGPL-3.0-only) on the **[`kelta-module` SDK crate](../../kelta-modules/sdk-rust/
 members of the `kelta-modules/Cargo.toml` workspace; `kelta-modules/Dockerfile` builds the image.
 A module in another language implements the same protocol by hand — the SDK is the checklist.
 
-1. **Declare everything in the manifest.** With the SDK, `kelta_module::Manifest` builds the v2
-   manifest (spec §3.1) and validates it: `permissions` (object grants, `system`, `credentials`), a
+1. **Declare everything in the manifest.** With the SDK, `kelta_module::Manifest` builds the
+   manifest (`manifestVersion: 2`, spec §3.1 — the only version the platform parses) and validates
+   it: `permissions` (object grants, `system`, `credentials`), a
    `metadata` package of the collections and fields it provisions, then `actions`, `hooks`,
    `events`, `services.entitlements`, `routes`, `schedules`, `webhook` and `ui`. Nothing undeclared
    is ever called, and the plan shows all of it to the admin. `ModuleService` serves it at
@@ -261,177 +262,53 @@ A module in another language implements the same protocol by hand — the SDK is
    Redirects are never followed. In-cluster, give it its own namespace with a NetworkPolicy that
    denies it the worker pods: the worker trusts identity headers from the gateway
    (`concerns.md` → External modules).
-9. **Install it**: Modules page → Install Module → From URL → Review → Approve and install. Or
-   call `POST /api/modules/plan`, then `POST /api/modules/install` with the plan's `planHash`.
-   Upgrade from the module's card (**Upgrade**). An upgrade that asks for more access says so,
-   and installs only on re-consent.
+9. **Install it.** The worker needs `KELTA_MODULE_SIGNING_KEY` (the ES256 key it signs every
+   request to a module with, published at `GET /api/modules/.well-known/jwks.json`) and the right
+   `KELTA_MODULE_ISSUER`; with the key blank, no module can be installed. Then: Modules page →
+   Install Module → enter the URL → Review → Approve and install. Or call
+   `POST /api/modules/plan` with the `baseUrl`, then `POST /api/modules/install` with the same
+   `baseUrl` and the plan's `planHash` (install without a `baseUrl` is a 400). Upgrade from the
+   module's card (**Upgrade**). An upgrade that asks for more access says so, and installs only on
+   re-consent.
 
-### Legacy: JAR module (removed in part 9g)
+**Installing onto a tenant that already has data — order matters.** A successful install is
+`ACTIVE` at once, on every pod: its actions, hooks and entitlements port register as soon as the
+`module.changed` event lands. If the module answers something the platform already answers
+(entitlements being the built case) and its collections are still empty, the platform starts
+getting empty answers *before* you can migrate anything into them — a tenant's members resolve to
+no plan, and, because `AlertDispatchService` treats an empty channel entitlement as "this tenant
+isn't gating channels", **alert channel limits silently stop applying**. Populate first, install
+second:
 
-A JAR module is one signed JAR + `kelta-module.json`, uploaded through
-`POST /api/modules/install-jar`.
-
-**Reference implementation: [`kelta-modules/billing-jar/`](../../kelta-modules/billing-jar/)** — the
-Java billing module the Rust one replaces, kept for rollback until part 9g: collections,
-two action handlers, a webhook handler, and a UI bundle in one JAR. Copy its `pom.xml` shape: no
-parent pom, outside the reactor, platform deps `provided` (they load from the platform
-classloader; bundling them puts a second copy of the runtime model in the JAR and every cast to a
-platform type fails).
-
-1. **Implement `KeltaModule`** (`runtime-core/.../workflow/module/KeltaModule.java`) with a public
-   no-arg constructor — `ModuleLoader.loadFromJar` instantiates it reflectively. Build
-   handlers in `onStartup(ModuleContext)`, not the constructor: the context does not exist yet at
-   construction. `context.getExtension(CredentialResolverPort.class)` is how a module reaches the
-   credential vault — the only supported way to hold a secret.
-   - `getActionHandlers()` → flow steps, registered tenant-scoped in `ActionHandlerRegistry`.
-   - `getBeforeSaveHooks()` → registered tenant-scoped in `BeforeSaveHookRegistry`, so they fire
-     only on the installing tenant's records. They run **before** global hooks for the same
-     collection; `"*"` still means every collection (for that tenant only).
-   - `getServices()` → `Map<Class<?>, Object>` of **platform-defined port → your implementation**,
-     registered tenant-scoped in `ModuleServiceRegistry`. This is the only way platform code can
-     ask a module a question *inline*; handlers and hooks are dispatch-only, and no Spring bean can
-     reach through `SandboxedModuleClassLoader` on its own. Platform callers resolve
-     `moduleServiceRegistry.find(tenantId, SomePort.class)` **per call** and fall back to their
-     compiled-in behaviour when it is empty — so publishing nothing changes nothing.
-     - The key must be an interface **the platform defines**, under a package in the classloader's
-       parent allowlist (`io.kelta.runtime.module.` and friends). Bundling your own copy of it is
-       rejected at registration rather than failing later as a `ClassCastException`.
-     - Two modules cannot publish the same port for one tenant; the second load is refused and
-       falls back to stubs. A refusal withdraws that module's already-accepted ports.
-     - **Never cache the instance platform-side** — unload closes the module's ClassLoader.
-2. **Declare collections in the manifest**, not in code:
-   ```json
-   "collections": [
-     { "name": "invoices", "displayName": "Invoices",
-       "fields": [ { "name": "reference", "type": "STRING", "required": true } ] }
-   ]
-   ```
-   `ModuleMetadataProvisioner` translates them into a package and applies it at install through
-   `PackageImportService.importPackage` — the importer sandbox clone, promotion and package import
-   use, writing via `queryEngine` on the `collections`/`fields` system collections, so the NATS
-   config broadcast and lifecycle init (including the physical table) fire on every pod. It runs a
-   dry run first, then applies every collection plus the fields of only the collections that did
-   not exist. Collection names must match `^[a-z][a-z0-9_]*$`; field names cannot be the platform's
-   reserved ones (`id`, `createdAt`, `updatedAt`, `createdBy`, `updatedBy`, `tenantId`); a malformed
-   manifest is rejected before anything is imported. Each collection and field is recorded in
-   `module_provisioned_resource` as `CREATED` (with a SHA-256 `content_hash` of what the manifest
-   asked for) or `ADOPTED` (null hash); a row once `CREATED` stays `CREATED` across uninstall +
-   reinstall. `GET /api/modules/{moduleId}/provisioned-resources` lists them for the caller's
-   tenant, including after uninstall. A failed import item marks the module `FAILED`.
-3. **Accept webhooks** by naming one of your action handlers in `"webhookHandlerKey"`. External
-   systems then POST to `/api/modules/webhooks/{tenantId}/{moduleId}` — one generic,
-   platform-owned route (`ModuleWebhookController`), since a module cannot contribute a
-   `@RestController` of its own.
-   - **The platform verifies nothing.** The path is unauthenticated (an external sender has no
-     platform JWT), so **your handler owns the trust anchor** — resolve your credential and check
-     the signature before treating the payload as real.
-   - The handler receives `resolvedData` = `{rawBody, headers, moduleId}` and `context.tenantId()`.
-     Use `rawBody` verbatim for any HMAC: re-serializing changes the bytes the signature covers.
-     `headers` is lower-cased and limited to signature-bearing prefixes.
-   - Return `ActionResult.failure(...)` to reject (→ 401). Nothing-to-dispatch-to (unknown tenant,
-     inactive module, no declared handler) uniformly returns 404 so a caller cannot enumerate a
-     tenant's modules.
-4. **Ship UI** by putting a browser bundle in the same JAR and naming it in `"uiBundlePath"`
-   (e.g. `static/ui-bundle.js`). The admin UI fetches it from
-   `GET /api/modules/{moduleId}/ui-bundle.js` and evaluates it; its top-level code calls
-   `ComponentRegistry.registerPageComponent(...)` from `@kelta/plugin-sdk`, which makes the
-   component available to the Page Builder.
-   - ⚠️ **Same-origin, signature-gated.** The bundle runs with the admin session's full DOM and
-     cookie access — the JAR signature is the entire trust model, there is no browser isolation.
-   - Loading is opt-in via `<PluginProvider loadModuleBundles>` and enabled only by `App.tsx`;
-     shared test wrappers keep the default so they issue no extra `GET /api/modules`.
-   - The bundle is evaluated from a blob URL, so it has **no module graph** and cannot `import`
-     a bare specifier like `@kelta/plugin-sdk`. The host publishes the registry at
-     `globalThis.__keltaComponentRegistry` — that global is the only channel available.
-5. **Classpath**: the module's own classes must be in the JAR. Only the prefixes in
-   `SandboxedModuleClassLoader.ALLOWED_PARENT_PREFIXES` resolve from the platform.
-
-**Installing onto a tenant that already has data — order matters.** `POST /api/modules/install-jar`
-**loads the module immediately**: handlers, hooks and `getServices()` all register at *install*
-time, on every pod. The `status` field stays `INSTALLED` until you call `/enable` — that flag is
-bookkeeping, **not** a gate on whether the code is live. So a module that publishes a service starts
-answering platform calls the moment the JAR lands.
-
-That inverts the obvious sequence. If the module resolves something the platform already answers
-(entitlements being the built case), install it and its collections are empty, so the platform
-starts getting empty answers *before* you can migrate anything into them. On the billing pilot that
-would have meant a tenant's members resolving to no plan — and, because `AlertDispatchService`
-treats an empty channel entitlement as "this tenant isn't gating channels", **alert channel limits
-would have silently stopped applying**, including paid SMS for free-tier members.
-
-Populate first, install second:
-
-1. Create the collections through the normal admin API (same names and fields as the manifest).
-   Install **adopts collections that already exist and leaves them completely alone** — no field
-   is added or updated on them (`ModuleMetadataProvisioner` → `PackageImportService` in `SKIP`
-   mode, with the adopted collections' fields filtered out), so the later install will not clobber
-   them.
+1. Create the collections through the normal admin API (same names and fields as the manifest's
+   `metadata` package). Install **adopts collections that already exist and leaves them completely
+   alone** (`ModuleMetadataProvisioner`: `ADOPT`, and their fields `SKIP_ADOPTED`), and the plan
+   shows it, so the install will not clobber them.
 2. Migrate the data the module will answer from, and verify it.
-3. Install + enable, then confirm the module — not the fallback — is answering.
+3. Install, then confirm the module — not the fallback — is answering.
 
-**When a module fails to load, it fails closed.** A JAR that does not verify (signature, checksum,
-classloading, or a throwing `onStartup`) does **not** fall back to working-looking stubs any more. Its
-declared action keys are registered as *quarantined* handlers that throw `ModuleUnavailableException`,
-and the module reports `QUARANTINED` with the reason in `tenant_module.last_error`. So:
+**Failure is visible, never silent.** A module that cannot be reached, times out or keeps failing
+trips that pod's circuit breaker and the install goes `DEGRADED`; a flow step calling it fails with
+`ModuleUnavailableException` / `ModuleTimeoutException` rather than succeeding. The 60 s reconcile
+probes `GET /kelta/v1/health`, and a successful call returns it to `ACTIVE`. `GET /api/modules/{id}/health` reports the
+stored status, `lastError`/`lastErrorAt`, the module's own live health answer and the circuit
+breaker of the pod that answered (`podName`).
 
-- A flow step calling it fails with a specific, attributable error — catchable as
-  `ModuleUnavailableException` — rather than `ResourceNotFound` (which reads as a mistyped key) or,
-  as before, *succeeding*.
-- A **manifest-only** module (no JAR, so no implementation) quarantines for the same reason. Declaring
-  a module before its code exists is fine; expecting its actions to do anything is not.
-- Stub mode still exists for dev as `kelta.modules.stub-mode=true`, reports `STUB` rather than
-  `ACTIVE`, and is never reached by falling back from an error.
-- **Infrastructure failures do not quarantine.** If object storage or the database is unreachable
-  while the JAR is fetched or verified (or a connectivity error surfaces from `onStartup`), the module
-  fails closed on that pod with the same refusing handlers, but its status is left alone, only
-  `last_error` is recorded, and the pod retries with backoff (`kelta.modules.load-retry.*`, 30 s →
-  10 min, never gives up). An `onStartup` that throws for any other reason is still the module's
-  fault and quarantines — don't let a flaky external call in `onStartup` look like a bug.
-- Re-enabling a `QUARANTINED` module (`POST /api/modules/{moduleId}/enable`, or **Re-enable** on the
-  admin Modules page) re-runs the load on every pod, without a restart. The load re-verifies, so a
-  module whose fault is still there quarantines again; the response's `moduleStatus` / `lastError`
-  say so. The same call on an `ACTIVE` module that is retrying (**Retry now** in the UI) skips the
-  remaining backoff. `GET /api/modules` carries `lastError`, `lastErrorAt`, `loadAttempts` and a
-  derived `loadRetrying` (`ACTIVE` with a recorded error — only a transient failure leaves one).
-- `GET /api/modules/{id}/health` reports whether the module is loaded **on the pod that answered**,
-  which is not the same as the stored status: loading is per-pod and driven by a fire-and-forget NATS
-  event. `loadStateOnThisPod` distinguishes `LOADED` from `RETRYING` (with `nextLoadRetryAt`) and
-  `FAILED`.
+**Uninstall does not drop data by default.** `GET /api/modules/{id}/uninstall-plan` decides per
+`module_provisioned_resource` row (`ModuleUninstaller`): an adopted resource is always kept, and a
+created one holding records, with dependents, or changed since install is kept unless the admin
+chooses to purge data.
 
-**What the platform does for a module, so it doesn't have to:**
-- **Binds the tenant** around a webhook dispatch. A module *cannot* — `io.kelta.runtime.context`
-  is outside the classloader allowlist — and unbound, its reads and writes run under the
-  `admin_bypass` RLS policy across tenants. Flow and CRUD paths already bind upstream.
-
-**Known limits** — these still need a platform change, so design around them:
-- **No scheduler.** A module is not a Spring bean, so no `@Scheduled`. Expose the work as an
-  `ActionHandler` and let a tenant drive it from a scheduled flow (see `billing:expire-passes`) —
-  more configurable than a hardcoded cron, and needs no new platform capability.
-- **No request context.** Neither `jakarta.servlet` nor `org.springframework` is on the classpath,
-  so a hook cannot read request headers (e.g. the gateway's `X-User-Type` actor tier). Design
-  around the record and `tenantId` it is given.
-- **No NATS.** A module cannot subscribe, so it cannot hold a cache that needs fleet-wide
-  invalidation. Prefer resolving from collections over caching stale config.
-- **No transactions.** A module writes through `QueryEngine` and cannot open one or use
-  `FOR UPDATE SKIP LOCKED`. Design writes to converge on replay rather than relying on a claim.
-- **No new `@RestController`.** Spring MVC resolves routes at context start. A module's HTTP
-  surface rides existing dynamic routes: flows (`execute_flow`), collection CRUD, and the generic
-  webhook route above.
-- **No new `CredentialType`.** `CredentialTypeRegistry` is built once at boot from a Spring
-  `List<CredentialType>`.
-- **No DDL or Flyway.** By design — a module gets exactly the schema powers the admin API exposes.
-- **Uninstall does not drop collections or data**, and reinstall/upgrade **skips** a collection
-  whose name already exists rather than updating it.
-
-**Tests**: `RuntimeModuleManagerHookTest` and `ModuleWebhookDispatchTest` load a real JAR through
-the real sandboxed classloader — copy that shape rather than mocking the module instance, since
-hook registration and handler resolution only happen inside `loadFromJar`.
-`ModuleMetadataProvisionerTest` covers manifest → package translation, created vs adopted and
-the content hash; `ModuleProvenanceStoreTest` pins the ownership-preserving upsert;
-`ModuleWebhookControllerTest` covers the HTTP status contract.
-**Docs**: [`status.md`](status.md) (Extensibility / modules row); adding an unauthenticated path
-also means updating `kelta-gateway` `application.yml` (`unauthenticated-paths`),
-`IpRateLimitFilter.DEFAULT_IP_PATHS`, and `PublicSurfaceTest`'s expected allowlist.
+**Tests**: the module's own tests against `kelta_module::testing`, plus the harness scenarios above.
+Platform side: `ExternalModuleServiceTest`, `ExternalModulePlannerTest`, `ExternalModuleRegistryTest`,
+`ModuleMetadataProvisionerTest` (package → plan, created vs adopted, content hash),
+`ModuleProvenanceStoreTest` (ownership-preserving upsert) and `ModuleWebhookControllerTest` (the
+HTTP status contract).
+**Docs**: [`status.md`](status.md) (Extensibility / modules row); a protocol change also updates
+`docs/module-protocol/openapi.yaml` and `integrations.md` → External modules; adding an
+unauthenticated path also means updating `kelta-gateway` `application.yml`
+(`unauthenticated-paths`), `IpRateLimitFilter.DEFAULT_IP_PATHS`, and `PublicSurfaceTest`'s expected
+allowlist.
 
 ---
 

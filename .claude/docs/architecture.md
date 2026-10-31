@@ -493,8 +493,8 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   child's Cerbos `collection` permission for the action, keyed on the collection id the gateway
   route carries (`CollectionLifecycleManager.getTenantVisibleCollectionId`). For a system
   collection behind a `static-` route it is that route's rule, mirrored in `GatewayStaticRoutes`
-  (users/profiles/collections/scheduled-jobs checks with their override permissions, the tenants and
-  module-signing-key rules, `API_ACCESS` otherwise) and pinned to the gateway sources by
+  (users/profiles/collections/scheduled-jobs checks with their override permissions, the tenants
+  rule, `API_ACCESS` otherwise) and pinned to the gateway sources by
   `GatewayStaticRoutesSyncTest`. System permissions use the gateway's `system_feature` check
   (`CerbosAuthorizationService.checkSystemPermission`). A denial is a 403 `FORBIDDEN` JSON:API
   error; a `tenants` child row the caller may not see is a 404. The hook matches handler methods,
@@ -556,7 +556,7 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   (`/api/ai/**` matches `/api/ai/%63onfig`), while the Spring MVC service behind it matches the
   percent-decoded segments with path parameters (`;v=1`) dropped and empty segments skipped
   (`/api/ai/config`). A prefix test on the raw path is therefore passed by encoding one letter.
-  `RouteAuthorizationFilter`'s static-route special cases (module signing keys, AI settings, below)
+  `RouteAuthorizationFilter`'s static-route special cases (AI settings, below)
   test `MatchedPath.of(path)` — the service's reading of the path — instead; a new prefix rule must
   do the same. (Spring Security's `StrictServerWebExchangeFirewall` already refuses `;`, `//`, dot
   segments and an encoded `/`, `.`, `%`, `\` or NUL, but not an encoded letter.)
@@ -708,14 +708,15 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   created and deactivated only by `ModuleServicePrincipalService` (worker; records + JDBC, one
   transaction under the tenant, then a Cerbos sync and `kelta.record.changed` for the profile and
   connected-app collections). Spec: `specs/module-platform/9-external-modules.md` §3.3.
-- **External modules installed by URL** (part 9c, V221). A `tenant_module` row with a
-  `base_url` is an external module: an HTTPS service, no JAR, nothing loaded on a pod
-  (`ModuleLoader` skips it). `ModuleController` dispatches on that: `POST /api/modules/plan
+- **External modules installed by URL** (part 9c, V221). Every `tenant_module` row is an
+  external module: an HTTPS service with a `base_url` (`NOT NULL` since part 9g, V225, which
+  deleted the in-process JAR path), nothing loaded on a pod. `ModuleController`: `POST /api/modules/plan
   {baseUrl}` fetches `{baseUrl}/.well-known/kelta-module.json` (manifest v2,
   `ModuleManifestParser.parseExternal`) and dry-runs its metadata package — it writes nothing and
   answers `200` even when blocked (the plan *is* the answer: grants, owned collections,
   capabilities, metadata CREATE/ADOPT/KEEP/SKIP_ADOPTED/FAILED, blockers, `planHash` = SHA-256 of the
-  canonical plan JSON). `POST /api/modules/install {baseUrl, planHash}` and
+  canonical plan JSON). `POST /api/modules/install {baseUrl, planHash}` (no `baseUrl` → `400
+  baseUrl is required`) and
   `POST /api/modules/{id}/upgrade {planHash}` re-plan and refuse a stale hash (`409`, error code
   `PlanChanged`, fresh plan in `meta.plan`) or blockers (`422`, one error per blocker code); an
   unreachable module is `502 ModuleUnreachable`. The apply (`ExternalModuleService`) writes the
@@ -744,7 +745,7 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   list: https unless allow-listed, re-checked per request, redirects never followed.
   Spec: `specs/module-platform/9-external-modules.md` §3.2, §3.5, §3.10.
 - **External module invocation** (part 9d). Each pod keeps an endpoint registry
-  (`ExternalModuleRegistry`) built only from `tenant_module` rows with a `base_url`. It is
+  (`ExternalModuleRegistry`) built from the `tenant_module` rows. It is
   refreshed on `kelta.config.module.changed` (`ModuleEventListener`), locally on the writing pod
   after every status change (`ExternalModuleService.refreshLocally`, read-after-write), and
   reconciled every 60 s from `ModuleStore.findAllExternal()` with no tenant bound
@@ -755,8 +756,8 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `RemoteEntitlementProvider` port only while the install is `ACTIVE` or `DEGRADED` — a disabled
   module blocks no write. A row re-registers only when its fingerprint (version, manifest hash,
   callable, service user, action keys) changes; an upgrade registers the new hooks before it
-  removes the old ones, and a tenant whose entitlements port is already held (a JAR module) keeps
-  that provider. **One call path:** `ExternalModuleInvoker` checks the status, mints the
+  removes the old ones, and a tenant whose entitlements port is already held by another install
+  keeps that provider. **One call path:** `ExternalModuleInvoker` checks the status, mints the
   principal's token, asks the per-pod, per-install `ModuleCircuitBreaker` (open after 5
   consecutive failures, one half-open trial after 30 s), then calls `ModuleHttpClient.invoke`
   (assertion, `Kelta-Access-Token`, `traceparent`, through `ModuleHostGuard`). Opening the breaker
@@ -785,8 +786,7 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `job_execution_log` rows on uninstall. `ScheduledJobExecutorService` runs one through the
   registry with `Idempotency-Key: <jobId>:<fireTime>`, and records `SKIPPED` when the install is
   not callable. Metrics: `kelta_worker_module_calls` (timer; `module`, `kind`, `outcome`) and
-  `kelta_worker_module_breaker_transitions` (`module`, `transition`). JAR modules keep their own
-  path unchanged. Spec: `specs/module-platform/9-external-modules.md` §3.6, §3.7.
+  `kelta_worker_module_breaker_transitions` (`module`, `transition`). Spec: `specs/module-platform/9-external-modules.md` §3.6, §3.7.
 - **External module events and UI bundles** (part 9e). `ModuleEventDeliveryListener` is a
   queue-group JetStream consumer, `worker-module-events`, on `kelta.record.changed.>` in the
   existing `KELTA_RECORDS` stream, so one pod handles each change. It reads the subscribers from
@@ -1025,14 +1025,15 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `POST /api/modules/kelta-billing/x/{checkout-sessions,portal-sessions}`, with byte-identical
   response shapes. They ride the platform-owned `/api/modules/**` static route, so the gateway
   applies only `API_ACCESS` and **scoping is in the handler**: every route acts on the **calling**
-  member, and none accepts a member id — there is no id to tamper with. **Every module HTTP
-  handler (`ModuleHttpController` → `dispatchRoute`) receives the platform user UUID** that
-  `CallerContextFilter` resolved (`CallerContext.current()`), never the raw `X-User-Id` header
-  (the gateway sends the caller's email there); with no resolved caller the module gets `null`.
+  member, and none accepts a member id — there is no id to tamper with. **Every module route
+  (`ModuleHttpController` → `ExternalModuleProxy.route`) carries the caller in the signed
+  assertion's `act` claim**, built from what `CallerContextFilter` resolved (`CallerContext`),
+  never from the raw `X-User-Id` header (the gateway sends the caller's email there); with no
+  resolved caller the module gets no `act`.
   Before KLT-790 billing stamped the email on Stripe, so `billing_*.userId` rows were invisible to
   `EntitlementResolver`; the webhook now ignores a non-UUID `client_reference_id`/`metadata.userId`
-  and falls back to the stored customer mapping, and `kelta-modules/billing-jar/VERIFICATION.md` has
-  the one-off email→UUID rewrite for existing rows.
+  and falls back to the stored customer mapping. (The one-off email→UUID rewrite for existing
+  rows was in the JAR module's `VERIFICATION.md`, deleted with it in part 9g; see git history.)
   Checkout and portal **return URLs are validated against the credential's
   `allowedReturnOrigins`** by the module, on the semantics the deleted `ReturnUrlValidator` set:
   origin equality (a prefix check accepts `https://app.example.com.evil.test`), HTTPS off
@@ -1086,18 +1087,20 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `MemberEntitlements.EMPTY`. No module, a throwing module, a null answer or an unresolvable slug
   all mean `EMPTY` — the answer a tenant without billing always had: watches uncapped, push/email
   ungated, SMS never sent.
-- **Runtime-module webhooks**: `POST /api/modules/webhooks/{tenantId}/{moduleId}` is an
-  **unauthenticated path** and the platform verifies **nothing** — it is a raw dispatcher into
-  the `ActionHandler` the module's manifest names in `webhookHandlerKey`, and **the module owns
-  the trust anchor** (it resolves its own credential and checks the signature). It exists because
-  Spring MVC resolves routes at context start, so a JAR loaded later cannot contribute a
-  controller; without this route a module could not receive a webhook at all. The raw body is
-  passed through verbatim — re-serializing would change the bytes an HMAC covers — and headers
-  are lower-cased and filtered to signature-bearing prefixes so a module never sees `Authorization`
-  or infrastructure headers. The `{tenantId}` is **untrusted**: it selects which tenant's module
-  (and secret) to dispatch to. Unknown tenant, inactive module, and no-declared-handler all answer
-  a uniform **404** so a caller cannot enumerate a tenant's modules; a handler rejection is 401
-  (not a fault to retry) and a thrown handler is 500 (retry). Like the other webhook paths it
+- **Module webhooks**: `POST /api/modules/webhooks/{tenantId}/{moduleId}` is an
+  **unauthenticated path** and the platform verifies **nothing** — it forwards the request to the
+  module's `{baseUrl}/kelta/v1/webhooks` (`ModuleWebhookController` → `ExternalModuleProxy.webhook`),
+  and **the module owns the trust anchor** (it resolves its own credential and checks the
+  signature). It exists because a module is another service and cannot contribute a controller of
+  its own; without this route it could not receive a webhook from a sender that knows nothing
+  about flows. The raw body is passed through verbatim — re-serializing would change the bytes an
+  HMAC covers — and headers are lower-cased and filtered to signature-bearing prefixes so a module
+  never sees `Authorization` or infrastructure headers. The `{tenantId}` is **untrusted**: it
+  selects which tenant's module (and secret) to forward to. Unknown tenant, a module not installed
+  or not callable, and no declared webhook all answer a uniform **404** so a caller cannot
+  enumerate a tenant's modules; the module's own status goes back to the sender, and a module that
+  cannot be called is `503` (retry). With module support switched off
+  (`kelta.modules.runtime.enabled=false`) the controller still exists and answers 404. Like the other webhook paths it
   bypasses `TenantIpAllowlistFilter`, and it carries its own per-IP rate-limit budget (300 per
   window). The sibling `/api/modules/**` administration and module-route paths stay authenticated.
 - **Member watch API** (consumer-alerting slices 5, K-8): `/api/watches/**` is a static route, so
@@ -1514,7 +1517,7 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   permission and return no tenant data records implements **`PermissionGatedController`** and
   calls `PermissionGatedControllers.assertEveryHandlerForbidden` in its test, naming any GET it
   deliberately leaves at `API_ACCESS` (references: `PromotionController`, `PackageController`;
-  with open reads `ModuleController`, `ModuleSigningKeyController`). One whose access follows the
+  with open reads `ModuleController`). One whose access follows the
   caller — own rows or a membership, such as chat participants or support-mailbox agents —
   implements `SelfScopedController` (`ChatController`, `MailboxController`); one whose access
   follows a source record implements `DerivedDataController` and loads that record through the

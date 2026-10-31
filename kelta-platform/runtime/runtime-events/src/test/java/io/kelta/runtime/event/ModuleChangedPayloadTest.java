@@ -17,16 +17,13 @@ class ModuleChangedPayloadTest {
         void shouldCreateWithFullConstructor() {
             var payload = new ModuleChangedPayload(
                     "id-1", "tenant-1", "mod-1", "Analytics Module",
-                    "1.0.0", "s3://modules/analytics.jar", "io.kelta.analytics.AnalyticsModule",
-                    "{\"name\":\"analytics\"}", ModuleChangeType.INSTALLED);
+                    "1.0.0", "{\"name\":\"analytics\"}", ModuleChangeType.INSTALLED);
 
             assertEquals("id-1", payload.getId());
             assertEquals("tenant-1", payload.getTenantId());
             assertEquals("mod-1", payload.getModuleId());
             assertEquals("Analytics Module", payload.getName());
             assertEquals("1.0.0", payload.getVersion());
-            assertEquals("s3://modules/analytics.jar", payload.getS3Key());
-            assertEquals("io.kelta.analytics.AnalyticsModule", payload.getModuleClass());
             assertEquals("{\"name\":\"analytics\"}", payload.getManifest());
             assertEquals(ModuleChangeType.INSTALLED, payload.getChangeType());
         }
@@ -39,8 +36,6 @@ class ModuleChangedPayloadTest {
             assertNull(payload.getModuleId());
             assertNull(payload.getName());
             assertNull(payload.getVersion());
-            assertNull(payload.getS3Key());
-            assertNull(payload.getModuleClass());
             assertNull(payload.getManifest());
             assertNull(payload.getChangeType());
         }
@@ -58,8 +53,6 @@ class ModuleChangedPayloadTest {
             payload.setModuleId("mod-2");
             payload.setName("Reporting");
             payload.setVersion("2.0.0");
-            payload.setS3Key("s3://modules/reporting.jar");
-            payload.setModuleClass("io.kelta.reporting.ReportModule");
             payload.setManifest("{\"name\":\"reporting\"}");
             payload.setChangeType(ModuleChangeType.ENABLED);
 
@@ -68,9 +61,25 @@ class ModuleChangedPayloadTest {
             assertEquals("mod-2", payload.getModuleId());
             assertEquals("Reporting", payload.getName());
             assertEquals("2.0.0", payload.getVersion());
-            assertEquals("s3://modules/reporting.jar", payload.getS3Key());
-            assertEquals("io.kelta.reporting.ReportModule", payload.getModuleClass());
             assertEquals("{\"name\":\"reporting\"}", payload.getManifest());
+            assertEquals(ModuleChangeType.ENABLED, payload.getChangeType());
+        }
+    }
+
+    @Nested
+    @DisplayName("Deserialization")
+    class DeserializationTests {
+
+        @Test
+        @DisplayName("ignores the JAR fields a pod of the previous release still publishes")
+        void shouldIgnoreRetiredJarFields() {
+            var payload = tools.jackson.databind.json.JsonMapper.builder()
+                    .enable(tools.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    .build()
+                    .readValue("{\"tenantId\":\"tenant-1\",\"moduleId\":\"mod-1\",\"s3Key\":null,"
+                            + "\"moduleClass\":null,\"changeType\":\"ENABLED\"}", ModuleChangedPayload.class);
+
+            assertEquals("mod-1", payload.getModuleId());
             assertEquals(ModuleChangeType.ENABLED, payload.getChangeType());
         }
     }
@@ -83,7 +92,7 @@ class ModuleChangedPayloadTest {
         void shouldContainKeyFields() {
             var payload = new ModuleChangedPayload(
                     "id-1", "tenant-1", "mod-1", "Analytics",
-                    "1.0.0", "s3://key", "io.Mod", "{}", ModuleChangeType.DISABLED);
+                    "1.0.0", "{}", ModuleChangeType.DISABLED);
 
             String str = payload.toString();
             assertTrue(str.contains("tenant-1"));

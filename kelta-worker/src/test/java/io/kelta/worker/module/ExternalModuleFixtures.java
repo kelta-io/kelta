@@ -28,8 +28,8 @@ final class ExternalModuleFixtures {
     }
 
     static TenantModuleData row(String status, Instant updatedAt) {
-        return new TenantModuleData(INSTALL, TENANT, MODULE, "Stub", "1.0.0", null, "https://stub.example.test",
-                null, null, null, "{}", status, "admin", updatedAt, updatedAt, null,
+        return new TenantModuleData(INSTALL, TENANT, MODULE, "Stub", "1.0.0", null,
+                "https://stub.example.test", "{}", status, "admin", updatedAt, updatedAt,
                 List.of(action("ping")), "https://stub.example.test", 1, "app-1", "svc-1");
     }
 

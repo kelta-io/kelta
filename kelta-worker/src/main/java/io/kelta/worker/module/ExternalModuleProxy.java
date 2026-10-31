@@ -21,8 +21,7 @@ import java.util.function.Predicate;
 
 /**
  * The two pass-through proxies to an external module
- * ({@code specs/module-platform/9-external-modules.md} §3.6), behind the same platform-owned
- * routes a JAR module serves through:
+ * ({@code specs/module-platform/9-external-modules.md} §3.6), behind platform-owned routes:
  *
  * <ul>
  *   <li><b>Routes</b> — {@code /api/modules/{id}/x/<path>} → {@code {baseUrl}/kelta/v1/routes/<path>}
@@ -51,7 +50,7 @@ public class ExternalModuleProxy {
     /**
      * Webhook headers forwarded to the module, matched as lower-cased prefixes: everything a
      * signature scheme needs travels in one of these, while the rest carries gateway and
-     * infrastructure detail. The same list the JAR path uses ({@code ModuleWebhookController}).
+     * infrastructure detail.
      */
     public static final Set<String> FORWARDED_WEBHOOK_HEADER_PREFIXES = Set.of(
             "x-", "stripe-", "signature", "digest", "content-type", "user-agent");
@@ -75,11 +74,6 @@ public class ExternalModuleProxy {
     public ExternalModuleProxy(ExternalModuleRegistry registry, ExternalModuleInvoker invoker) {
         this.registry = Objects.requireNonNull(registry);
         this.invoker = Objects.requireNonNull(invoker);
-    }
-
-    /** Whether the tenant has this module installed as an external module (on this pod's view). */
-    public boolean isExternal(String tenantId, String moduleId) {
-        return registry.endpoint(tenantId, moduleId).isPresent();
     }
 
     /**

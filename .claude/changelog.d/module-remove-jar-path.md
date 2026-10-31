@@ -1,0 +1,1 @@
+- 2026-10-31 refactor(modules): remove the in-process JAR module path; every module is an external HTTP service (V225 refuses to run while a JAR install remains) (module-platform 9g)

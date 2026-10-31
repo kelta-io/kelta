@@ -35,7 +35,7 @@ The platform has **no built-in backup scheduler**. Back up:
 
 1. **PostgreSQL** — all tenant data, metadata, audit and history. Use your database's native tooling (`pg_dump`,
    WAL archiving, managed snapshots).
-2. **Object storage** — attachments and module JARs when `KELTA_S3_ENABLED` is on.
+2. **Object storage** — attachments and pinned module UI bundles when `KELTA_S3_ENABLED` is on.
 3. **Secrets** — the signing JWK set, `KELTA_ENCRYPTION_KEY` (without it `ENCRYPTED` fields are unrecoverable),
    VAPID and HMAC secrets.
 

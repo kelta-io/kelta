@@ -27,7 +27,7 @@ order: 40
 | **MCP** | Model Context Protocol. Kelta exposes admin and data toolsets over MCP for AI agents. |
 | **Menu (app)** | A top-level app in the end-user shell; its items are the navigation tabs. |
 | **Metadata package** | A JSON export of tenant configuration addressed by natural keys, applied with export / diff / apply. |
-| **Module** | A signed JAR installed into a tenant at runtime that contributes action handlers, hooks, collections and UI. |
+| **Module** | An HTTPS service installed into a tenant by URL that contributes flow actions, hooks, collections, events, routes and UI, and calls the platform back as its own service user. |
 | **PAT** | Personal access token, `klt_…` — a bearer credential that acts as its owner. |
 | **Picklist** | A controlled list of values; *global* picklists are shared across fields. |
 | **Profile** | The role attached to a user: system, object and field permissions. |

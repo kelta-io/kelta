@@ -307,28 +307,6 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
             // (percent-decoded): the raw path would let /api/ai/%63onfig past a
             // /api/ai/config rule while kelta-ai still serves it as /api/ai/config.
             String matchedPath = MatchedPath.of(path);
-            // Designating a module signing key is a grant of code-execution
-            // authority: a module JAR signed by a trusted key runs arbitrary Java in
-            // the worker JVM (SandboxedModuleClassLoader allows java.* wholesale).
-            // API_ACCESS — all the rest of /api/modules/** carries — is far too weak
-            // a gate for that, so writes here need MANAGE_CREDENTIALS. Reads are left
-            // at API_ACCESS: the keys are public, and the dependentModules count is
-            // what makes a rotation safe to plan.
-            if ("static-modules".equals(collectionId)
-                    && matchedPath.startsWith("/api/modules/signing-keys")
-                    && StaticCollectionCheck.isWrite(method)) {
-                return cerbosService.checkSystemPermission(principal, "MANAGE_CREDENTIALS")
-                        .map(allowed -> {
-                            if (!allowed) {
-                                log.warn("User {} denied MANAGE_CREDENTIALS for module "
-                                        + "signing key write on path: {}",
-                                        principal.getUsername(), path);
-                                return new Deny(collectionName,
-                                        "Insufficient permissions: MANAGE_CREDENTIALS required");
-                            }
-                            return new Allow(exchange, false);
-                        });
-            }
             // AI settings writes (kelta-ai AiConfigController) require MANAGE_TENANTS, the
             // platform-admin grant governor-limit writes carry: the monthly token quota, the
             // AI on/off switch, the model and max tokens are platform controls. kelta-ai has

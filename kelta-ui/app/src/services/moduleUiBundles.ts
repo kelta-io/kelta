@@ -29,9 +29,8 @@ const loadedModuleIds = new Set<string>()
 const SERVED_STATUSES = new Set(['ACTIVE', 'DEGRADED'])
 
 /**
- * Loads the browser bundles of the tenant's active runtime modules, so a module can ship its UI
- * in the same single JAR as its backend code — or, for an external module, in the bundle the
- * platform pinned at install.
+ * Loads the browser bundles of the tenant's active modules: the bundle the platform pinned for
+ * each external module at install.
  *
  * <p>Each bundle's top-level code calls `ComponentRegistry.registerPageComponent(...)` from
  * `@kelta/plugin-sdk`; the caller syncs that registry into the host afterwards.
@@ -41,8 +40,7 @@ const SERVED_STATUSES = new Set(['ACTIVE', 'DEGRADED'])
  * evaluated from a blob URL, which inherits this page's origin.
  *
  * **This executes publisher-authored JavaScript with the admin session's full DOM and cookie
- * access.** The trust anchor is the JAR signature the platform verified at install and re-verified
- * on read, or for an external module the SHA-256 the admin approved in the install plan, which the
+ * access.** The trust anchor is the SHA-256 the admin approved in the install plan, which the
  * worker re-checks before serving its pinned copy (never the module's live file) — there is no
  * browser-side isolation. Serving an unverified bundle would make a bad module a stored-XSS vector
  * across the tenant.

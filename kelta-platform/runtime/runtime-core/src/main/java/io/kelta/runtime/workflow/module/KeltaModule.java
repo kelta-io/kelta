@@ -66,27 +66,6 @@ public interface KeltaModule {
     }
 
     /**
-     * Returns services this module publishes <b>for the platform to call</b>, keyed by the
-     * platform-defined port interface each one implements.
-     *
-     * <p>Action handlers and hooks only let a module react to what the platform dispatches. This is
-     * the other direction: it lets platform code ask a module a question inline — the case a
-     * runtime module otherwise cannot serve at all, since its classes live behind a sandboxed
-     * ClassLoader that no Spring bean can reach into.
-     *
-     * <p>The key must be an interface <b>the platform defines</b>; a copy compiled into the module
-     * JAR is rejected at registration, because a child-first ClassLoader would otherwise produce
-     * two same-named classes and fail later as a {@code ClassCastException} far from the cause.
-     * Registration is tenant-scoped, and two modules cannot publish the same port for one tenant.
-     *
-     * @return port-to-implementation map (may be empty, must not be null)
-     * @see io.kelta.runtime.module.service.ModuleServiceRegistry
-     */
-    default java.util.Map<Class<?>, Object> getServices() {
-        return java.util.Map.of();
-    }
-
-    /**
      * Called when the module is started up. Use this for initialization logic
      * that requires access to runtime services.
      *

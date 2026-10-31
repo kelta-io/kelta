@@ -62,8 +62,8 @@ class ModuleCredentialServiceTest {
 
     private static TenantModuleData install(String status, String manifest) {
         Instant at = Instant.parse("2026-10-01T00:00:00Z");
-        return new TenantModuleData("install-1", TENANT, "stub", "Stub", "1.0.0", null, "https://stub.example.test",
-                null, null, null, manifest, status, "admin", at, at, null, List.of(),
+        return new TenantModuleData("install-1", TENANT, "stub", "Stub", "1.0.0", null,
+                "https://stub.example.test", manifest, status, "admin", at, at, List.of(),
                 "https://stub.example.test", 1, APP, SERVICE_USER);
     }
 
@@ -145,9 +145,9 @@ class ModuleCredentialServiceTest {
     @DisplayName("another install's principal names its own install, which does not declare this credential")
     void anotherInstallsPrincipal() {
         TenantModuleData other = new TenantModuleData("install-2", TENANT, "other", "Other", "1.0.0", null,
-                "https://other.example.test", null, null, null, """
+                "https://other.example.test", """
                 {"manifestVersion": 2, "protocolVersion": 1, "id": "other", "name": "Other", "version": "1.0.0"}
-                """, "ACTIVE", "admin", Instant.now(), Instant.now(), null, List.of(),
+                """, "ACTIVE", "admin", Instant.now(), Instant.now(), List.of(),
                 "https://other.example.test", 1, "app-2", "svc-2");
         when(moduleStore.findByConnectedAppId(TENANT, "app-2")).thenReturn(Optional.of(other));
         when(principals.isActivePrincipal(TENANT, "app-2", "svc-2")).thenReturn(true);
@@ -164,20 +164,6 @@ class ModuleCredentialServiceTest {
     @DisplayName("a deactivated app or SERVICE user is refused while its token is still valid")
     void inactivePrincipal() {
         when(principals.isActivePrincipal(TENANT, APP, SERVICE_USER)).thenReturn(false);
-
-        assertThat(refusalOf(() -> service.read(TENANT, APP, SERVICE_USER, "stripe", null)))
-                .isEqualTo(Refusal.NOT_MODULE_PRINCIPAL);
-        verifyNothingResolved();
-    }
-
-    @Test
-    @DisplayName("a JAR module row is not an external install")
-    void notExternal() {
-        Instant at = Instant.now();
-        TenantModuleData jar = new TenantModuleData("install-1", TENANT, "stub", "Stub", "1.0.0", null, null,
-                "abc", 1L, "com.example.Module", "{}", "ACTIVE", "admin", at, at, "s3-key", List.of(),
-                null, null, APP, SERVICE_USER);
-        when(moduleStore.findByConnectedAppId(TENANT, APP)).thenReturn(Optional.of(jar));
 
         assertThat(refusalOf(() -> service.read(TENANT, APP, SERVICE_USER, "stripe", null)))
                 .isEqualTo(Refusal.NOT_MODULE_PRINCIPAL);

@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApi } from '../../context/ApiContext'
-import { ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
+import { LoadingSpinner, ErrorMessage } from '../../components'
 import { componentRegistry } from '../../services/componentRegistry'
 import { Button } from '@/components/ui/button'
 import { ExternalModuleInstall } from './ExternalModuleInstall'
@@ -11,7 +11,6 @@ import { ExternalModuleUninstallDialog } from './ExternalModuleUninstallDialog'
 import { ExternalModuleHealth } from './ExternalModuleHealth'
 import {
   ArrowUpCircle,
-  Globe,
   Package,
   Power,
   PowerOff,
@@ -23,9 +22,7 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
-  ShieldAlert,
   AlertTriangle,
-  RefreshCw,
 } from 'lucide-react'
 
 interface ModuleAction {
@@ -40,34 +37,27 @@ interface ModuleAction {
   outputSchema: string | null
 }
 
+/** A row of `GET /api/modules`. Every module is an external HTTPS service installed by URL. */
 interface TenantModule {
   id: string
-  tenantId: string
   moduleId: string
   name: string
   version: string
   description: string | null
-  sourceUrl: string
-  jarChecksum: string
-  jarSizeBytes: number | null
-  moduleClass: string
-  manifest: string
   status: string
   installedBy: string
   installedAt: string
   updatedAt: string
   /** Absent from rows a worker older than part 9e lists. */
   actions?: ModuleAction[]
-  /** An external module's base URL (an HTTPS service installed by URL); null for a JAR module. */
-  baseUrl?: string | null
+  /** The module's base URL, the HTTPS service it was installed from. */
+  baseUrl: string
   protocolVersion?: number | null
-  /** SHA-256 of the external module's pinned admin UI bundle, the one approved at install. */
+  /** SHA-256 of the module's pinned admin UI bundle, the one approved at install. */
   uiBundleSha256?: string | null
-  /** Why the last load failed (QUARANTINED reason, or the transient error being retried). */
+  /** Why the module is DEGRADED (its service is not answering) or FAILED (install did not finish). */
   lastError?: string | null
   lastErrorAt?: string | null
-  /** ACTIVE, but failing closed on a transient error and retrying with backoff. */
-  loadRetrying?: boolean
 }
 
 export interface ModulesPageProps {
@@ -104,13 +94,6 @@ function statusBadge(status: string) {
           Failed
         </span>
       )
-    case 'QUARANTINED':
-      return (
-        <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">
-          <ShieldAlert size={12} />
-          Quarantined
-        </span>
-      )
     case 'DEGRADED':
       return (
         <span className="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
@@ -118,17 +101,18 @@ function statusBadge(status: string) {
           Degraded
         </span>
       )
-    case 'STUB':
-      return (
-        <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-          Stub
-        </span>
-      )
     case 'INSTALLING':
       return (
         <span className="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
           <Loader2 size={12} className="animate-spin" />
           Installing
+        </span>
+      )
+    case 'UNINSTALLING':
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
+          <Loader2 size={12} className="animate-spin" />
+          Uninstalling
         </span>
       )
     default:
@@ -140,18 +124,10 @@ function statusBadge(status: string) {
   }
 }
 
-/** What a module's `lastError` means in its status. */
-function lastErrorPrefix(status: string): string {
-  switch (status) {
-    case 'QUARANTINED':
-      return 'Quarantined: '
-    case 'DEGRADED':
-      return 'Not answering, calls are failing fast: '
-    case 'FAILED':
-      return 'Install did not finish: '
-    default:
-      return 'Temporarily unavailable, retrying automatically: '
-  }
+/** What a module's `lastError` means in its status. Only these statuses show the error. */
+const LAST_ERROR_PREFIX: Readonly<Record<string, string>> = {
+  DEGRADED: 'Not answering, calls are failing fast: ',
+  FAILED: 'Install did not finish: ',
 }
 
 export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): React.ReactElement {
@@ -159,17 +135,9 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
   const queryClient = useQueryClient()
 
   const [isInstallOpen, setIsInstallOpen] = useState(false)
-  const [manifestInput, setManifestInput] = useState('')
-  const [sourceUrlInput, setSourceUrlInput] = useState('')
-  const [checksumInput, setChecksumInput] = useState('')
-  const [jarFile, setJarFile] = useState<File | null>(null)
-  const [signatureInput, setSignatureInput] = useState('')
   const [expandedModule, setExpandedModule] = useState<string | null>(null)
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [moduleToDelete, setModuleToDelete] = useState<TenantModule | null>(null)
-  const [installMode, setInstallMode] = useState<'url' | 'jar'>('url')
   const [moduleToUpgrade, setModuleToUpgrade] = useState<TenantModule | null>(null)
-  const [externalToUninstall, setExternalToUninstall] = useState<TenantModule | null>(null)
+  const [moduleToUninstall, setModuleToUninstall] = useState<TenantModule | null>(null)
 
   const {
     data: modules,
@@ -180,47 +148,6 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
     queryKey: ['modules'],
     // getList, not get: the worker answers a JSON:API collection, which get leaves wrapped.
     queryFn: () => apiClient.getList<TenantModule>('/api/modules'),
-  })
-
-  const installMutation = useMutation({
-    // With a JAR this posts multipart to /install-jar, which is the only path that produces a
-    // module that actually runs. Without one the module installs from its manifest alone and every
-    // declared action is inert -- the platform quarantines it rather than pretending it works.
-    mutationFn: (data: {
-      manifest: string
-      sourceUrl: string
-      checksum: string
-      jar: File | null
-      signature: string
-    }) => {
-      if (!data.jar) {
-        return apiClient.post<TenantModule>('/api/modules/install', {
-          manifest: data.manifest,
-          sourceUrl: data.sourceUrl,
-          checksum: data.checksum,
-        })
-      }
-      const form = new FormData()
-      form.append('manifest', new Blob([data.manifest], { type: 'application/json' }))
-      form.append('jar', data.jar)
-      if (data.signature.trim()) {
-        form.append('signature', data.signature.trim())
-      }
-      return apiClient.postFormData<TenantModule>('/api/modules/install-jar', form)
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['modules'] })
-      toast.success('Module installed successfully')
-      setIsInstallOpen(false)
-      setManifestInput('')
-      setSourceUrlInput('')
-      setChecksumInput('')
-      setJarFile(null)
-      setSignatureInput('')
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Failed to install module')
-    },
   })
 
   const enableMutation = useMutation({
@@ -244,39 +171,6 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
       toast.error(err.message || 'Failed to disable module')
     },
   })
-
-  const uninstallMutation = useMutation({
-    mutationFn: (moduleId: string) => apiClient.delete(`/api/modules/${moduleId}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['modules'] })
-      toast.success('Module uninstalled')
-      setDeleteDialogOpen(false)
-      setModuleToDelete(null)
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Failed to uninstall module')
-    },
-  })
-
-  const handleInstall = () => {
-    if (!manifestInput.trim()) {
-      toast.error('Manifest JSON is required')
-      return
-    }
-    try {
-      JSON.parse(manifestInput)
-    } catch {
-      toast.error('Manifest must be valid JSON')
-      return
-    }
-    installMutation.mutate({
-      manifest: manifestInput,
-      sourceUrl: sourceUrlInput || 'local://upload',
-      checksum: checksumInput || 'none',
-      jar: jarFile,
-      signature: signatureInput,
-    })
-  }
 
   if (isLoading) {
     return <LoadingSpinner />
@@ -337,149 +231,7 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
       {isInstallOpen && (
         <div className="mb-6 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
           <h2 className="mb-4 text-lg font-medium text-gray-900">Install Module</h2>
-
-          <div className="mb-4 flex gap-2" role="tablist" aria-label="Install from">
-            <Button
-              role="tab"
-              aria-selected={installMode === 'url'}
-              variant={installMode === 'url' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setInstallMode('url')}
-              data-testid="install-mode-url"
-            >
-              From URL
-            </Button>
-            <Button
-              role="tab"
-              aria-selected={installMode === 'jar'}
-              variant={installMode === 'jar' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setInstallMode('jar')}
-              data-testid="install-mode-jar"
-            >
-              JAR (legacy)
-            </Button>
-          </div>
-
-          {installMode === 'url' && (
-            <ExternalModuleInstall onDone={() => setIsInstallOpen(false)} />
-          )}
-
-          {installMode === 'jar' && (
-            <div className="space-y-4">
-              <div>
-                <label
-                  htmlFor="module-manifest"
-                  className="mb-1 block text-sm font-medium text-gray-700"
-                >
-                  Module Manifest (JSON) *
-                </label>
-                <textarea
-                  id="module-manifest"
-                  value={manifestInput}
-                  onChange={(e) => setManifestInput(e.target.value)}
-                  className="h-40 w-full rounded-md border border-gray-300 p-3 font-mono text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  placeholder='{"id": "my-module", "name": "My Module", "version": "1.0.0", ...}'
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="module-jar"
-                  className="mb-1 block text-sm font-medium text-gray-700"
-                >
-                  Module JAR
-                </label>
-                <input
-                  id="module-jar"
-                  type="file"
-                  accept=".jar"
-                  onChange={(e) => setJarFile(e.target.files?.[0] ?? null)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-                {!jarFile && (
-                  <p className="mt-1 text-xs text-amber-700">
-                    Without a JAR the module has no implementation. It installs, but every action it
-                    declares is quarantined and will refuse to run.
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label
-                  htmlFor="module-signature"
-                  className="mb-1 block text-sm font-medium text-gray-700"
-                >
-                  Publisher Signature (base64)
-                </label>
-                <input
-                  id="module-signature"
-                  type="text"
-                  value={signatureInput}
-                  onChange={(e) => setSignatureInput(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  placeholder="detached Ed25519 signature over the JAR bytes"
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  The signature is the trust boundary: a module runs with the worker&apos;s full
-                  access, and its UI bundle runs in your session. Required when this tenant has a
-                  signing key registered.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label
-                    htmlFor="module-source-url"
-                    className="mb-1 block text-sm font-medium text-gray-700"
-                  >
-                    Source URL
-                  </label>
-                  <input
-                    id="module-source-url"
-                    type="text"
-                    value={sourceUrlInput}
-                    onChange={(e) => setSourceUrlInput(e.target.value)}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    placeholder="https://modules.example.com/module.jar"
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="module-checksum"
-                    className="mb-1 block text-sm font-medium text-gray-700"
-                  >
-                    SHA-256 Checksum
-                  </label>
-                  <input
-                    id="module-checksum"
-                    type="text"
-                    value={checksumInput}
-                    onChange={(e) => setChecksumInput(e.target.value)}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    placeholder="a1b2c3d4e5f6..."
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-3">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setIsInstallOpen(false)
-                    setManifestInput('')
-                    setSourceUrlInput('')
-                    setChecksumInput('')
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button onClick={handleInstall} disabled={installMutation.isPending}>
-                  {installMutation.isPending ? 'Installing...' : 'Install'}
-                </Button>
-              </div>
-            </div>
-          )}
+          <ExternalModuleInstall onDone={() => setIsInstallOpen(false)} />
         </div>
       )}
 
@@ -551,9 +303,13 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
 
       {/* Module Cards */}
       {moduleList.length > 0 && (
-        <div className="space-y-4">
+        <div className="space-y-4" data-testid="module-cards">
           {moduleList.map((mod) => (
-            <div key={mod.id} className="rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div
+              key={mod.id}
+              className="rounded-lg border border-gray-200 bg-white shadow-sm"
+              data-testid={`module-card-${mod.moduleId}`}
+            >
               {/* Module Header */}
               <div className="flex items-center justify-between px-6 py-4">
                 <div className="flex items-center gap-4">
@@ -565,41 +321,19 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
                       <h3 className="text-base font-medium text-gray-900">{mod.name}</h3>
                       <span className="text-xs text-gray-500">v{mod.version}</span>
                       {statusBadge(mod.status)}
-                      {mod.baseUrl && (
-                        <span
-                          className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700"
-                          data-testid={`module-external-${mod.moduleId}`}
-                        >
-                          <Globe size={12} />
-                          External
-                        </span>
-                      )}
-                      {mod.status === 'ACTIVE' && mod.loadRetrying && (
-                        <span
-                          className="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800"
-                          data-testid={`module-retrying-${mod.moduleId}`}
-                        >
-                          <RefreshCw size={12} />
-                          Retrying load
-                        </span>
-                      )}
                     </div>
                     {mod.description && (
                       <p className="mt-0.5 text-sm text-gray-500">{mod.description}</p>
                     )}
-                    {mod.lastError &&
-                      (mod.status === 'QUARANTINED' ||
-                        mod.status === 'DEGRADED' ||
-                        mod.status === 'FAILED' ||
-                        (mod.status === 'ACTIVE' && mod.loadRetrying)) && (
-                        <p
-                          className="mt-0.5 text-xs text-red-700"
-                          data-testid={`module-last-error-${mod.moduleId}`}
-                        >
-                          {lastErrorPrefix(mod.status)}
-                          {mod.lastError}
-                        </p>
-                      )}
+                    {mod.lastError && LAST_ERROR_PREFIX[mod.status] && (
+                      <p
+                        className="mt-0.5 text-xs text-red-700"
+                        data-testid={`module-last-error-${mod.moduleId}`}
+                      >
+                        {LAST_ERROR_PREFIX[mod.status]}
+                        {mod.lastError}
+                      </p>
+                    )}
                     <p className="mt-0.5 text-xs text-gray-400">
                       {(mod.actions ?? []).length} action
                       {(mod.actions ?? []).length !== 1 ? 's' : ''} &middot; Installed{' '}
@@ -609,30 +343,16 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {mod.status === 'ACTIVE' && mod.loadRetrying && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => enableMutation.mutate(mod.moduleId)}
-                      disabled={enableMutation.isPending}
-                      className="gap-1"
-                    >
-                      <RefreshCw size={14} />
-                      Retry now
-                    </Button>
-                  )}
-                  {mod.baseUrl && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setModuleToUpgrade(mod)}
-                      className="gap-1"
-                      data-testid={`module-check-upgrade-${mod.moduleId}`}
-                    >
-                      <ArrowUpCircle size={14} />
-                      Upgrade
-                    </Button>
-                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setModuleToUpgrade(mod)}
+                    className="gap-1"
+                    data-testid={`module-check-upgrade-${mod.moduleId}`}
+                  >
+                    <ArrowUpCircle size={14} />
+                    Upgrade
+                  </Button>
                   {mod.status === 'ACTIVE' || mod.status === 'DEGRADED' ? (
                     <Button
                       variant="outline"
@@ -653,24 +373,13 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
                       className="gap-1"
                     >
                       <Power size={14} />
-                      {mod.status === 'QUARANTINED'
-                        ? 'Re-enable'
-                        : mod.status === 'FAILED' && mod.baseUrl
-                          ? 'Retry install'
-                          : 'Enable'}
+                      {mod.status === 'FAILED' ? 'Retry install' : 'Enable'}
                     </Button>
                   )}
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => {
-                      if (mod.baseUrl) {
-                        setExternalToUninstall(mod)
-                        return
-                      }
-                      setModuleToDelete(mod)
-                      setDeleteDialogOpen(true)
-                    }}
+                    onClick={() => setModuleToUninstall(mod)}
                     aria-label={`Uninstall ${mod.name}`}
                     className="gap-1 text-red-600 hover:bg-red-50 hover:text-red-700"
                   >
@@ -693,25 +402,23 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
               {/* Expanded Actions List */}
               {expandedModule === mod.id && (
                 <div className="space-y-4 border-t border-gray-100 px-6 py-4">
-                  {mod.baseUrl && (
-                    <div className="space-y-3">
-                      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-xs">
-                        <dt className="text-gray-500">Base URL</dt>
-                        <dd className="break-all text-gray-900">{mod.baseUrl}</dd>
-                        <dt className="text-gray-500">Admin UI bundle</dt>
-                        <dd className="break-all text-gray-900">
-                          {mod.uiBundleSha256 ? (
-                            <>
-                              pinned, SHA-256 <code>{mod.uiBundleSha256}</code>
-                            </>
-                          ) : (
-                            'none'
-                          )}
-                        </dd>
-                      </dl>
-                      <ExternalModuleHealth moduleId={mod.moduleId} />
-                    </div>
-                  )}
+                  <div className="space-y-3">
+                    <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-xs">
+                      <dt className="text-gray-500">Base URL</dt>
+                      <dd className="break-all text-gray-900">{mod.baseUrl}</dd>
+                      <dt className="text-gray-500">Admin UI bundle</dt>
+                      <dd className="break-all text-gray-900">
+                        {mod.uiBundleSha256 ? (
+                          <>
+                            pinned, SHA-256 <code>{mod.uiBundleSha256}</code>
+                          </>
+                        ) : (
+                          'none'
+                        )}
+                      </dd>
+                    </dl>
+                    <ExternalModuleHealth moduleId={mod.moduleId} />
+                  </div>
                   <div>
                     <h4 className="mb-3 text-sm font-medium text-gray-700">Action Handlers</h4>
                     {(mod.actions ?? []).length === 0 ? (
@@ -751,7 +458,7 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
         </div>
       )}
 
-      {moduleToUpgrade?.baseUrl && (
+      {moduleToUpgrade && (
         <ExternalModuleUpgradeDialog
           moduleId={moduleToUpgrade.moduleId}
           name={moduleToUpgrade.name}
@@ -760,31 +467,13 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
         />
       )}
 
-      {externalToUninstall && (
+      {moduleToUninstall && (
         <ExternalModuleUninstallDialog
-          moduleId={externalToUninstall.moduleId}
-          name={externalToUninstall.name}
-          onClose={() => setExternalToUninstall(null)}
+          moduleId={moduleToUninstall.moduleId}
+          name={moduleToUninstall.name}
+          onClose={() => setModuleToUninstall(null)}
         />
       )}
-
-      {/* Delete Confirmation */}
-      <ConfirmDialog
-        open={deleteDialogOpen}
-        title="Uninstall Module"
-        message={`Are you sure you want to uninstall "${moduleToDelete?.name}"? This will remove all its action handlers. Flows using these handlers will need to be updated.`}
-        confirmLabel="Uninstall"
-        variant="danger"
-        onConfirm={() => {
-          if (moduleToDelete) {
-            uninstallMutation.mutate(moduleToDelete.moduleId)
-          }
-        }}
-        onCancel={() => {
-          setDeleteDialogOpen(false)
-          setModuleToDelete(null)
-        }}
-      />
     </div>
   )
 }

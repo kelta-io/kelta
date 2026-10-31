@@ -78,8 +78,8 @@ class ModuleEventDeliveryListenerTest {
     private static ExternalModuleRegistry.Endpoint endpoint(String installId, String moduleId,
                                                             ModulePrincipalAccess access) {
         TenantModuleData row = new TenantModuleData(installId, TENANT, moduleId, moduleId, "1.0.0", null,
-                "https://" + moduleId + ".example.test", null, null, null, "{}", TenantModuleData.STATUS_ACTIVE,
-                "admin", Instant.EPOCH, Instant.EPOCH, null, List.of(), "https://" + moduleId + ".example.test", 1,
+                "https://" + moduleId + ".example.test", "{}", TenantModuleData.STATUS_ACTIVE,
+                "admin", Instant.EPOCH, Instant.EPOCH, List.of(), "https://" + moduleId + ".example.test", 1,
                 "app-" + moduleId, "svc-" + moduleId);
         return new ExternalModuleRegistry.Endpoint(row, manifest(), access);
     }

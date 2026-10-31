@@ -175,8 +175,9 @@ class RowLevelSecurityIntegrationTest {
             admin.update("INSERT INTO notification (id, tenant_id, recipient_id, title, body) "
                     + "VALUES (?, ?, ?, 'Title', 'Body')", t[2], t[0], t[1]);
             admin.update("INSERT INTO tenant_module (id, tenant_id, module_id, name, version, source_url, "
-                    + "manifest, installed_by) VALUES (?, ?, 'sample', 'Sample', '1.0.0', "
-                    + "'https://modules.example/sample', '{}'::jsonb, ?)", t[3], t[0], t[1]);
+                    + "base_url, manifest, installed_by) VALUES (?, ?, 'sample', 'Sample', '1.0.0', "
+                    + "'https://modules.example/sample', 'https://modules.example/sample', '{}'::jsonb, ?)",
+                    t[3], t[0], t[1]);
             admin.update("INSERT INTO module_event_dead_letter (id, tenant_id, tenant_module_id, event_id, "
                     + "payload, attempts) VALUES (?, ?, ?, 'event-1', '{}'::jsonb, 5)", t[4], t[0], t[3]);
         }

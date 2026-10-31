@@ -1,6 +1,6 @@
 ---
 title: Security hardening for public traffic
-description: The checks to make before exposing a deployment — unauthenticated paths, rate limits, the auth server's public surface, secrets, module signing, header trust and internal endpoints.
+description: The checks to make before exposing a deployment — unauthenticated paths, rate limits, the auth server's public surface, secrets, modules, header trust and internal endpoints.
 section: deploy
 order: 70
 ---
@@ -93,9 +93,17 @@ resolved client address, and forwarded headers from anyone else are ignored.
 
 ## Modules
 
-`KELTA_MODULES_SIGNING_REQUIRED=true`. A module runs arbitrary code in the worker and its UI bundle runs in the
-administrator's browser session; the signature is the whole trust model. Retire the legacy platform-wide key
-once per-tenant keys are in place.
+A module is a separate HTTPS service: its code never runs in the platform, and it reaches tenant data only
+through the API as a service user holding the permissions an administrator approved. Approving a module is still
+a trust decision — it can misuse any credential or collection it was granted, and its UI bundle runs in the
+administrator's browser session (pinned by hash at install, so it cannot change afterwards).
+
+- Keep `KELTA_MODULE_SIGNING_KEY` in a secret manager. It signs every request the platform sends a module; a
+  leaked key lets its holder forge requests to every tenant's modules until you rotate it.
+- List only module services in `KELTA_MODULE_ALLOWED_HOSTS`, never shared infrastructure, and never widen
+  `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` for a module.
+- Run an in-cluster module where it cannot reach the worker directly (for example, a namespace whose network
+  policy denies it the worker pods): the worker trusts the identity headers the gateway stamps.
 
 ## Header trust
 
@@ -114,7 +122,7 @@ ingress. Actuator endpoints beyond health should not be public.
 - [ ] `CORS_ALLOWED_ORIGIN_PATTERN` set to your app origin, not `*`
 - [ ] `DIRECT_LOGIN_ENABLED=false`
 - [ ] `KELTA_SECURITY_TRUSTED_PROXIES` set to the ingress pod CIDR on the gateway and the auth server
-- [ ] `KELTA_MODULES_SIGNING_REQUIRED=true`
+- [ ] `KELTA_MODULE_SIGNING_KEY` in a secret manager; `KELTA_MODULE_ALLOWED_HOSTS` lists module services only
 - [ ] `KELTA_WORKER_CERBOS_ADMIN_PASSWORD` set on the worker (no built-in default; without it no policy is pushed)
 - [ ] Only the gateway, auth and ui are reachable from the internet
 - [ ] Secrets in a secret manager; `KELTA_ENCRYPTION_KEY` backed up

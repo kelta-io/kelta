@@ -134,20 +134,17 @@ class ExternalModuleManifestParserTest {
     class Versions {
 
         @Test
-        @DisplayName("a JAR (v1) manifest is not an external manifest")
+        @DisplayName("a manifest that does not declare manifestVersion 2 is refused")
         void v1IsRefused() {
             refused(r -> r.remove("manifestVersion"), "manifestVersion");
             refused(r -> r.put("manifestVersion", 1), "manifestVersion must be 2");
         }
 
         @Test
-        @DisplayName("the JAR parser refuses a v2 manifest and points at install by URL")
-        void jarParserRefusesV2() {
-            assertThatThrownBy(() -> parser.parse(FULL.replace("\"id\"", "\"moduleClass\": \"x.Y\", \"id\"")))
-                    .isInstanceOf(ModuleManifestException.class)
-                    .hasMessageContaining("install it by URL");
+        @DisplayName("manifestVersion reads the declared version, 1 when absent")
+        void manifestVersion() {
             assertThat(parser.manifestVersion(FULL)).isEqualTo(2);
-            assertThat(parser.manifestVersion("{\"id\":\"jar\"}")).isEqualTo(1);
+            assertThat(parser.manifestVersion("{\"id\":\"old\"}")).isEqualTo(1);
         }
 
         @Test

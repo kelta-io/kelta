@@ -8,7 +8,8 @@ status: partial
 
 Portal billing — letting external (portal) users buy plans and passes — ships as a **runtime module**
 (`kelta-billing`) rather than compiled-in platform code, and is the reference implementation of the
-[module SPI](/docs/platform/modules/). Install it only on tenants that sell to portal users.
+[module protocol](/docs/platform/modules/): an HTTPS service installed into a tenant by URL. Install it only on
+tenants that sell to portal users.
 
 ## Concepts
 
@@ -22,13 +23,14 @@ Portal billing — letting external (portal) users buy plans and passes — ship
 ## Setup
 
 1. Create a credential of type `stripe` named `stripe` with `secretKey`, `webhookSecret` and
-   `allowedReturnOrigins` (checkout may only return to these origins).
+   `allowedReturnOrigins` (checkout may only return to these origins). The module's manifest declares it, and
+   the module reads it per request ([reading tenant credentials](/docs/platform/modules/#reading-tenant-credentials)).
 2. Point a Stripe webhook at `https://api.example.com/<tenant>/api/modules/webhooks/<tenantId>/kelta-billing`
    subscribed to `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
    `checkout.session.async_payment_failed` and `customer.subscription.created|updated|deleted`. The module
    verifies the HMAC over the raw body, and grants a pass only once the payment is collected.
 3. Create `billing_plans` rows with matching `stripePriceId`s.
-4. Schedule the `billing:expire-passes` action in a scheduled flow — a module has no scheduler of its own.
+4. Nothing to schedule: the module's manifest runs `kelta-billing:expire-passes` hourly.
 
 ## Member surface
 
@@ -41,9 +43,11 @@ The module serves the member endpoints under its authenticated route prefix:
 | `POST /api/modules/kelta-billing/x/checkout-sessions` | start a Stripe hosted checkout; returns the redirect URL |
 | `POST /api/modules/kelta-billing/x/portal-sessions` | open Stripe's billing portal |
 
-The same operations exist as flow actions (`billing:create-checkout-session`, `billing:create-portal-session`,
-`billing:resolve-entitlements`, `billing:list-plans`, `billing:me`), and a *Billing plans* page-builder widget ships
-in the module's UI bundle.
+The same operations exist as flow actions (`kelta-billing:create-checkout-session`,
+`kelta-billing:create-portal-session`, `kelta-billing:resolve-entitlements`, `kelta-billing:list-plans`,
+`kelta-billing:me`), and a *Billing plans* page-builder widget ships in the module's UI bundle. Every action
+except `list-plans` acts on the calling member, so it fails on a scheduled or asynchronous flow run, which has
+none.
 
 ## Entitlements
 
@@ -57,7 +61,7 @@ channel) is never sent, since it needs an affirmative entitlement.
 
 - Webhook idempotency relies on convergence (a pass is granted once per checkout session, subscriptions upsert by
   Stripe id) rather than a transactional event claim.
-- Quota rules with `appliesTo: PORTAL` are skipped — a module cannot read the caller's user type; use
-  `appliesTo: ALL`.
+- Quotas are soft limits: the quota hook has 2 s and lets a create through when the module is slow or
+  unreachable, and concurrent creates by one member can land over the cap.
 - Live verification against a real Stripe account is still owed by the platform team; run the module's
   verification runbook in your own environment before relying on it.

@@ -176,7 +176,7 @@ public class ExternalModuleRegistry {
         try {
             Optional<TenantModuleData> row = TenantContext.callWithTenant(tenantId,
                     () -> moduleStore.findByTenantAndModuleId(tenantId, moduleId));
-            if (row.isPresent() && row.get().isExternal()) {
+            if (row.isPresent()) {
                 TenantContext.runWithTenant(tenantId, () -> apply(row.get()));
             } else {
                 remove(tenantId, moduleId);
@@ -284,7 +284,7 @@ public class ExternalModuleRegistry {
     /**
      * The acting user of a flow step: the run's user ({@link ActionContext#userId()}, which
      * {@code FlowActorResolver} resolved to the caller, the record's changer, or the flow's run-as
-     * user or owner), the identity a JAR module's action read. Sent only when it is an
+     * user or owner). Sent only when it is an
      * {@code ACTIVE} {@code INTERNAL} or {@code PORTAL} user of the tenant, read from
      * {@code platform_user} (never from a request header, which maps a missing or {@code SERVICE}
      * type to {@code INTERNAL}). {@code null} for a run with no user, and for a service, inactive or

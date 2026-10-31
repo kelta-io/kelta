@@ -35,43 +35,15 @@ public class JdbcModuleStore implements ModuleStore {
         String id = data.id() != null ? data.id() : UUID.randomUUID().toString();
         jdbcTemplate.update("""
             INSERT INTO tenant_module
-                (id, tenant_id, module_id, name, version, description, source_url,
-                 jar_checksum, jar_size_bytes, module_class, manifest, status,
-                 installed_by, s3_key, base_url, protocol_version, connected_app_id,
-                 service_user_id, installed_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                (id, tenant_id, module_id, name, version, description, source_url, manifest, status,
+                 installed_by, base_url, protocol_version, connected_app_id, service_user_id,
+                 installed_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, NOW(), NOW())
             """,
             id, data.tenantId(), data.moduleId(), data.name(), data.version(),
-            data.description(), data.sourceUrl(), data.jarChecksum(), data.jarSizeBytes(),
-            data.moduleClass(), data.manifest(), data.status(), data.installedBy(),
-            data.s3Key(), data.baseUrl(), data.protocolVersion(), data.connectedAppId(),
-            data.serviceUserId());
+            data.description(), data.sourceUrl(), data.manifest(), data.status(), data.installedBy(),
+            data.baseUrl(), data.protocolVersion(), data.connectedAppId(), data.serviceUserId());
         return id;
-    }
-
-    @Override
-    public void saveJarSignature(String moduleRowId, String signatureBase64) {
-        jdbcTemplate.update(
-                "UPDATE tenant_module SET jar_signature = ?, updated_at = NOW() WHERE id = ?",
-                signatureBase64, moduleRowId);
-    }
-
-    @Override
-    public void saveJarSignature(String moduleRowId, String signatureBase64, String keyFingerprint) {
-        jdbcTemplate.update("""
-            UPDATE tenant_module
-               SET jar_signature = ?, jar_signature_key_fingerprint = ?, updated_at = NOW()
-             WHERE id = ?
-            """,
-            signatureBase64, keyFingerprint, moduleRowId);
-    }
-
-    @Override
-    public Optional<String> findJarSignature(String moduleRowId) {
-        List<String> rows = jdbcTemplate.query(
-                "SELECT jar_signature FROM tenant_module WHERE id = ?",
-                (rs, rowNum) -> rs.getString("jar_signature"), moduleRowId);
-        return rows.isEmpty() ? Optional.empty() : Optional.ofNullable(rows.get(0));
     }
 
     @Override
@@ -152,28 +124,9 @@ public class JdbcModuleStore implements ModuleStore {
     }
 
     @Override
-    public void recordLoadOutcome(String id, String status, String error) {
-        jdbcTemplate.update(
-            "UPDATE tenant_module SET status = ?, last_error = ?, "
-                + "last_error_at = CASE WHEN ?::text IS NULL THEN last_error_at ELSE NOW() END, "
-                + "last_loaded_at = CASE WHEN ?::text IS NULL THEN NOW() ELSE last_loaded_at END, "
-                + "load_attempts = load_attempts + 1, updated_at = NOW() WHERE id = ?",
-            status, error, error, error, id);
-    }
-
-    @Override
-    public void recordLoadError(String id, String error) {
-        jdbcTemplate.update(
-            "UPDATE tenant_module SET last_error = ?, last_error_at = NOW(), "
-                + "load_attempts = load_attempts + 1, updated_at = NOW() WHERE id = ?",
-            error, id);
-    }
-
-    @Override
-    public java.util.Map<String, Object> findLoadDiagnostics(String id) {
+    public java.util.Map<String, Object> findLastError(String id) {
         var rows = jdbcTemplate.queryForList(
-            "SELECT last_error, last_error_at, last_loaded_at, load_attempts "
-                + "FROM tenant_module WHERE id = ?", id);
+            "SELECT last_error, last_error_at FROM tenant_module WHERE id = ?", id);
         if (rows.isEmpty()) {
             return java.util.Map.of();
         }
@@ -181,8 +134,6 @@ public class JdbcModuleStore implements ModuleStore {
         var out = new java.util.LinkedHashMap<String, Object>();
         out.put("lastError", row.get("last_error"));
         out.put("lastErrorAt", row.get("last_error_at"));
-        out.put("lastLoadedAt", row.get("last_loaded_at"));
-        out.put("loadAttempts", row.get("load_attempts"));
         return out;
     }
 
@@ -235,17 +186,9 @@ public class JdbcModuleStore implements ModuleStore {
     }
 
     @Override
-    public List<TenantModuleData> findAllActive() {
-        List<TenantModuleData> modules = jdbcTemplate.query(
-            "SELECT * FROM tenant_module WHERE status = 'ACTIVE' ORDER BY tenant_id, module_id",
-            this::mapModule);
-        return modules.stream().map(this::withActions).toList();
-    }
-
-    @Override
     public List<TenantModuleData> findAllExternal() {
         List<TenantModuleData> modules = jdbcTemplate.query(
-            "SELECT * FROM tenant_module WHERE base_url IS NOT NULL ORDER BY tenant_id, module_id",
+            "SELECT * FROM tenant_module ORDER BY tenant_id, module_id",
             this::mapModule);
         return modules.stream().map(this::withActions).toList();
     }
@@ -275,15 +218,11 @@ public class JdbcModuleStore implements ModuleStore {
             rs.getString("version"),
             rs.getString("description"),
             rs.getString("source_url"),
-            rs.getString("jar_checksum"),
-            rs.getObject("jar_size_bytes") != null ? rs.getLong("jar_size_bytes") : null,
-            rs.getString("module_class"),
             rs.getString("manifest"),
             rs.getString("status"),
             rs.getString("installed_by"),
             toInstant(rs.getTimestamp("installed_at")),
             toInstant(rs.getTimestamp("updated_at")),
-            rs.getString("s3_key"),
             List.of(), // Actions loaded separately
             rs.getString("base_url"),
             rs.getObject("protocol_version") != null ? rs.getInt("protocol_version") : null,

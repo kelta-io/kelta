@@ -64,8 +64,8 @@ class ModuleTaskServiceTest {
 
     private static TenantModuleData install(String status, String baseUrl) {
         Instant at = Instant.parse("2026-10-01T00:00:00Z");
-        return new TenantModuleData("install-1", TENANT, "stub", "Stub", "1.0.0", null, baseUrl,
-                null, null, null, "{}", status, "admin", at, at, null, List.of(), baseUrl, 1, APP, SERVICE_USER);
+        return new TenantModuleData("install-1", TENANT, "stub", "Stub", "1.0.0", null, baseUrl, "{}",
+                status, "admin", at, at, List.of(), baseUrl, 1, APP, SERVICE_USER);
     }
 
     private static byte[] body(String json) {
@@ -137,16 +137,12 @@ class ModuleTaskServiceTest {
         when(principals.isActivePrincipal(TENANT, APP, SERVICE_USER)).thenReturn(false);
         assertThat(completeRefusal(APP, SERVICE_USER, ok)).as("a deactivated principal")
                 .isEqualTo(Refusal.NOT_MODULE_PRINCIPAL);
-        when(principals.isActivePrincipal(TENANT, APP, SERVICE_USER)).thenReturn(true);
-        when(moduleStore.findByConnectedAppId(TENANT, APP)).thenReturn(Optional.of(install("ACTIVE", null)));
-        assertThat(completeRefusal(APP, SERVICE_USER, ok)).as("a JAR module's row")
-                .isEqualTo(Refusal.NOT_MODULE_PRINCIPAL);
 
         verifyNoInteractions(tasks, flowEngine);
     }
 
     @Test
-    @DisplayName("a disabled or quarantined install is MODULE_NOT_ACTIVE; DEGRADED may still complete")
+    @DisplayName("a disabled install is MODULE_NOT_ACTIVE; DEGRADED may still complete")
     void inactiveInstall() {
         when(moduleStore.findByConnectedAppId(TENANT, APP))
                 .thenReturn(Optional.of(install(TenantModuleData.STATUS_DISABLED, "https://stub.example.test")));

@@ -14,7 +14,7 @@ import java.util.Objects;
  * delay ({@code kelta.modules.external.reconcile-interval-ms}, 60 s) on every pod
  * ({@code specs/module-platform/9-external-modules.md} §3.5).
  *
- * <p>Per pod by design, like {@link ModuleLoadRetryScheduler}: each pod keeps its own registrations
+ * <p>Per pod by design: each pod keeps its own registrations
  * and breakers, so each re-reads the shared rows itself. The rows are only read here (Critical
  * Rule 1); a breaker's status write happens on the call path, compare-and-set.
  *

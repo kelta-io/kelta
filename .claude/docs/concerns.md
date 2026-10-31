@@ -562,8 +562,8 @@ it does not check:
   `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS`, which also opens flow `HTTP_CALLOUT`/`CALL_API`.
 - **The manifest is not signed.** Its integrity is TLS to the module host (none for an allow-listed
   `http` host). `planHash` binds what the admin reviewed: the apply re-fetches and re-plans, and any
-  change in grants, metadata, version or installed state is a `409`. The JAR path's publisher
-  signature has no 9c equivalent; whoever controls the module host controls what it declares.
+  change in grants, metadata, version or installed state is a `409`. There is no publisher
+  signature; whoever controls the module host controls what it declares.
 - **The JWKS is public by design** (`/api/modules/.well-known/jwks.json`, listed in
   `unauthenticated-paths` as the exact file). It is public key material with no tenant. The signing
   key (`KELTA_MODULE_SIGNING_KEY`) is one platform-wide key: a leak lets the holder forge requests
@@ -600,8 +600,9 @@ what it does not guard against:
   slot before running it (`ScheduledJobRepository.claim`), so two pods no longer both run it, and
   a pod that dies after the claim skips that slot rather than repeating it. Module calls still
   carry `Idempotency-Key: <jobId>:<fireTime>`; an action that must not repeat should honour it.
-- **Route bodies are text.** The route proxy receives the request body as a UTF-8 string (the JAR
-  path's signature), so a binary or non-UTF-8 body is re-encoded on the way to the module. Module
+- **Route bodies are text.** The route proxy receives the request body as a UTF-8 string
+  (`ModuleHttpController`'s `@RequestBody String`), so a binary or non-UTF-8 body is re-encoded on
+  the way to the module. Module
   answers are always served as `application/json` with `nosniff` and `no-store`, never as the
   module's own content type.
 
@@ -723,7 +724,7 @@ homelab cluster (`ci-cd.md` → Rust external modules). What that does not guara
   bound (an HTTP request), not on a scheduled or async flow. `kelta-billing:create-checkout-session`,
   `create-portal-session`, `me` and `resolve-entitlements` then fail with "No calling member"; the
   module never takes the member from the input, which any flow author controls. Routes always carry
-  `act`. *JAR:* read the member from the in-process caller context the same way.
+  `act`.
 - **A record-triggered run inherits a flow's fallback actor as its initiator.** A flow step's
   write publishes its record event as the run's actor (`ActingUser`), and `FlowActorResolver`
   takes any UUID on the event as the initiator. So a run no one started — a schedule, a webhook, a
@@ -734,7 +735,7 @@ homelab cluster (`ci-cd.md` → Rust external modules). What that does not guara
   flow runs record one (`act.source`, #2135).
 - **The quota hook reads every collection.** Counting a member's records in an arbitrary collection
   needs read access to it, so the manifest asks for `VIEW_ALL_DATA` — shown on the consent screen,
-  and narrower than the JAR's in-process access, but still a read grant on all of the tenant's data
+  and narrower than the in-process access the deleted JAR build had, but still a read grant on all of the tenant's data
   for a module whose job is billing. A rule's `countFilter` field names go to the platform as query
   filters; a bad one fails open.
 - **Billing quotas are soft limits.** The `*` beforeCreate hook has 2 s and
@@ -753,7 +754,7 @@ homelab cluster (`ci-cd.md` → Rust external modules). What that does not guara
 - **Caches are per replica.** A record event reaches one replica of a module (the Service picks
   one). The billing module's rules cache (60 s) therefore lags on any other replica by up to its
   TTL after a rule change; its entitlements cache is off by default for that reason.
-- **`appliesTo=PORTAL` rules now apply.** The JAR module skipped them (it could not read the
+- **`appliesTo=PORTAL` rules now apply.** The former JAR build skipped them (it could not read the
   caller's user type); the Rust module reads the signed actor's `user_type`. A tenant with active
   PORTAL rules sees them enforced from the cutover on (`kelta-modules/billing/CUTOVER.md`).
 
@@ -941,7 +942,6 @@ is the one enforced. Folding one into the other is a design decision (which serv
 | `PageBuilderPage.tsx` (kelta-ui) | 1,474 | Extract page-list table, config modal, editor shell |
 | `SchemaMigrationEngine.java` (runtime-core) | 1,106 | Split non-destructive vs destructive paths |
 | `PhysicalTableStorageAdapter.java` (runtime-core) | 1,094 | Split 2026-10-12 (was 2,423) into package-private `SqlIdentifiers`, `SqlQueryBuilder`, `TenantScopePolicy`, `StorageConstraintErrors`, `CollectionTableDdl`; what remains is CRUD orchestration + row mapping/value conversion |
-| `RuntimeModuleManager.java` (kelta-worker) | 467 | Split 2026-10-12 (was 1,693) into package-private `ModuleInstaller`, `ModuleLoader` (839 — load/unload, quarantine and retry; sole owner of per-pod load state), `ModuleRegistrar`, `ModuleDispatcher` (routes, webhooks, UI bundle); what remains is the public façade + enable/disable/uninstall |
 
 **Other:**
 - **Email templates have two lookup axes** — `EmailRepository.findTemplateByKey` (`template_key`,
@@ -1039,19 +1039,24 @@ works — which reads as a method-specific bug.
 stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 `CollectionSchemaControllerTest`).
 
-### Runtime module loading
+### Module-platform 9g rollout — old worker pods read dropped columns (V225)
 
-- **A transient infrastructure error must never be written as a terminal state.** Only failures
-  `ModuleLoadFailureClassifier` calls `PERMANENT` (bad signature/checksum, missing JAR, classload,
-  throwing `onStartup`) may record `QUARANTINED`; storage/DB/network failures fail closed on the
-  pod, write only `last_error`/`load_attempts` (`ModuleStore.recordLoadError`) and retry
-  (`ModuleLoadRetryScheduler`). Any new "mark it broken" path must ask whether a retry could fix it.
-  Alert on `kelta_worker_module_load_retry_pending`.
-- **Recovery is Re-enable** (`POST /api/modules/{moduleId}/enable`, or **Re-enable** on the admin
-  Modules page) — it reloads on every pod via the `ENABLED` NATS event and re-verifies, so an
-  integrity failure quarantines again; a transient failure shows as **Retrying load**
-  (`loadRetrying`) with **Retry now**. A row quarantined by a pre-classifier outage is not
-  auto-detected (its reason looks like any other) — re-enable it by hand.
+- **V225 refuses to run while a JAR install is left.** Its `DO` block raises if any `tenant_module`
+  row has `base_url IS NULL` or status `QUARANTINED`/`STUB`, which fails the migrate Job (the ArgoCD
+  PreSync hook, `backoffLimit: 0`) and stops the rollout before a worker pod changes. Move each such
+  module out of process (install the external service by URL, uninstall the JAR row), then re-sync.
+- **During the rolling update, old pods' module reads fail.** V225 drops `tenant_module` columns
+  (`jar_checksum`, `module_class`, `s3_key`, `jar_signature`, `last_loaded_at`, `load_attempts`, …)
+  that the previous release's `JdbcModuleStore` still reads: it selects `*` and maps
+  `rs.getString("jar_checksum")` and friends, which now throws. Until each old pod is replaced, a
+  request it answers that reads `tenant_module` is a `500`: `GET /api/modules` and every other
+  `/api/modules` admin read, the module self-calls that resolve the install by its connected app
+  (`/api/modules/self/credentials/{name}`, task complete/heartbeat), and its `module.changed`
+  refreshes and 60 s reconcile (logged, not fatal). Flow actions, hooks, the entitlements port,
+  routes and webhooks keep working on old pods: they go through the in-memory
+  `ExternalModuleRegistry` built before the migration. The window is the rollout's length; a module
+  that reads a credential per request (billing reads its Stripe key) can see a few failed calls
+  from it. Don't install, upgrade or uninstall a module until the rollout finishes.
 
 ### Gateway routing
 
@@ -1168,7 +1173,7 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   so a controller whose body is not that collection's records must opt out by marker, or callers
   without VIEW_ALL_DATA / MODIFY_ALL_DATA get `data: null` / an empty list (after any write ran).
   Opted out: `PermissionGatedController` (packages, promotions, environments, bulk jobs, data
-  exports, governor limits, support-mailbox admin, modules, module signing keys) and
+  exports, governor limits, support-mailbox admin, modules) and
   `SelfScopedController` (watches, wins, devices, chat, support inbox), plus
   `DerivedDataController` for the record email log (`GET /api/email/logs?collection=&recordId=`
   loads the record through the `QueryEngine` and checks `isRecordReadable` before reading the
@@ -1286,8 +1291,9 @@ has the same lockless select (it is only reached once per export today).
 ## Dependency Risks
 
 - **Native images — reflection.** Production ships gateway and auth native; the worker's
-  production image is JVM since #1360 (runtime module JARs can't load classes in a native image),
-  but `make up` (`docker-compose.build.yml`) still builds it native, so keep its
+  production image is JVM since #1360 (the in-process JAR module loader could not run on a native
+  image; module-platform 9g deleted it, and going native again is a separate decision that
+  `ci.yml`'s `worker-image-is-jvm` keeps deliberate), but `make up` (`docker-compose.build.yml`) still builds it native, so keep its
   `reflect-config.json` current. Every class reflectively (de)serialized on a native image needs a
   `reflect-config.json` entry in the same PR, or it breaks only there: gateway bootstrap DTOs
   (reachable from `BootstrapConfig`; a miss once took the whole API down —
@@ -1540,7 +1546,7 @@ One line each; full write-ups are in git history.
 - 2026-07-02 — gateway native image missing a bootstrap DTO reflect entry took the API down; 2026-07-11 — NATS payloads serialized `{}` on native (#1240); 2026-07-12 — GraalJS `new Date()` failed on native.
 - 2026-08-10 (#1344) — tracing exported nothing on native images (env-var-only conditional property).
 - 2026-10-05 — Netty build-time clock origin outage.
-- 2026-10-06 — an object-store outage during JAR load quarantined every runtime module; quarantine was sticky (startup loads only `ACTIVE`), so modules stayed off ~5 days until re-enabled by hand. Load failures now classified by phase; transient ones retry with backoff instead of quarantining, and re-enable reloads on running pods (#1725, #1779 — no manual status flip or restart). Lesson: transient infra errors must never be terminal.
+- 2026-10-06 — an object-store outage during JAR load quarantined every runtime module; quarantine was sticky (startup loads only `ACTIVE`), so modules stayed off ~5 days until re-enabled by hand. Load failures now classified by phase; transient ones retry with backoff instead of quarantining, and re-enable reloads on running pods (#1725, #1779 — no manual status flip or restart). Lesson: transient infra errors must never be terminal. (The JAR load path, quarantine and load retry were deleted in module-platform 9g.)
 - 2026-07-11 — chat/video subjects had no JetStream streams; 2026-07-12 — durable consumer config drift took down worker subscriptions.
 - Older: federated users stuck PENDING_ACTIVATION; password reset sent no email; `EmptyResultDataAccessException` and null `reset_token_expires_at` in `PasswordController`.
 - 2026-10-24 (#1875) — KLT-686: `record_version` had no retention; `RecordVersionRetentionSweep` prunes by age (`kelta.record-version.retention.max-age-days`) and an opt-in per-record cap, dry-run by default (open item in Data growth). `RecordVersionRetentionSweepTest`, `RecordVersionRetentionIntegrationTest`.
@@ -1565,7 +1571,7 @@ One line each; full write-ups are in git history.
 - 2026-09-09 — `kelta-ui/app`'s ~2,700 tests never ran (not invoked + Node 18); Node 20, `Test kelta-ui` step, `asyncUtilTimeout` 10 s.
 - Runtime modules' ~1,900 tests never ran (`-DskipTests`); `test-runtime` job in both gates.
 - V188 — Mockito audit tests passed against a table that rejected every row: credential-access audit rows were all rejected by a CHECK constraint while Mockito tests passed; `SetupAuditActionScenarioTest`.
-- 2026-08-31 — a rejected module reported success via stub handlers; quarantine.
+- 2026-08-31 — a rejected module reported success via stub handlers; quarantine (JAR path, deleted in module-platform 9g).
 - `StripeApiClient`, `FcmPushProvider`, `ApnsPushProvider` unstartable (multi-constructor `@Component`); `PushProviderWiringTest`.
 - Test-harness: runtime-core storage tests build H2 with `DATABASE_TO_LOWER=TRUE` to match Postgres identifier folding.
 - 2026-10-23 (#1848) — KLT-667: `DeleteLayoutTool`, `UpdateLayoutTool`, `UpdateFlowTool`, `MaterializeApiCollectionTool`, `DescribeApiTool`, `GetRecordTool` and `SearchTool` had no test; each now has a WireMock wire test (`<Tool>Test`), and tool arguments are type-checked centrally (`ArgumentTypeValidatingToolDecoratorTest`).

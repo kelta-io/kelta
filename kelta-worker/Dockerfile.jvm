@@ -1,11 +1,11 @@
 # JVM build of Kelta Worker. THIS IS WHAT PRODUCTION RUNS.
 #
 # The native-image build (kelta-worker/Dockerfile) is kept for local `make up`
-# and for reference, but it cannot run this service's runtime-module feature:
-# SandboxedModuleClassLoader defines classes from an installed JAR at runtime and
-# a native image has no bytecode interpreter, so URLClassLoader.findClass throws
-# ClassNotFoundException, the loader falls back to inert stub handlers, and
-# /api/modules keeps reporting ACTIVE. Nothing surfaces the breakage.
+# and for reference. Production moved to the JVM because the in-process JAR module
+# loader could not run on a native image. That loader is gone (module-platform
+# slice 9g: every module is an external HTTP service), but whether the worker goes
+# native again is a separate decision with its own validation, not a side effect
+# of this file. The CI job worker-image-is-jvm holds the line until then.
 #
 # Trade-offs accepted: ~20-40s startup instead of ~50ms, and a larger heap.
 # Startup is covered by the deployment's startupProbe (up to ~310s).

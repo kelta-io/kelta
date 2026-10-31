@@ -151,7 +151,7 @@ class PublicSurfaceTest {
             // Modules: the webhook dispatch path is open, module administration is not.
             assertThat(isPublic("/api/modules/webhooks/t1/m1", HttpMethod.POST)).isTrue();
             assertThat(isPublic("/api/modules", HttpMethod.GET)).isFalse();
-            assertThat(isPublic("/api/modules/install-jar", HttpMethod.POST)).isFalse();
+            assertThat(isPublic("/api/modules/install", HttpMethod.POST)).isFalse();
             // External modules: the signing JWKS is open; plan/install by URL and the rest of
             // /api/modules/.well-known are not.
             assertThat(isPublic("/api/modules/.well-known/jwks.json", HttpMethod.GET)).isTrue();

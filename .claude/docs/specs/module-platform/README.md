@@ -6,9 +6,10 @@
 > fail loudly, and be upgradable and removable without orphaning a tenant's data.
 >
 > The forcing function is the **complete removal of compiled-in billing** from the platform
-> (slice 8). Billing already runs as a runtime module on the `<tenant-slug>` prod tenant — a
-> compiled-in Spring controller resolving a member's entitlements out of a signed, uploaded JAR —
-> so the mechanism is proven. What is not proven is everything around it.
+> (slice 8). When this spec was written, billing already ran as a runtime module on a prod
+> tenant — a compiled-in Spring controller resolving a member's entitlements out of a signed,
+> uploaded JAR — so the mechanism was proven. What was not proven was everything around it. (Since
+> slice 9 billing is an external HTTP service, and part 9g deleted the JAR path.)
 >
 > Source-verified against the codebase on **2026-10-11** at main `ece7925` (Flyway directory head
 > **V206** (`V206__collection_ownership.sql`) — next new migration is **V207**; deployed
@@ -31,37 +32,44 @@ that don't apply state "N/A — reason"). Read this parent first; every child re
 > reverses this spec's security model (module code no longer runs in the worker JVM, and
 > permissions become enforceable), supersedes slice 3's manifest v2 (3a) while reusing its plan /
 > `planHash` / uninstall contracts (3b, 3c), meets slice 4's goal through a generated service
-> profile, and folds the minimal form of slice 5 into the manifest. The JAR path, and the security
-> model below, stay accurate until slice 9's part 9g deletes it.
+> profile, and folds the minimal form of slice 5 into the manifest. **Part 9g deleted the JAR path
+> (built 2026-10-31, pending merge; V225).** The security model, reuse map, module status and deploy
+> hazards below are rewritten for external modules; the slice table and known defects keep their
+> 2026-10-11 JAR-era record, marked as such.
 
 ---
 
 ## Security model — read this before designing anything
 
-`SandboxedModuleClassLoader.ALLOWED_PARENT_PREFIXES` includes **`java.` and `javax.` wholesale**. A
-loaded module can open sockets, read the filesystem, spawn threads, and call `System.exit` — inside
-the worker JVM, with the worker's database connection. On the browser side, `moduleUiBundles.ts`
-evaluates publisher JavaScript from a blob URL, same-origin, with the admin session's full DOM and
-cookie access.
+**Module code never runs in a platform process.** Since slice 9 (part 9g deleted the in-process
+JAR path and its sandboxed classloader) a module is a separate HTTPS service. The trust boundary is
+the **network plus the module's service principal**:
 
-**The JAR publisher signature is the entire trust boundary.**
+- **Platform → module:** every request carries a short-lived ES256 assertion
+  (`ModuleAssertionSigner`, `KELTA_MODULE_SIGNING_KEY`; public keys at
+  `GET /api/modules/.well-known/jwks.json`) bound to the method, URL and body, naming the tenant,
+  the install and the acting user. Traffic goes only to the install's `base_url`, through
+  `ModuleHostGuard` (`KELTA_MODULE_ALLOWED_HOSTS` for in-cluster `http` hosts), with no redirects.
+- **Module → platform:** the module calls the public JSON:API with a token for the install's
+  `SERVICE` user, whose generated profile holds exactly the manifest's `permissions` plus the
+  collections the module created. Cerbos object/field permissions, RLS and rate limits apply, so
+  `permissions` are **enforced**, not disclosed. A tenant secret reaches a module only through
+  `GET /api/modules/self/credentials/{name}`, for a name the manifest declared, audited as the
+  module.
+- **Consent:** an admin installs from a plan (`planHash`) that lists every grant, credential,
+  collection and capability; an upgrade that widens access needs re-consent.
 
-Everything this spec calls a *capability* is **disclosure and coarse gating at platform chokepoints
-— not containment**. A capability tells an admin what a module intends to reach and lets the
-platform refuse at a few specific call sites. It does not confine the module.
+What is still trust, not containment:
 
-This must stay stated plainly. The risk of leaving it implicit is that `capabilities: [...]` in a
-manifest reads like a sandbox to a future maintainer, who then relaxes the signature gate on that
-assumption. `RouteAuthorizationFilter` already gets this right: designating a module signing key is
-gated on `MANAGE_CREDENTIALS` precisely because it is a grant of code-execution authority.
-
-Corollaries that follow from this and are **not** open questions:
-
-- Per-module resource quotas, thread isolation, and `SecurityManager`-style sandboxing are not
-  buildable on a supported JVM mechanism. Do not design as if they exist.
-- `data:read` / `data:write` capabilities will not be shipped. A module holds `QueryEngine`
-  directly; the platform would not be enforcing them, and a capability the platform does not
-  enforce is worse than no capability at all.
+- **The admin's approval is the trust decision.** The manifest is not signed; whoever controls the
+  module host controls what it declares, and a module that was granted a credential or a
+  collection can misuse it. Approving a module is like giving a SaaS vendor an API key.
+- **The UI bundle is full-trust code.** `moduleUiBundles.ts` evaluates it same-origin with the
+  admin session's DOM and cookie access. Pinning by SHA-256 at install stops later swaps, not a
+  malicious first version.
+- **An in-cluster module must not reach the worker.** The worker trusts the gateway's identity
+  headers, so an in-cluster module needs a NetworkPolicy that denies it the worker pods
+  (`concerns.md` → External modules).
 
 ---
 
@@ -73,12 +81,14 @@ provisioning engine, and modules are not using it.**
 | Need | Existing thing to reuse | Location |
 |---|---|---|
 | Provision collections, fields, picklists, validation rules, layouts, flows, UI pages, menus | `PackageImportService` — upserts **13 types by natural key** (`TYPE_ORDER`), SKIP/OVERWRITE, dry-run, per-item report, and (since #1660) resolves a FIELD's LOOKUP target to a system collection such as `users`, routed through `QueryEngine` so NATS broadcast + table DDL fire normally | `kelta-worker/.../service/PackageImportService.java` (831 lines at 2026-10-11) |
-| Module HTTP surface | `/api/modules/**` is **already a static gateway route**; `RouteAuthorizationFilter` enforces `API_ACCESS` on static routes and leaves finer checks to the worker | `kelta-gateway/.../service/RouteConfigService.java:190` |
-| Unauthenticated inbound | Generic platform-owned webhook route + tenant binding | `kelta-worker/.../controller/ModuleWebhookController.java` |
+| Module HTTP surface | `/api/modules/**` is **already a static gateway route**; `RouteAuthorizationFilter` enforces `API_ACCESS` on static routes and leaves finer checks to the worker. `/api/modules/{id}/x/**` is proxied to the module's `/kelta/v1/routes/{path}`, with an optional per-route `permission` | `RouteConfigService.registerStaticRoutes()`, `ModuleHttpController` → `ExternalModuleProxy.route` |
+| Unauthenticated inbound | Generic platform-owned webhook route, forwarded raw to the module's `/kelta/v1/webhooks`; the module verifies the sender | `kelta-worker/.../controller/ModuleWebhookController.java` → `ExternalModuleProxy.webhook` |
+| Module → platform data | The public JSON:API under the install's `SERVICE` principal (generated profile, Cerbos, RLS) | `ModuleServicePrincipalService`, `ModuleAccessTokenService` |
 | Permission enforcement | Cerbos policies are **generated from `profile_system_permission` rows** and pushed at runtime — one Cerbos action per distinct permission name. **No Cerbos change is needed to add a permission** | `CerbosPolicyGenerator`, `CerbosPolicySyncService` |
-| Secrets | The credential vault: encryption, rotation, `MANAGE_CREDENTIALS` gating, and resolve auditing (V188) | `CredentialResolverPort` via `ModuleContext.getExtension(...)` |
-| Periodic work | `scheduled_jobs` rows of type `FLOW` → a flow whose Task calls a module action key | `ScheduledJobExecutorService` |
-| Module→platform services | `ModuleServiceRegistry`, tenant-scoped, identity-based removal | `runtime-core/.../module/service/ModuleServiceRegistry.java` |
+| Secrets | The credential vault: encryption, rotation, `MANAGE_CREDENTIALS` gating, and resolve auditing (V188); a module reads a declared credential over HTTP, audited as the module | `ModuleCredentialService` → `CredentialResolverPort` |
+| Periodic work | Manifest `schedules` → `scheduled_job` rows of type `MODULE_ACTION` | `ModuleScheduleSync`, `ScheduledJobExecutorService` |
+| Record events | `kelta.record.changed` → queue-group delivery to `/kelta/v1/events` with backoff + dead letter | `ModuleEventDeliveryListener` |
+| Platform → module services | `ModuleServiceRegistry`, tenant-scoped, identity-based removal; the external entitlements port registers `RemoteEntitlementProvider` | `runtime-core/.../module/service/ModuleServiceRegistry.java`, `ExternalModuleRegistry` |
 | i18n | `ui-translations` rows, overlaid client-side over bundled strings | `SystemCollectionDefinitions`, `bootstrapCache.ts` |
 
 `ModuleCollectionProvisioner` was a weaker re-implementation of two of `PackageImportService`'s
@@ -93,7 +103,7 @@ through `PackageImportService` — see [`2-provenance-provisioning.md`](../_arch
 |---|---|---|
 | Credential types | `CredentialTypeRegistry` built once from Spring `List<CredentialType>`; no `register()` | **Not opening.** A module *uses* credentials via `credential-ref` settings. A module needing a typed credential leaves a compiled-in residue — a recorded platform limitation, not per-feature debt |
 | `FieldType` | Java enum carrying Postgres column-type mappings that drive DDL | **Not opening.** Compose existing types; `JSON` covers structured cases |
-| MCP tools | `kelta-mcp` is a separate Spring service — no module classloader, stateless transport, `List<AdminTool>` fixed at construction | **Not opening.** If needed, generate tools from `tenant_module_action` rows over HTTP; never load module code into kelta-mcp |
+| MCP tools | `kelta-mcp` is a separate Spring service — stateless transport, `List<AdminTool>` fixed at construction | **Not opening.** If needed, generate tools from `tenant_module_action` rows over HTTP |
 | NATS streams / subscriptions | `JetStreamInitializer` + `NatsSubscriptionConfig` are startup-bound | **Not opening.** `kelta.trigger.<tenantId>.<topic>` is already an open runtime subject space |
 | Arbitrary gateway paths | `RouteConfigService.registerStaticRoutes()` is a hardcoded array | **Not opening.** The `/api/modules/{moduleId}/...` prefix gives the same capability with no collision surface |
 
@@ -103,32 +113,30 @@ through `PackageImportService` — see [`2-provenance-provisioning.md`](../_arch
 
 ### Module status
 
-`INSTALLED` · `ACTIVE` · `DEGRADED` · `QUARANTINED` · `DISABLED` · `FAILED` · `STUB`
+`INSTALLING` · `INSTALLED` · `ACTIVE` · `DEGRADED` · `DISABLED` · `FAILED` · `UNINSTALLING`
+(`chk_module_status`, V225)
 
-- `DEGRADED` — loaded, but something declared is unavailable (required setting unset, declared port
-  refused, UI bundle missing). Real handlers for what loaded; quarantined for the rest.
-- `QUARANTINED` — load failed for a reason that is the module's own (signature, checksum, classload,
-  `onStartup` threw, rejected service port, JAR object gone). Quarantined handlers only.
-  **An infrastructure failure never writes it** (object storage or the database unreachable, no JAR
-  storage on the pod): the module fails closed on that pod with the same refusing handlers, only
-  `last_error` is recorded, the status is left alone, and `ModuleLoadRetryScheduler` retries with
-  capped exponential backoff. Classification is by load phase (`ModuleLoadFailureClassifier`). The
-  admin re-enables a quarantined module (or retries a retrying one now) from the Modules page or
-  `POST /api/modules/{moduleId}/enable` — every pod reloads, no restart. This
-  is the 2026-10-06 lesson — see `concerns.md` → "An object-storage outage quarantined every
-  runtime module for five days".
-- `STUB` — **explicit dev opt-in** (`kelta.modules.stub-mode=true`), never reached by falling back
-  from an error, and reported as such by the API and UI.
+- `ACTIVE` — installed and callable; a successful install or upgrade lands here at once.
+- `DEGRADED` — a pod's circuit breaker opened on repeated failures; still called through that
+  breaker, and the 60 s reconcile probes `GET /kelta/v1/health` and writes `ACTIVE` again on
+  success.
+- `FAILED` — an install step failed (`last_error`); `POST /api/modules/{moduleId}/enable` retries
+  from the stored manifest.
+- `DISABLED` — no invocations; hooks and the entitlements port are unregistered.
+- `QUARANTINED` and `STUB` belonged to the in-process JAR loader and were removed in part 9g
+  (V225 refuses to run while a row still holds one).
 
-**The DB status column is not pod reality.** `isLoaded()` is per-pod; `GET /api/modules/{id}/health`
-reports both and names the pod.
+**The DB status column is not pod reality.** The circuit breaker is per pod;
+`GET /api/modules/{id}/health` reports the stored status, the module's own health answer and the
+answering pod's breaker, and names the pod.
 
-### Quarantined handler
+### Unavailable module
 
-A module whose load failed registers handlers that return
-`ActionResult.failure("ModuleUnavailable", "<moduleId> v<version> is quarantined: <reason>")` —
-registered rather than absent, so a flow step fails with a specific attributable error instead of
-`ResourceNotFound`, which reads to an admin as a mistyped action key.
+A module that cannot be called fails the caller with a specific, attributable error:
+`RemoteActionHandler` is registered for every declared action whatever the status and refuses at
+call time, so a flow step fails with `ModuleUnavailableException` (or `ModuleTimeoutException`, its
+subclass) — never `ResourceNotFound`, which reads to an admin as a mistyped action key, and never a
+success.
 
 ### Provenance
 
@@ -149,8 +157,8 @@ This is the exact defect fixed in #1390; it is a contract, not a preference.
 
 ### Idempotent / destructive / consent
 
-- **Idempotent:** JAR upload (version-keyed), package import (natural-key upsert), permission
-  upsert, provenance upsert, route/schedule registration, load/unload.
+- **Idempotent:** install/upgrade by URL (bound to a `planHash`), package import (natural-key
+  upsert), permission upsert, provenance upsert, schedule sync, registry refresh.
 - **Destructive, never automatic:** dropping collections or fields, deleting records, deleting a
   tenant-modified metadata item, revoking a permission grant an admin made.
 - **Explicit admin consent:** install (capability + permission approval via `planHash`), downgrade,
@@ -160,6 +168,13 @@ This is the exact defect fixed in #1390; it is a contract, not a preference.
 ---
 
 ## Slice plan
+
+> **JAR-era record.** Rows 0–8 record the state verified on 2026-10-11, when modules were
+> in-process JARs. Part 9g deleted that code (`RuntimeModuleManager`, the classloader, quarantine,
+> stub mode, load retry, `install-jar`, `ModuleRouteRegistry`, `getServices()`), so where a row
+> names it, read it as history. The external equivalents are in slice 9: routes carry an optional
+> `permission`, the manifest declares `services` and the plan shows them, `DEGRADED` is written by
+> the breaker, and lifecycle (plan, upgrade, uninstall plan) is built.
 
 | Slice | Child spec | Axis | State (verified 2026-10-11) |
 |---|---|---|---|
@@ -172,7 +187,7 @@ This is the exact defect fixed in #1390; it is a contract, not a preference.
 | 6 — Module HTTP routes | `6-module-routes.md` (not written) | **backend, security** | 🟡 **Partial, built ahead of its spec.** `ModuleManifest.RouteManifest` (`path`, `methods`, `handlerKey`), `ModuleRouteRegistry` (registered on load, after the code loaded) and `ModuleHttpController` (`/api/modules/{moduleId}/x/**`, depth-1..3 patterns) dispatch module routes; the health endpoint reports `routesRegisteredOnThisPod`. Not done: a route declares no permission, so the only check is the gateway's `API_ACCESS` on the static `/api/modules/**` route |
 | 7 — Capability gating | `7-capability-gating.md` (not written) | **security** (closes an open hole) | 🟡 **Partial.** `RuntimeModuleManager.registerTenantServices` refuses any port in `getServices()` the manifest's `services` list does not declare, and withdraws the module's already-accepted ports. Not done: no capability list and no admin approval of declared ports at install |
 | 8 — Billing removal | `8-billing-removal.md` (not written) | **the proving slice** — ends with a Flyway drop | ✅ **Done 2026-10-12.** Code removed 2026-10-11; Deleted from the worker: `service/billing/` (`EntitlementServiceImpl`, `ModuleAwareEntitlementService`, `BillingPassExpirySweep`, `BillingEntitlementRuleCache`), every `repository/Billing*` class, `MemberEntitlementQuotaHook`, `BillingPlanRefreshHook`, `BillingEntitlementRuleRefreshHook`, `BillingEntitlementCacheListener` and its NATS subscription; from runtime: `BillingEntitlementChangedPayload` and the `KELTA_BILLING` stream; from the gateway: the `/api/billing/**` static route and its authoritative-path entry. `V207__drop_billing_webhook_event.sql` drops the orphan dedupe table. The worker's only `EntitlementService` is `service/entitlement/ModuleEntitlementService`: the tenant's module `EntitlementProvider`, else `MemberEntitlements.EMPTY` — what a tenant without billing always got (watches uncapped, push/email ungated, SMS never sent). `V209__drop_legacy_billing_tables.sql` drops the five V178 `billing_*` tables and their `billing-*` system collection rows, and the definitions are gone from `SystemCollectionDefinitions` |
-| 9 — External modules | [`9-external-modules.md`](9-external-modules.md) | **backend + UI, security** — modules as out-of-process HTTP services, any language | 🟡 **In progress** — spec + protocol contract (`docs/module-protocol/openapi.yaml`) merged 2026-10-30; 9b (service principal) built. Parts 9a–9h: contract, service principal, install by URL, invocation layer, events + UI pin, Rust billing module, JAR-path removal, async actions |
+| 9 — External modules | [`9-external-modules.md`](9-external-modules.md) | **backend + UI, security** — modules as out-of-process HTTP services, any language | ✅ **Built** (verified 2026-10-31) — parts 9a–9h: contract, service principal, install by URL, invocation layer, events + UI pin, credential read, Rust SDK + billing module (every billing tenant cut over 2026-10-31), long-running actions, and 9g JAR-path removal (pending merge, V225). Not built: the settings form, a dead-letter list or replay |
 
 Slice 8 exercises every earlier slice: routes (checkout/portal), webhooks (Stripe), settings
 (`credential-ref` to the Stripe key), permissions (`MANAGE_BILLING`), provisioning (five
@@ -184,7 +199,16 @@ fail-closed (billing must **never** stub-succeed).
 ## Known defects this spec exists to fix
 
 Each was source-verified as of 2026-08-31 and **re-checked against code on 2026-10-11**. Each
-entry leads with its current state. `concerns.md` tracks defects 1 and 2 (one combined entry,
+entry leads with its state at that date.
+
+> **After slice 9 (2026-10-31).** The JAR path these entries describe was deleted in part 9g, so
+> 1, 2, 4, 5, 8 and 9 are moot as written. For external modules: `permissions` are enforced through
+> the service principal's generated profile and `minPlatformVersion` is checked at install and
+> upgrade (3); declared `services` are shown in the plan an admin approves (4); upgrade is
+> `POST /api/modules/{id}/upgrade` with re-consent (5); uninstall removes unedited `CREATED`
+> resources (6); settings have a column but no form (7); calls and breaker transitions have
+> metrics and the breaker writes `DEGRADED` (8); a 60 s reconcile repairs a pod that missed an
+> event (9). `concerns.md` tracks defects 1 and 2 (one combined entry,
 "FIXED — a rejected module reported success"); it has no entry for 3–9, so this list is their
 record until a slice closes them.
 
@@ -236,11 +260,10 @@ record until a slice closes them.
 
 ## Deploy hazards that apply to every slice
 
-1. **The worker must stay JVM.** `build-and-publish-containers.yml` pins `Dockerfile.jvm` because a
-   native image cannot classload an uploaded JAR — a native worker quarantines **every** module
-   (before slice 0 it silently turned them into success-reporting stubs). Since slice 8 removed the compiled-in fallback (2026-10-11), that silently ungates every billing tenant: entitlements resolve `EMPTY`, so watch caps and channel limits stop applying.
-   Slice 0 added that CI assertion: the `worker-image-is-jvm` job in `ci.yml`, a
-   `quality-gate` dependency.
+1. **Retired (part 9g).** The worker had to stay JVM because a native image cannot classload an
+   uploaded JAR. 9g deleted the JAR loader, so modules no longer constrain the worker's image.
+   Production still runs the JVM worker and the `worker-image-is-jvm` CI job still pins
+   `Dockerfile.jvm`: going native again is a separate decision with its own validation.
 2. **The merge-train trap.** The deploy workflow sets `cancel-in-progress: true` and filters paths
    against the previous push, so merging a second PR before the first's build completes can leave
    merged code unbuilt with green CI. In slice 8 that means a migration deploying without its code,
@@ -248,11 +271,14 @@ record until a slice closes them.
 3. **The migrate Job is an ArgoCD PreSync hook** — it runs to completion while the *old* pods still
    serve traffic. A drop migration therefore removes tables underneath running readers, which is
    why 8f ships at least one release after 8e has soaked.
-4. **`kelta-modules/**` is not a deploy trigger.** Every module-side change is a manual build, sign,
-   install, verify, and appears in no deploy.
-5. **`install-jar` activates immediately.** Handlers, hooks and services register at *install*;
-   `status` stays `INSTALLED` until `/enable` — that flag is bookkeeping, not a gate. On a tenant
-   with existing data, populate collections first.
+4. **A module ships on its own pipeline.** A change under the `kelta-modules` Rust workspace builds
+   and pushes that module's image and bumps its homelab-argo overlay (`build-and-push-modules`,
+   `rust_modules` filter) — it is not part of the platform deploy, and a new version reaches a
+   tenant only through an upgrade (plan + re-consent).
+5. **Install activates immediately.** A successful install is `ACTIVE` at once on every pod: its
+   actions, hooks and entitlements port register as soon as the change event lands. On a tenant
+   with existing data, populate the collections first (`playbooks.md` → Ship a runtime-installable
+   module).
 
 ---
 

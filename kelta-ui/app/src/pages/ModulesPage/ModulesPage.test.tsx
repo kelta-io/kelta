@@ -5,6 +5,8 @@
  * - Module list rendering
  * - Plugin Components section backed by the client-side componentRegistry
  *   (empty state + grouped counts and name chips)
+ * - Status badges, the FAILED/DEGRADED error line, enable/disable
+ * - Install by URL as the only install path
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -17,21 +19,17 @@ import { ModulesPage } from './ModulesPage'
 const mockModules = [
   {
     id: 'tm-1',
-    tenantId: 'tenant-1',
     moduleId: 'mod-analytics',
     name: 'Analytics Module',
     version: '1.2.0',
     description: 'Adds analytics action handlers',
-    sourceUrl: 'https://modules.example.com/analytics.jar',
-    jarChecksum: 'abc123',
-    jarSizeBytes: 1024,
-    moduleClass: 'com.example.AnalyticsModule',
-    manifest: '{}',
     status: 'ACTIVE',
     installedBy: 'user-1',
     installedAt: '2026-01-15T10:00:00Z',
     updatedAt: '2026-01-15T10:00:00Z',
     actions: [],
+    baseUrl: 'https://analytics.example.test',
+    protocolVersion: 1,
   },
 ]
 
@@ -134,54 +132,27 @@ describe('ModulesPage', () => {
     })
   })
 
-  describe('Load failures', () => {
-    it('shows a quarantined module with its reason and a Re-enable action that reloads it', async () => {
+  describe('Status and errors', () => {
+    it('shows why a FAILED install did not finish and offers to retry it', async () => {
       const user = userEvent.setup()
       mockAxios.get.mockResolvedValue({
         data: [
           {
             ...mockModules[0],
-            status: 'QUARANTINED',
-            lastError: 'ModuleSignatureException: checksum mismatch',
+            status: 'FAILED',
+            lastError: 'module answered 503 during install',
           },
         ],
       })
       mockAxios.post.mockResolvedValue({ data: { status: 'enabled' } })
       render(<ModulesPage />, { wrapper: createTestWrapper() })
 
-      await waitFor(() => expect(screen.getByText('Quarantined')).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByText('Failed')).toBeInTheDocument())
       expect(screen.getByTestId('module-last-error-mod-analytics')).toHaveTextContent(
-        'Quarantined: ModuleSignatureException: checksum mismatch'
+        'Install did not finish: module answered 503 during install'
       )
 
-      await user.click(screen.getByRole('button', { name: /re-enable/i }))
-      await waitFor(() =>
-        expect(mockAxios.post).toHaveBeenCalledWith('/api/modules/mod-analytics/enable', {})
-      )
-    })
-
-    it('shows an ACTIVE module failing on a transient error as retrying, with Retry now', async () => {
-      const user = userEvent.setup()
-      mockAxios.get.mockResolvedValue({
-        data: [
-          {
-            ...mockModules[0],
-            loadRetrying: true,
-            lastError: 'SdkClientException: Connection refused',
-          },
-        ],
-      })
-      mockAxios.post.mockResolvedValue({ data: { status: 'enabled' } })
-      render(<ModulesPage />, { wrapper: createTestWrapper() })
-
-      await waitFor(() =>
-        expect(screen.getByTestId('module-retrying-mod-analytics')).toBeInTheDocument()
-      )
-      expect(screen.getByTestId('module-last-error-mod-analytics')).toHaveTextContent(
-        /retrying automatically: SdkClientException: Connection refused/
-      )
-
-      await user.click(screen.getByRole('button', { name: /retry now/i }))
+      await user.click(screen.getByRole('button', { name: /retry install/i }))
       await waitFor(() =>
         expect(mockAxios.post).toHaveBeenCalledWith('/api/modules/mod-analytics/enable', {})
       )
@@ -189,56 +160,55 @@ describe('ModulesPage', () => {
 
     it('does not show a stale error on a healthy module', async () => {
       mockAxios.get.mockResolvedValue({
-        data: [{ ...mockModules[0], loadRetrying: false, lastError: null }],
+        data: [{ ...mockModules[0], lastError: 'an old failure' }],
       })
       render(<ModulesPage />, { wrapper: createTestWrapper() })
 
       await waitFor(() => expect(screen.getByText('Analytics Module')).toBeInTheDocument())
       expect(screen.queryByTestId('module-last-error-mod-analytics')).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /retry now/i })).not.toBeInTheDocument()
+    })
+
+    it('disables an ACTIVE module and enables a DISABLED one', async () => {
+      const user = userEvent.setup()
+      mockAxios.get.mockResolvedValue({
+        data: [
+          mockModules[0],
+          { ...mockModules[0], id: 'tm-2', moduleId: 'mod-off', name: 'Off', status: 'DISABLED' },
+        ],
+      })
+      mockAxios.post.mockResolvedValue({ data: {} })
+      render(<ModulesPage />, { wrapper: createTestWrapper() })
+
+      const active = await screen.findByTestId('module-card-mod-analytics')
+      await user.click(within(active).getByRole('button', { name: /disable/i }))
+      await waitFor(() =>
+        expect(mockAxios.post).toHaveBeenCalledWith('/api/modules/mod-analytics/disable', {})
+      )
+
+      const disabled = screen.getByTestId('module-card-mod-off')
+      expect(within(disabled).getByText('Disabled')).toBeInTheDocument()
+      await user.click(within(disabled).getByRole('button', { name: /^enable$/i }))
+      await waitFor(() =>
+        expect(mockAxios.post).toHaveBeenCalledWith('/api/modules/mod-off/enable', {})
+      )
     })
   })
 
   describe('Install', () => {
-    it('posts the JAR as multipart to /install-jar, which is the only path that runs code', async () => {
-      // Before this, the form only ever called /api/modules/install with the manifest JSON, so
-      // every module installed through the UI had no implementation at all.
-      const user = userEvent.setup()
-      mockAxios.post.mockResolvedValue({ data: mockModules[0] })
-      render(<ModulesPage />, { wrapper: createTestWrapper() })
-      await waitFor(() => expect(screen.getByText('Analytics Module')).toBeInTheDocument())
-
-      await user.click(screen.getByRole('button', { name: /install module/i }))
-      // Install by URL is the default; the JAR form is the legacy tab.
-      await user.click(screen.getByTestId('install-mode-jar'))
-      await user.type(
-        screen.getByLabelText(/module manifest/i),
-        '{{"id":"m","name":"M","version":"1.0.0","moduleClass":"C"}'
-      )
-      await user.upload(
-        screen.getByLabelText(/module jar/i),
-        new File([new Uint8Array([1, 2, 3])], 'm.jar', { type: 'application/java-archive' })
-      )
-      await user.type(screen.getByLabelText(/publisher signature/i), 'sig-base64')
-      await user.click(screen.getByRole('button', { name: /^install$/i }))
-
-      await waitFor(() => expect(mockAxios.post).toHaveBeenCalled())
-      const [url, body] = mockAxios.post.mock.calls[0]
-      expect(url).toBe('/api/modules/install-jar')
-      expect(body).toBeInstanceOf(FormData)
-      expect((body as FormData).get('jar')).toBeInstanceOf(File)
-      expect((body as FormData).get('signature')).toBe('sig-base64')
-    })
-
-    it('warns that a manifest-only install produces a module that cannot run', async () => {
+    it('installs by URL only: no JAR upload or install-mode toggle', async () => {
       const user = userEvent.setup()
       render(<ModulesPage />, { wrapper: createTestWrapper() })
       await waitFor(() => expect(screen.getByText('Analytics Module')).toBeInTheDocument())
 
       await user.click(screen.getByRole('button', { name: /install module/i }))
-      await user.click(screen.getByTestId('install-mode-jar'))
 
-      expect(screen.getByText(/every action it\s+declares is quarantined/i)).toBeInTheDocument()
+      expect(screen.getByTestId('external-module-install')).toBeInTheDocument()
+      expect(screen.getByLabelText(/module url/i)).toBeInTheDocument()
+      expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+      expect(screen.queryByLabelText(/module jar/i)).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: /cancel/i }))
+      expect(screen.queryByTestId('external-module-install')).not.toBeInTheDocument()
     })
   })
 })

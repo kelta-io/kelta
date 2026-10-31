@@ -28,8 +28,8 @@ import java.util.UUID;
 
 /**
  * An external module's flow action ({@code specs/module-platform/9-external-modules.md} §3.6):
- * registered per tenant in {@code ActionHandlerRegistry} under {@code <moduleId>:<key>}, so a flow
- * Task names it exactly as it would a JAR module's action, and run as
+ * registered per tenant in {@code ActionHandlerRegistry} under {@code <moduleId>:<key>}, which is
+ * how a flow Task names it, and run as
  * {@code POST {baseUrl}/kelta/v1/actions/{key}}.
  *
  * <p>Stateless apart from its key: each call reads the install's current snapshot from the
@@ -38,8 +38,7 @@ import java.util.UUID;
  * {@code TaskState.timeoutSeconds} is not enforced by the engine).
  *
  * <p>The run's user rides as the signed {@code act} claim ({@link ExternalModuleRegistry#flowActor}),
- * so an action that serves "the calling member" (billing's checkout) works from a flow as it did
- * in a JAR module.
+ * so an action that serves "the calling member" (billing's checkout) works from a flow.
  *
  * <p>Outcomes: {@code success: true} → its {@code output}; {@code success: false} →
  * {@link ActionResult#failure} with {@code <error.code>: <error.message>} (flow error
