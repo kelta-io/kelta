@@ -78,8 +78,10 @@ impl Call {
         &self.assertion.install_id
     }
 
-    /// The user whose action caused this call (`act` claim). `None` for flow steps without a
-    /// request caller, schedules, webhooks, events and lifecycle calls.
+    /// The user whose action caused this call (`act` claim): the request's caller, or on a flow
+    /// step the run's user (an action that acts for them as a member requires
+    /// [`Actor::is_initiator`]; a route checks [`Actor::is_fallback`]).
+    /// `None` for a flow run with no user, module schedules, webhooks, events and lifecycle calls.
     pub fn actor(&self) -> Option<&Actor> {
         self.assertion.actor.as_ref()
     }

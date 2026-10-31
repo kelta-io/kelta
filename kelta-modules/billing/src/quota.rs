@@ -215,7 +215,7 @@ mod tests {
     }
 
     fn portal(sub: &str) -> Actor {
-        Actor { sub: sub.into(), user_type: Some("PORTAL".into()), profile_id: None }
+        Actor { sub: sub.into(), user_type: Some("PORTAL".into()), profile_id: None, source: None }
     }
 
     #[tokio::test]
@@ -294,7 +294,7 @@ mod tests {
     async fn portal_rules_hold_only_for_portal_members() {
         let platform = platform_with_watches("u1", 2);
         let rules = || vec![rule(json!({"appliesTo": "portal"}))];
-        let staff = Actor { sub: "u1".into(), user_type: Some("INTERNAL".into()), profile_id: None };
+        let staff = Actor { sub: "u1".into(), user_type: Some("INTERNAL".into()), profile_id: None, source: None };
         assert!(decide(&platform, rules(), json!({"maxWatches": 2}), Some(staff)).await.allowed);
         assert!(decide(&platform, rules(), json!({"maxWatches": 2}), None).await.allowed);
         assert!(!decide(&platform, rules(), json!({"maxWatches": 2}), Some(portal("u1"))).await.allowed);

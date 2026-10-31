@@ -311,7 +311,7 @@ class FlowExecutionReadAuthorizationTest {
 
     private static FlowExecutionData execution(String startedBy) {
         return new FlowExecutionData(EXECUTION_ID, "tenant-1", FLOW_ID, FlowExecutionData.STATUS_FAILED,
-                startedBy, RECORD_ID, Map.of("secret", "state"), "s1", "boom: secret value", "E_STEP", 1, 10,
+                startedBy, null, RECORD_ID, Map.of("secret", "state"), "s1", "boom: secret value", "E_STEP", 1, 10,
                 Map.of("input", Map.of()), false, Instant.parse("2026-10-31T00:00:00Z"),
                 Instant.parse("2026-10-31T00:00:01Z"));
     }

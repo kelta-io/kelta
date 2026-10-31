@@ -2,6 +2,7 @@ package io.kelta.worker.listener;
 
 import io.kelta.runtime.flow.FlowEngine;
 import io.kelta.runtime.flow.InitialStateBuilder;
+import io.kelta.runtime.workflow.ActorSource;
 import io.kelta.worker.service.TenantSlugResolver;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,7 +56,7 @@ class NatsTriggerFlowListenerTest {
         ObjectMapper objectMapper = new ObjectMapper();
         listener = new NatsTriggerFlowListener(flowEngine, new InitialStateBuilder(),
                 jdbcTemplate, objectMapper, tenantSlugResolver,
-                org.mockito.Mockito.mock(io.kelta.worker.service.FlowActorResolver.class));
+                runAsResolver());
         lenient().when(tenantSlugResolver.resolveSlug(TENANT)).thenReturn(Optional.of("acme"));
     }
 
@@ -81,7 +82,7 @@ class NatsTriggerFlowListenerTest {
 
         ArgumentCaptor<Map<String, Object>> stateCaptor = ArgumentCaptor.forClass(Map.class);
         verify(flowEngine).startExecution(eq(TENANT), eq("flow-1"), eq(DEFINITION),
-                stateCaptor.capture(), isNull(), isNull(), eq(false));
+                stateCaptor.capture(), eq("run-as-1"), eq(ActorSource.RUN_AS), isNull(), eq(false));
 
         Map<String, Object> state = stateCaptor.getValue();
         Map<String, Object> input = (Map<String, Object>) state.get("input");
@@ -98,7 +99,7 @@ class NatsTriggerFlowListenerTest {
         listener.handleTriggerMessage("kelta.trigger.tenant-1.invoices", "{}");
 
         verify(flowEngine, never()).startExecution(anyString(), anyString(), anyString(),
-                anyMap(), any(), any(), anyBoolean());
+                anyMap(), any(), any(), any(), anyBoolean());
     }
 
     @Test
@@ -109,7 +110,7 @@ class NatsTriggerFlowListenerTest {
         listener.handleTriggerMessage("kelta.trigger.tenant-1.orders.created", "{}");
 
         verify(flowEngine).startExecution(eq(TENANT), eq("flow-1"), eq(DEFINITION),
-                anyMap(), isNull(), isNull(), eq(false));
+                anyMap(), eq("run-as-1"), eq(ActorSource.RUN_AS), isNull(), eq(false));
     }
 
     @Test
@@ -122,7 +123,7 @@ class NatsTriggerFlowListenerTest {
 
         ArgumentCaptor<Map<String, Object>> stateCaptor = ArgumentCaptor.forClass(Map.class);
         verify(flowEngine).startExecution(anyString(), anyString(), anyString(),
-                stateCaptor.capture(), any(), any(), anyBoolean());
+                stateCaptor.capture(), any(), any(), any(), anyBoolean());
         Map<String, Object> input = (Map<String, Object>) stateCaptor.getValue().get("input");
         assertThat(input).containsEntry("raw", "plain text");
     }
@@ -151,5 +152,15 @@ class NatsTriggerFlowListenerTest {
 
         verify(jdbcTemplate, org.mockito.Mockito.times(2))
                 .query(contains("NATS_TRIGGERED"), any(RowMapper.class), eq(TENANT));
+    }
+
+    /** A resolver that answers every flow with {@code run-as-1} as its {@link ActorSource#RUN_AS} actor. */
+    private static io.kelta.worker.service.FlowActorResolver runAsResolver() {
+        io.kelta.worker.service.FlowActorResolver resolver = org.mockito.Mockito.mock(io.kelta.worker.service.FlowActorResolver.class);
+        org.mockito.Mockito.lenient().when(resolver.resolve(
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new io.kelta.worker.service.FlowActorResolver.Resolved("run-as-1", ActorSource.RUN_AS));
+        return resolver;
     }
 }

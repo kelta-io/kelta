@@ -145,14 +145,20 @@ impl Fixture {
         .await
     }
 
+    /// Runs action `key` as a flow step: with `actor`, the member who started the run.
     async fn action(&self, key: &str, input: Value, idempotency_key: Option<&str>, actor: bool) -> Value {
+        let act = actor.then(|| json!({"sub": MEMBER, "user_type": "PORTAL", "source": "initiator"}));
+        self.action_as(key, input, idempotency_key, act).await
+    }
+
+    /// Runs action `key` with `act` as the signed actor claim, or none.
+    async fn action_as(&self, key: &str, input: Value, idempotency_key: Option<&str>, act: Option<Value>) -> Value {
         let body = json!({"tenantId": TENANT_ID, "input": input}).to_string();
         let headers: Vec<(&str, &str)> = idempotency_key.map(|k| ("idempotency-key", k)).into_iter().collect();
         let (status, answer) = self
-            .call("POST", &format!("/kelta/v1/actions/{key}"), body.as_bytes(), &headers, |c| {
-                if actor {
-                    c["act"] = json!({"sub": MEMBER, "user_type": "PORTAL"});
-                } else {
+            .call("POST", &format!("/kelta/v1/actions/{key}"), body.as_bytes(), &headers, |c| match act {
+                Some(act) => c["act"] = act,
+                None => {
                     c.as_object_mut().unwrap().remove("act");
                 }
             })
@@ -283,6 +289,68 @@ async fn actions_reuse_the_platform_idempotency_key_and_need_a_member() {
     }
     let answer = f.action("create-checkout-session", input, None, false).await;
     assert_eq!(answer, json!({"success": false, "error": {"code": "BILLING_ERROR", "message": "No calling member"}}));
+}
+
+#[tokio::test]
+async fn checkout_and_portal_refuse_a_flow_runs_fallback_actor() {
+    let f = fixture().await;
+    let checkout = json!({"planCode": "day", "successUrl": "https://app.example.test/ok",
+                          "cancelUrl": "https://app.example.test/cancel"});
+    let portal = json!({"returnUrl": "https://app.example.test/account"});
+    let no_member = json!({"success": false, "error": {"code": "BILLING_ERROR", "message": "No calling member"}});
+    // The flow's run-as user or owner, sent because no one started the run; an unknown source fails closed.
+    for source in ["run_as", "owner", "a-future-source"] {
+        let act = json!({"sub": MEMBER, "user_type": "PORTAL", "source": source});
+        let answer =
+            f.action_as("create-checkout-session", checkout.clone(), Some("exec-1:Checkout"), Some(act.clone())).await;
+        assert_eq!(answer, no_member, "checkout as {source}");
+        let answer = f.action_as("create-portal-session", portal.clone(), Some("exec-1:Portal"), Some(act)).await;
+        assert_eq!(answer, no_member, "portal as {source}");
+    }
+    assert!(f.stripe.0.lock().unwrap().is_empty(), "nothing reached Stripe");
+
+    // Reading the run user's own entitlements is not acting for them as a member.
+    let owner = json!({"sub": MEMBER, "user_type": "PORTAL", "source": "owner"});
+    let answer = f.action_as("resolve-entitlements", json!({}), None, Some(owner)).await;
+    assert_eq!(answer["success"], true, "{answer}");
+
+    // The member who started the run acts.
+    let initiator = json!({"sub": MEMBER, "user_type": "PORTAL", "source": "initiator"});
+    let answer = f.action_as("create-checkout-session", checkout, Some("exec-2:Checkout"), Some(initiator)).await;
+    assert_eq!(answer, json!({"success": true, "output": {"url": "https://checkout.stripe.test/c/cs_test_1"}}));
+}
+
+#[tokio::test]
+async fn an_action_calls_actor_without_a_source_is_not_a_member_but_a_routes_caller_is() {
+    let f = fixture().await;
+    let checkout = json!({"planCode": "day", "successUrl": "https://app.example.test/ok",
+                          "cancelUrl": "https://app.example.test/cancel"});
+    let portal = json!({"returnUrl": "https://app.example.test/account"});
+    let no_member = json!({"success": false, "error": {"code": "BILLING_ERROR", "message": "No calling member"}});
+    f.platform.insert("billing_customers", json!({"userId": MEMBER, "stripeCustomerId": "cus_1"}));
+
+    // An action call is a flow step. One whose actor does not say how it was chosen (a platform
+    // that signs no `act.source`) is not known to be a member, so the module does not depend on
+    // the platform's deploy order.
+    let unmarked = json!({"sub": MEMBER, "user_type": "PORTAL"});
+    let answer =
+        f.action_as("create-checkout-session", checkout.clone(), Some("exec-1:Checkout"), Some(unmarked.clone())).await;
+    assert_eq!(answer, no_member, "checkout");
+    let answer =
+        f.action_as("create-portal-session", portal.clone(), Some("exec-1:Portal"), Some(unmarked.clone())).await;
+    assert_eq!(answer, no_member, "portal");
+    assert!(f.stripe.0.lock().unwrap().is_empty(), "nothing reached Stripe");
+    // Reading that user's own billing still works.
+    let answer = f.action_as("me", json!({}), None, Some(unmarked)).await;
+    assert_eq!(answer["success"], true, "{answer}");
+
+    // A route's caller carries no source by design, and acts.
+    let (status, body) = f.as_member("POST", "/kelta/v1/routes/checkout-sessions", checkout).await;
+    assert_eq!((status, body), (StatusCode::OK, json!({"url": "https://checkout.stripe.test/c/cs_test_1"})));
+    let (status, body) = f.as_member("POST", "/kelta/v1/routes/portal-sessions", portal).await;
+    assert_eq!((status, body), (StatusCode::OK, json!({"url": "https://billing.stripe.test/p/1"})));
+    let (status, _) = f.as_member("GET", "/kelta/v1/routes/me", Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]

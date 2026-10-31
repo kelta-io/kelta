@@ -1,5 +1,7 @@
 package io.kelta.worker.service;
 
+import io.kelta.runtime.workflow.ActorSource;
+import io.kelta.worker.service.FlowActorResolver.Resolved;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -34,9 +36,9 @@ class FlowActorResolverTest {
     }
 
     @Test
-    @DisplayName("a UUID initiating user wins without touching the database")
+    @DisplayName("a UUID initiating user wins without touching the database, as an INITIATOR")
     void initiatorWins() {
-        assertEquals(INITIATOR, resolver.resolve(TENANT, FLOW, INITIATOR));
+        assertEquals(new Resolved(INITIATOR, ActorSource.INITIATOR), resolver.resolve(TENANT, FLOW, INITIATOR));
         verifyNoInteractions(jdbcTemplate);
     }
 
@@ -45,50 +47,75 @@ class FlowActorResolverTest {
     void nonUuidInitiatorFallsThrough() {
         when(userIdResolver.resolve("webhook", TENANT)).thenReturn("webhook");
         stubFlowRow(RUN_AS, OWNER);
-        assertEquals(RUN_AS, resolver.resolve(TENANT, FLOW, "webhook"));
+        assertEquals(new Resolved(RUN_AS, ActorSource.RUN_AS), resolver.resolve(TENANT, FLOW, "webhook"));
     }
 
     @Test
-    @DisplayName("an email initiator translates to its platform-user UUID")
+    @DisplayName("an email initiator translates to its platform-user UUID, still an INITIATOR")
     void emailInitiatorTranslates() {
         when(userIdResolver.resolve("admin@kelta.local", TENANT)).thenReturn(INITIATOR);
-        assertEquals(INITIATOR, resolver.resolve(TENANT, FLOW, "admin@kelta.local"));
+        assertEquals(new Resolved(INITIATOR, ActorSource.INITIATOR),
+            resolver.resolve(TENANT, FLOW, "admin@kelta.local"));
         verify(jdbcTemplate, never()).queryForList(anyString(), eq(FLOW));
     }
 
     @Test
-    @DisplayName("no initiator → configured run-as user")
+    @DisplayName("no initiator → configured run-as user, as RUN_AS")
     void runAsUser() {
         stubFlowRow(RUN_AS, OWNER);
-        assertEquals(RUN_AS, resolver.resolve(TENANT, FLOW, null));
+        assertEquals(new Resolved(RUN_AS, ActorSource.RUN_AS), resolver.resolve(TENANT, FLOW, null));
     }
 
     @Test
-    @DisplayName("no initiator, no run-as → flow owner")
+    @DisplayName("no initiator, no run-as → flow owner, as OWNER")
     void ownerFallback() {
         stubFlowRow(null, OWNER);
-        assertEquals(OWNER, resolver.resolve(TENANT, FLOW, null));
+        assertEquals(new Resolved(OWNER, ActorSource.OWNER), resolver.resolve(TENANT, FLOW, null));
     }
 
     @Test
-    @DisplayName("nothing resolves → null")
+    @DisplayName("nothing resolves → NONE")
     void nothingResolves() {
         stubFlowRow(null, null);
-        assertNull(resolver.resolve(TENANT, FLOW, null));
+        assertEquals(Resolved.NONE, resolver.resolve(TENANT, FLOW, null));
     }
 
     @Test
-    @DisplayName("unknown flow → null")
+    @DisplayName("unknown flow → NONE")
     void unknownFlow() {
         when(jdbcTemplate.queryForList(anyString(), eq(FLOW))).thenReturn(List.of());
-        assertNull(resolver.resolve(TENANT, FLOW, null));
+        assertEquals(Resolved.NONE, resolver.resolve(TENANT, FLOW, null));
     }
 
     @Test
-    @DisplayName("a database error never blocks the flow start — resolves to null")
+    @DisplayName("a database error never blocks the flow start — resolves to NONE")
     void databaseErrorFallsBackToNull() {
         when(jdbcTemplate.queryForList(anyString(), eq(FLOW)))
             .thenThrow(new RuntimeException("connection refused"));
-        assertNull(resolver.resolve(TENANT, FLOW, null));
+        assertEquals(Resolved.NONE, resolver.resolve(TENANT, FLOW, null));
+    }
+
+    @Test
+    @DisplayName("a retry keeps the original run's user and recorded source, never turning a fallback into an initiator")
+    void retryKeepsTheRecordedSource() {
+        assertEquals(new Resolved(OWNER, ActorSource.OWNER),
+            resolver.resolveRetry(TENANT, FLOW, OWNER, ActorSource.OWNER));
+        assertEquals(new Resolved(INITIATOR, ActorSource.INITIATOR),
+            resolver.resolveRetry(TENANT, FLOW, INITIATOR, ActorSource.INITIATOR));
+        verifyNoInteractions(jdbcTemplate, userIdResolver);
+    }
+
+    @Test
+    @DisplayName("a retry of a run with no recorded source keeps its user, with the source still unknown")
+    void retryOfAnUnrecordedRun() {
+        assertEquals(new Resolved(RUN_AS, null), resolver.resolveRetry(TENANT, FLOW, RUN_AS, null));
+        verifyNoInteractions(jdbcTemplate);
+    }
+
+    @Test
+    @DisplayName("a retry of a run with no user resolves afresh, as a run with no initiator")
+    void retryOfARunWithoutUser() {
+        stubFlowRow(null, OWNER);
+        assertEquals(new Resolved(OWNER, ActorSource.OWNER), resolver.resolveRetry(TENANT, FLOW, null, null));
     }
 }

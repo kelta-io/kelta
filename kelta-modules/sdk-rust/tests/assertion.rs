@@ -7,7 +7,7 @@ use std::time::Duration;
 use common::*;
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use kelta_module::assertion::{IncomingRequest, VerifyError};
-use kelta_module::protocol::Actor;
+use kelta_module::protocol::{Actor, ActorSource};
 use serde_json::{Value, json};
 
 const PATH: &str = "/kelta/v1/hooks";
@@ -43,7 +43,7 @@ async fn accepts_a_valid_assertion_and_exposes_only_its_claims() {
     assert_eq!(verified.module_id, MODULE_ID);
     assert_eq!(
         verified.actor,
-        Some(Actor { sub: "user-1".into(), user_type: Some("PORTAL".into()), profile_id: None })
+        Some(Actor { sub: "user-1".into(), user_type: Some("PORTAL".into()), profile_id: None, source: None })
     );
 }
 
@@ -54,6 +54,18 @@ async fn accepts_no_actor_a_null_slug_and_an_audience_array() {
     let verified = verify_claims(&claims).await.expect("valid");
     assert_eq!(verified.actor, None);
     assert_eq!(verified.tenant_slug, None);
+}
+
+#[tokio::test]
+async fn a_flow_steps_actor_source_comes_from_the_signed_claim() {
+    let claims = with(
+        claims("POST", PATH, BODY),
+        "act",
+        json!({ "sub": "owner-1", "user_type": "INTERNAL", "source": "owner" }),
+    );
+    let actor = verify_claims(&claims).await.expect("valid").actor.expect("an actor");
+    assert_eq!(actor.source, Some(ActorSource::Owner));
+    assert!(actor.is_fallback());
 }
 
 #[tokio::test]

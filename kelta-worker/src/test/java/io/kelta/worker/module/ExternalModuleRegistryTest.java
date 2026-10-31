@@ -7,6 +7,7 @@ import io.kelta.runtime.module.service.EntitlementProvider;
 import io.kelta.runtime.module.service.MemberEntitlements;
 import io.kelta.runtime.module.service.ModuleServiceRegistry;
 import io.kelta.runtime.workflow.ActionHandlerRegistry;
+import io.kelta.runtime.workflow.ActorSource;
 import io.kelta.runtime.workflow.BeforeSaveHookRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -218,7 +219,7 @@ class ExternalModuleRegistryTest {
     }
 
     @Test
-    @DisplayName("a flow step's actor is the run's user when it is an active INTERNAL or PORTAL user, else none")
+    @DisplayName("a flow step's actor is the run's user, with its source, when it is an active INTERNAL or PORTAL user, else none")
     void flowActor() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         ExternalModuleRegistry withDb = new ExternalModuleRegistry(store, actions, hooks, services, invoker, jdbc,
@@ -231,21 +232,29 @@ class ExternalModuleRegistryTest {
         when(jdbc.queryForList(eq(sql), eq(String.class), eq("gone-1"), eq(ExternalModuleFixtures.TENANT)))
                 .thenReturn(List.of());
 
-        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "member-1"))
-                .isEqualTo(new ModuleAssertionSigner.Actor("member-1", "PORTAL", null));
-        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "svc-1")).as("a service user").isNull();
-        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "gone-1")).as("unknown or inactive").isNull();
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "member-1", ActorSource.INITIATOR))
+                .isEqualTo(new ModuleAssertionSigner.Actor("member-1", "PORTAL", null, ActorSource.INITIATOR));
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "member-1", ActorSource.RUN_AS))
+                .as("a run-as fallback is sent, marked")
+                .isEqualTo(new ModuleAssertionSigner.Actor("member-1", "PORTAL", null, ActorSource.RUN_AS));
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "member-1", ActorSource.OWNER))
+                .as("an owner fallback is sent, marked")
+                .isEqualTo(new ModuleAssertionSigner.Actor("member-1", "PORTAL", null, ActorSource.OWNER));
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "svc-1", ActorSource.INITIATOR)).as("a service user").isNull();
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "gone-1", ActorSource.INITIATOR)).as("unknown or inactive").isNull();
     }
 
     @Test
-    @DisplayName("a flow step with no run user has no actor and reads nothing")
+    @DisplayName("a flow step with no run user, or a run user of unknown source, has no actor and reads nothing")
     void flowActorWithoutRunUser() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         ExternalModuleRegistry withDb = new ExternalModuleRegistry(store, actions, hooks, services, invoker, jdbc,
                 null, null, new ObjectMapper());
 
-        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, null)).isNull();
-        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, " ")).isNull();
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, null, ActorSource.INITIATOR)).isNull();
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, " ", ActorSource.INITIATOR)).isNull();
+        // A run started before its source was recorded: a source-less act would read as the caller.
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "member-1", null)).isNull();
         verifyNoInteractions(jdbc);
     }
 
@@ -262,9 +271,9 @@ class ExternalModuleRegistryTest {
 
         CallerContext header = new CallerContext("svc-2", CallerContext.UserType.INTERNAL, false, false);
         assertThat(CallerContext.callAs(header,
-                () -> withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "svc-2")))
+                () -> withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "svc-2", ActorSource.INITIATOR)))
                 .as("a SERVICE user the gateway header called INTERNAL").isNull();
-        assertThatThrownBy(() -> withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "down-1"))
+        assertThatThrownBy(() -> withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "down-1", ActorSource.INITIATOR))
                 .isInstanceOf(io.kelta.runtime.workflow.ModuleUnavailableException.class);
     }
 }

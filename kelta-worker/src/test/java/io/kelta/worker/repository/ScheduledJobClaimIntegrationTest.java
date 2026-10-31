@@ -3,6 +3,7 @@ package io.kelta.worker.repository;
 import io.kelta.runtime.flow.FlowEngine;
 import io.kelta.runtime.flow.InitialStateBuilder;
 import io.kelta.runtime.module.integration.spi.ScriptExecutor;
+import io.kelta.runtime.workflow.ActorSource;
 import io.kelta.worker.service.DataExportService;
 import io.kelta.worker.service.FlowActorResolver;
 import io.kelta.worker.service.ReportExecutionService;
@@ -113,7 +114,7 @@ class ScheduledJobClaimIntegrationTest {
 
         Map<String, AtomicInteger> startsByFlow = new ConcurrentHashMap<>();
         FlowEngine flowEngine = mock(FlowEngine.class);
-        when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), anyBoolean()))
+        when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean()))
                 .thenAnswer(invocation -> {
                     String flowId = invocation.getArgument(1);
                     startsByFlow.computeIfAbsent(flowId, k -> new AtomicInteger()).incrementAndGet();
@@ -246,8 +247,18 @@ class ScheduledJobClaimIntegrationTest {
         when(slugs.resolveSlug(anyString())).thenReturn(Optional.of("tenant-a"));
         ObjectProvider<DefaultEmailService> email = mock(ObjectProvider.class);
         return new ScheduledJobExecutorService(
-                repository, flowEngine, mock(FlowActorResolver.class), new InitialStateBuilder(),
+                repository, flowEngine, ownerResolver(), new InitialStateBuilder(),
                 new ObjectMapper(), mock(ScriptExecutor.class), mock(ReportExecutionService.class),
                 mock(DataExportService.class), mock(DataExportRepository.class), slugs, email);
+    }
+
+    /** A resolver that answers every flow with {@code owner-1} as its {@link ActorSource#OWNER} actor. */
+    private static FlowActorResolver ownerResolver() {
+        FlowActorResolver resolver = org.mockito.Mockito.mock(FlowActorResolver.class);
+        org.mockito.Mockito.lenient().when(resolver.resolve(
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new FlowActorResolver.Resolved("owner-1", ActorSource.OWNER));
+        return resolver;
     }
 }

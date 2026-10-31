@@ -720,19 +720,35 @@ homelab cluster (`ci-cd.md` → Rust external modules). What that does not guara
   namespace, reopens it. The residual risk is any other path to the worker: a pod in a namespace
   without such a policy, or a node-level process. Closing it for good needs the worker to verify
   the gateway's identity (mTLS or a signed identity header) rather than trusting the network.
-- **A flow action may have no member.** The platform sends `act` only when a caller context is
-  bound (an HTTP request), not on a scheduled or async flow. `kelta-billing:create-checkout-session`,
-  `create-portal-session`, `me` and `resolve-entitlements` then fail with "No calling member"; the
-  module never takes the member from the input, which any flow author controls. Routes always carry
-  `act`.
+- **A flow action may have no member.** A flow step's `act` is the run's user
+  (`FlowActorResolver`: initiator, else the flow's run-as user, else its owner), with `act.source`
+  saying which. A run whose trigger names no user (a schedule, a webhook, a record that names no
+  user) therefore sends a fallback identity, marked `run_as` or `owner`, and
+  `kelta-billing:create-checkout-session` and `create-portal-session`, which accept only
+  `initiator`, refuse it with "No calling member" (as they refuse an unknown source or an action
+  call with no source); `me` and `resolve-entitlements` read that user's own billing. A run with
+  no user, or one started before V227 recorded its source, sends no `act`: that includes a run
+  still **waiting** (a Wait, a long-running module task) when V227 deployed, whose resumed module
+  step therefore fails a member-only action closed. A **retry** re-asserts the original run's user
+  and source (`FlowActorResolver.resolveRetry`), so an admin's retry of a member's run sends that
+  member as `initiator`, whoever asked for the retry. The module never takes the member from the
+  input, which any flow author controls. Routes always carry `act`, with no `source`. Every module
+  action that acts for "the calling member" must require `Actor::is_initiator()` the same way (a
+  route checks `!is_fallback()`): the platform cannot tell it which actions are member-only.
 - **A record-triggered run inherits a flow's fallback actor as its initiator.** A flow step's
   write publishes its record event as the run's actor (`ActingUser`), and `FlowActorResolver`
   takes any UUID on the event as the initiator. So a run no one started — a schedule, a webhook, a
   record change with no acting user, whose actor is the flow's run-as user or owner — makes the
-  record-triggered run it causes start with that fallback user as its *initiator*. The event no
-  longer names the record's stored author (resolved 2026-10-31, below); what remains is that it
-  carries no actor source. Closing it needs the source on `ActingUser` and the record event, once
-  flow runs record one (`act.source`, #2135).
+  record-triggered run it causes start with that fallback user as its *initiator*, and an external
+  module then receives that user as `act.source: initiator`, so a member-only action
+  (`Actor::is_initiator()`) serves them. In general, for a record trigger `initiator` is the user
+  whose write produced the event, and a flow's own write passes on the upstream run's user —
+  fallback or not. The event no longer names the record's stored author, and a flow can no longer
+  set `createdBy`/`updatedBy` through a field mapping (`FlowAuditStamp` drops them; resolved
+  2026-10-31, below), so a flow author cannot pick an arbitrary user; what remains is that the
+  event carries no actor source. Flow runs now record one (`flow_execution.started_by_source`,
+  `ActionContext.actorSource`); closing this needs that source carried on `ActingUser` and the
+  record event, and `FlowEventListener` passing it on instead of `INITIATOR`.
 - **The quota hook reads every collection.** Counting a member's records in an arbitrary collection
   needs read access to it, so the manifest asks for `VIEW_ALL_DATA` — shown on the consent screen,
   and narrower than the in-process access the deleted JAR build had, but still a read grant on all of the tenant's data

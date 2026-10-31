@@ -1,8 +1,10 @@
 package io.kelta.worker.controller;
 
 import io.kelta.runtime.flow.FlowEngine;
+import io.kelta.runtime.flow.FlowExecutionData;
 import io.kelta.runtime.flow.FlowStore;
 import io.kelta.runtime.flow.InitialStateBuilder;
+import io.kelta.runtime.workflow.ActorSource;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.repository.FlowRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
@@ -64,9 +66,10 @@ class FlowExecutionControllerTest {
 
         when(initialStateBuilder.buildFromApiInvocation(anyMap(), anyString(), anyString(), anyString(),
                 anyString())).thenReturn(Map.of("input", Map.of()));
-        when(flowActorResolver.resolve(TENANT_ID, FLOW_ID, USER_ID)).thenReturn(USER_ID);
+        when(flowActorResolver.resolve(TENANT_ID, FLOW_ID, USER_ID))
+                .thenReturn(new FlowActorResolver.Resolved(USER_ID, ActorSource.INITIATOR));
         when(flowEngine.startExecution(eq(TENANT_ID), eq(FLOW_ID), eq(DEFINITION), anyMap(), eq(USER_ID),
-                isNull(), anyBoolean())).thenReturn("exec-1");
+                eq(ActorSource.INITIATOR), isNull(), anyBoolean())).thenReturn("exec-1");
     }
 
     @Test
@@ -81,7 +84,7 @@ class FlowExecutionControllerTest {
         assertThat(data.get("type")).isEqualTo("flow-executions");
         assertThat(data.get("id")).isEqualTo("exec-1");
         verify(flowEngine).startExecution(eq(TENANT_ID), eq(FLOW_ID), eq(DEFINITION), anyMap(), eq(USER_ID),
-                isNull(), eq(false));
+                eq(ActorSource.INITIATOR), isNull(), eq(false));
     }
 
     @Test
@@ -113,7 +116,7 @@ class FlowExecutionControllerTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(((Map<?, ?>) response.getBody().get("data")).get("type")).isEqualTo("flow-executions");
         verify(flowEngine).startExecution(eq(TENANT_ID), eq(FLOW_ID), eq(DEFINITION), anyMap(), eq(USER_ID),
-                isNull(), eq(true));
+                eq(ActorSource.INITIATOR), isNull(), eq(true));
     }
 
     @Test
@@ -203,7 +206,7 @@ class FlowExecutionControllerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         verify(flowEngine).startExecution(eq(TENANT_ID), eq(FLOW_ID), eq(DEFINITION), anyMap(), eq(USER_ID),
-                isNull(), eq(false));
+                eq(ActorSource.INITIATOR), isNull(), eq(false));
     }
 
     @Test
@@ -252,7 +255,7 @@ class FlowExecutionControllerTest {
 
         ArgumentCaptor<Map<String, Object>> state = ArgumentCaptor.forClass(Map.class);
         verify(flowEngine).startExecution(eq(TENANT_ID), eq(FLOW_ID), eq(DEFINITION), state.capture(), eq(USER_ID),
-                isNull(), eq(false));
+                eq(ActorSource.INITIATOR), isNull(), eq(false));
         Map<String, Object> context = (Map<String, Object>) state.getValue().get("context");
         assertThat(context).containsEntry("userId", USER_ID).containsEntry("tenantId", TENANT_ID);
         assertThat(state.getValue()).doesNotContainKey("record");
@@ -274,7 +277,7 @@ class FlowExecutionControllerTest {
 
         ArgumentCaptor<Map<String, Object>> state = ArgumentCaptor.forClass(Map.class);
         verify(flowEngine).startExecution(eq(TENANT_ID), eq(FLOW_ID), eq(DEFINITION), state.capture(), eq(USER_ID),
-                isNull(), eq(false));
+                eq(ActorSource.INITIATOR), isNull(), eq(false));
         assertThat(state.getValue()).isEqualTo(customState);
     }
 
@@ -288,6 +291,28 @@ class FlowExecutionControllerTest {
         assertThat(FlowExecutionController.isMemberLaunchable(flowRow("AUTOLAUNCHED", "not json"))).isFalse();
         assertThat(FlowExecutionController.isMemberLaunchable(flowRow("AUTOLAUNCHED", "[]"))).isFalse();
         assertThat(FlowExecutionController.isMemberLaunchable(flowRow(null, null))).isFalse();
+    }
+
+    @Test
+    @DisplayName("a retry runs as the original run's user with its recorded source")
+    void retryKeepsTheRecordedActorSource() {
+        FlowStore flowStore = mock(FlowStore.class);
+        controller = new FlowExecutionController(flowEngine, flowStore, initialStateBuilder,
+                flowRepository, flowActorResolver, new AdminPermissionGuard(new CerbosPermissionResolver(), bootstrapRepository));
+        givenFlow(true);
+        when(flowStore.loadExecution("exec-0")).thenReturn(Optional.of(new FlowExecutionData("exec-0", TENANT_ID,
+                FLOW_ID, FlowExecutionData.STATUS_FAILED, "owner-1", ActorSource.OWNER, null, Map.of(), null,
+                "boom", null, 1, 5, Map.of("k", "v"), false, null, null)));
+        when(flowActorResolver.resolveRetry(TENANT_ID, FLOW_ID, "owner-1", ActorSource.OWNER))
+                .thenReturn(new FlowActorResolver.Resolved("owner-1", ActorSource.OWNER));
+        when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean()))
+                .thenReturn("exec-2");
+
+        ResponseEntity<Map<String, Object>> response = controller.retryExecution("exec-0", "full");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verify(flowEngine).startExecution(eq(TENANT_ID), eq(FLOW_ID), eq(DEFINITION), eq(Map.of("k", "v")),
+                eq("owner-1"), eq(ActorSource.OWNER), isNull(), eq(false));
     }
 
     private ResponseEntity<Map<String, Object>> execute(Map<String, Object> body) {
@@ -340,6 +365,6 @@ class FlowExecutionControllerTest {
     }
 
     private void verifyNeverStarted() {
-        verify(flowEngine, never()).startExecution(any(), any(), any(), any(), any(), any(), anyBoolean());
+        verify(flowEngine, never()).startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
     }
 }

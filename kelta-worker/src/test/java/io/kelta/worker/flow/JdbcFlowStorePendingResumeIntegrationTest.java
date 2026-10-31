@@ -1,11 +1,14 @@
 package io.kelta.worker.flow;
 
+import io.kelta.runtime.flow.FlowExecutionData;
 import io.kelta.runtime.flow.FlowStore.ConsumedResume;
+import io.kelta.runtime.workflow.ActorSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.junit.jupiter.Container;
@@ -23,6 +26,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The {@code flow_pending_resume} claim SQL of {@link JdbcFlowStore} against a real Postgres with
@@ -96,6 +100,32 @@ class JdbcFlowStorePendingResumeIntegrationTest {
     private static void ageClaim(String executionId, Duration by) {
         jdbc.update("UPDATE flow_pending_resume SET claimed_at = claimed_at - (? * INTERVAL '1 second') "
                 + "WHERE execution_id = ?", by.toSeconds(), executionId);
+    }
+
+    @Test
+    @DisplayName("an execution keeps its actor and how it was chosen (V227), so a resumed run still knows it")
+    void executionActorSourceRoundTrips() {
+        String owner = "eeeeeeee-0000-0000-0000-000000000001";
+        String id = store.createExecution(TENANT_A, flowId(TENANT_A), owner, ActorSource.OWNER, null,
+                Map.of("k", "v"), false);
+        String unknown = store.createExecution(TENANT_A, flowId(TENANT_A), owner, null, null, Map.of(), false);
+
+        FlowExecutionData execution = store.loadExecution(id).orElseThrow();
+        assertThat(execution.startedBy()).isEqualTo(owner);
+        assertThat(execution.startedBySource()).isEqualTo(ActorSource.OWNER);
+        assertThat(store.loadExecution(unknown).orElseThrow().startedBySource()).isNull();
+        assertThat(store.findExecutionsByFlow(flowId(TENANT_A), 10, 0))
+                .extracting(FlowExecutionData::startedBySource).containsExactlyInAnyOrder(ActorSource.OWNER, null);
+
+        // The column admits only the ActorSource names (and NULL).
+        assertThatThrownBy(() -> jdbc.update(
+                "UPDATE flow_execution SET started_by_source = 'DELEGATE' WHERE id = ?", id))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("chk_flow_execution_started_by_source");
+        for (ActorSource source : ActorSource.values()) {
+            jdbc.update("UPDATE flow_execution SET started_by_source = ? WHERE id = ?", source.name(), id);
+            assertThat(store.loadExecution(id).orElseThrow().startedBySource()).isEqualTo(source);
+        }
     }
 
     @Test

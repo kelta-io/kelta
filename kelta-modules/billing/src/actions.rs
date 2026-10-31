@@ -1,5 +1,7 @@
 //! The module's actions, shared by flow steps (`kelta-billing:<key>`) and HTTP routes
 //! (`/api/modules/kelta-billing/x/<path>`). The calling member is always the verified actor.
+//! Checkout and the billing portal act for that member, so they refuse a flow run's fallback
+//! actor (its run-as user or owner, `act.source`) as they refuse a call with no actor.
 
 use chrono::Utc;
 use kelta_module::client::{ClientError, Platform};
@@ -32,6 +34,11 @@ pub struct ActionCall<'a, P> {
     pub stripe: &'a StripeClient,
     /// The verified acting user, if any.
     pub user_id: Option<&'a str>,
+    /// True when that user is known to be a member who acted, so an action may act *for* them:
+    /// on a route, a caller that is not a flow fallback
+    /// ([`kelta_module::protocol::Actor::is_fallback`]); on an action call (a flow step), only an
+    /// actor whose `act.source` is `initiator` ([`kelta_module::protocol::Actor::is_initiator`]).
+    pub member_acted: bool,
     pub input: &'a Map<String, Value>,
     /// The platform's `Idempotency-Key`, reused for Stripe so a retried step does not repeat.
     pub idempotency_key: Option<&'a str>,
@@ -50,8 +57,21 @@ pub async fn run<P: Platform>(key: &str, call: &ActionCall<'_, P>) -> Option<Act
     })
 }
 
+/// Refusal for an action that needs a calling member and has none.
+const NO_CALLING_MEMBER: &str = "No calling member";
+
 fn member<'a, P>(call: &ActionCall<'a, P>) -> Result<&'a str, String> {
-    call.user_id.filter(|u| !u.trim().is_empty()).ok_or_else(|| "No calling member".to_string())
+    call.user_id.filter(|u| !u.trim().is_empty()).ok_or_else(|| NO_CALLING_MEMBER.to_string())
+}
+
+/// The member an action acts for (a checkout, a billing portal session). A flow run's fallback
+/// identity is not one (no member started that run), nor is a flow step's actor that does not say
+/// how it was chosen, so both get the same refusal as no actor.
+fn acting_member<'a, P>(call: &ActionCall<'a, P>) -> Result<&'a str, String> {
+    if !call.member_acted {
+        return Err(NO_CALLING_MEMBER.to_string());
+    }
+    member(call)
 }
 
 /// A platform read failed: logged, and answered without its detail.
@@ -77,7 +97,7 @@ async fn stripe_credential<P: Platform>(call: &ActionCall<'_, P>, purpose: &str)
 }
 
 async fn create_checkout_session<P: Platform>(call: &ActionCall<'_, P>) -> ActionResult {
-    let user_id = member(call)?;
+    let user_id = acting_member(call)?;
     let (Some(plan_code), Some(success_url), Some(cancel_url)) =
         (input(call.input, "planCode"), input(call.input, "successUrl"), input(call.input, "cancelUrl"))
     else {
@@ -140,7 +160,7 @@ async fn create_checkout_session<P: Platform>(call: &ActionCall<'_, P>) -> Actio
 }
 
 async fn create_portal_session<P: Platform>(call: &ActionCall<'_, P>) -> ActionResult {
-    let user_id = member(call)?;
+    let user_id = acting_member(call)?;
     let Some(return_url) = input(call.input, "returnUrl") else {
         return Err("returnUrl is required".into());
     };

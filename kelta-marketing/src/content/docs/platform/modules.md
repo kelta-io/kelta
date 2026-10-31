@@ -116,6 +116,18 @@ A module is called only while its install is `ACTIVE` or `DEGRADED`:
   with the error code `ModuleTimeoutException`. Any other failure, or a disabled module, gives
   `ModuleUnavailableException`. A `Catch` can match either code. Work that takes longer than one call is a
   [long-running action](#long-running-actions).
+
+  The signed assertion's `act` names the run's user, with `act.source` saying how the platform chose it:
+  `initiator` (the user the run's trigger names), `run_as` (the flow's run-as user) or `owner` (the
+  flow's owner). The last two are fallbacks for a run whose trigger names no user. An action that acts
+  for the calling member should accept only `initiator` (the Rust SDK's `Actor::is_initiator()`) and
+  refuse anything else, including an actor with no `source`. More values may be added, so treat an
+  unknown one as a fallback. A route's or hook's `act` is the caller and has no `source`.
+
+  For a record-triggered run, `initiator` is the user whose write produced the event. When a flow's own
+  write produced it, that is the upstream run's user, which may itself be a `run_as` or `owner` fallback
+  arriving as `initiator`. A retry runs as the original run's initiator, whoever asked for it. A run that was still waiting when the platform began recording
+  the source sends no `act` when it resumes, so a member-only action refuses it.
 - **Before-save hooks.** `POST /kelta/v1/hooks` answers `{ allowed, fieldUpdates, errors, conflict }`:
   - `errors` reject the write with `400`;
   - `conflict` rejects it with `409`;

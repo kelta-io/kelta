@@ -10,6 +10,7 @@ import io.kelta.runtime.flow.InitialStateBuilder;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.workflow.ActorSource;
 import io.kelta.worker.service.TenantSlugResolver;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,7 +55,7 @@ class FlowEventListenerTest {
         queryEngine = mock(QueryEngine.class);
         listener = new FlowEventListener(flowEngine, triggerEvaluator, initialStateBuilder,
                 jdbcTemplate, objectMapper, tenantSlugResolver,
-                org.mockito.Mockito.mock(io.kelta.worker.service.FlowActorResolver.class),
+                changerResolver(),
                 collectionRegistry, queryEngine);
     }
 
@@ -73,7 +74,7 @@ class FlowEventListenerTest {
             stubJdbcWithTriggerConfig(plainConfig);
             when(triggerEvaluator.matchesRecordTrigger(any(), any())).thenReturn(true);
             when(initialStateBuilder.buildFromRecordEvent(any(), any(), any())).thenReturn(Map.of());
-            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), anyBoolean())).thenReturn("exec-1");
+            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean())).thenReturn("exec-1");
 
             listener.handleRecordChanged(buildRecordChangedMessage("tenant-1", "orders", ChangeType.CREATED));
 
@@ -98,7 +99,7 @@ class FlowEventListenerTest {
             stubJdbcWithTriggerConfig(wrappedConfig);
             when(triggerEvaluator.matchesRecordTrigger(any(), any())).thenReturn(true);
             when(initialStateBuilder.buildFromRecordEvent(any(), any(), any())).thenReturn(Map.of());
-            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), anyBoolean())).thenReturn("exec-1");
+            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean())).thenReturn("exec-1");
 
             listener.handleRecordChanged(buildRecordChangedMessage("tenant-1", "orders", ChangeType.CREATED));
 
@@ -225,14 +226,15 @@ class FlowEventListenerTest {
             stubJdbcWithTriggerConfig(plainConfig);
             when(triggerEvaluator.matchesRecordTrigger(any(), any())).thenReturn(true);
             when(initialStateBuilder.buildFromRecordEvent(any(), any(), any())).thenReturn(Map.of());
-            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), anyBoolean()))
+            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean()))
                     .thenReturn("exec-1");
 
             // The helper builds a payload with recordId="rec-1"
             listener.handleRecordChanged(buildRecordChangedMessage("tenant-1", "orders", ChangeType.UPDATED));
 
             verify(flowEngine).startExecution(
-                    eq("tenant-1"), any(), any(), any(), any(), eq("rec-1"), anyBoolean());
+                    eq("tenant-1"), any(), any(), any(), eq("changer-1"), eq(ActorSource.INITIATOR), eq("rec-1"),
+                    anyBoolean());
         }
     }
 
@@ -255,7 +257,7 @@ class FlowEventListenerTest {
 
             // Capture the slug seen by TenantContext at the moment startExecution is invoked.
             java.util.concurrent.atomic.AtomicReference<String> seenSlug = new java.util.concurrent.atomic.AtomicReference<>();
-            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), anyBoolean()))
+            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean()))
                     .thenAnswer(invocation -> {
                         seenSlug.set(io.kelta.runtime.context.TenantContext.getSlug());
                         return "exec-1";
@@ -279,12 +281,12 @@ class FlowEventListenerTest {
             when(tenantSlugResolver.resolveSlug("tenant-1")).thenReturn(Optional.empty());
             when(triggerEvaluator.matchesRecordTrigger(any(), any())).thenReturn(true);
             when(initialStateBuilder.buildFromRecordEvent(any(), any(), any())).thenReturn(Map.of());
-            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), anyBoolean())).thenReturn("exec-1");
+            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean())).thenReturn("exec-1");
 
             listener.handleRecordChanged(buildRecordChangedMessage("tenant-1", "orders", ChangeType.UPDATED));
 
             // Execution still attempted — degraded behaviour, but trigger evaluation still happens
-            verify(flowEngine).startExecution(eq("tenant-1"), any(), any(), any(), any(), any(), anyBoolean());
+            verify(flowEngine).startExecution(eq("tenant-1"), any(), any(), any(), any(), any(), any(), anyBoolean());
         }
     }
 
@@ -411,7 +413,7 @@ class FlowEventListenerTest {
                     ArgumentCaptor.forClass(PlatformEvent.class);
             verify(initialStateBuilder).buildFromRecordEvent(built.capture(), eq("flow-1"), anyString());
             assertThat(built.getValue().getPayload().getData()).containsEntry("status", "shipped");
-            verify(flowEngine).startExecution(eq("tenant-1"), eq("flow-1"), any(), any(), any(),
+            verify(flowEngine).startExecution(eq("tenant-1"), eq("flow-1"), any(), any(), any(), any(),
                     eq("rec-1"), anyBoolean());
         }
 
@@ -474,5 +476,16 @@ class FlowEventListenerTest {
         PlatformEvent<RecordChangedPayload> event = EventFactory.createRecordEvent(
                 "record." + changeType.name().toLowerCase(), tenantId, "user-1", payload);
         return objectMapper.writeValueAsString(event);
+    }
+
+    /** A resolver that answers every flow with {@code changer-1} as its {@link ActorSource#INITIATOR} actor. */
+    private static io.kelta.worker.service.FlowActorResolver changerResolver() {
+        io.kelta.worker.service.FlowActorResolver resolver =
+                org.mockito.Mockito.mock(io.kelta.worker.service.FlowActorResolver.class);
+        org.mockito.Mockito.lenient().when(resolver.resolve(
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new io.kelta.worker.service.FlowActorResolver.Resolved("changer-1", ActorSource.INITIATOR));
+        return resolver;
     }
 }

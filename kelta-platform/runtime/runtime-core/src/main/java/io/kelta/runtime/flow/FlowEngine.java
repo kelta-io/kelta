@@ -6,6 +6,7 @@ import io.kelta.runtime.context.TenantPropagatingExecutors;
 import io.kelta.runtime.flow.executor.*;
 import io.kelta.runtime.workflow.ActionHandlerRegistry;
 import io.kelta.runtime.workflow.ActionResult;
+import io.kelta.runtime.workflow.ActorSource;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -135,7 +136,8 @@ public class FlowEngine {
      * @param flowId           flow ID
      * @param definitionJson   the flow definition JSON
      * @param initialInput     the initial state data
-     * @param userId           user who initiated the execution (null for triggers)
+     * @param userId           the run's user (the worker's {@code FlowActorResolver} result)
+     * @param actorSource      how {@code userId} was chosen; null when unknown
      * @param triggerRecordId  ID of the record that triggered this execution
      *                         (null for manual runs, scheduled jobs, and webhooks)
      * @param isTest           whether this is a test execution
@@ -143,16 +145,16 @@ public class FlowEngine {
      */
     public String startExecution(String tenantId, String flowId, String definitionJson,
                                  Map<String, Object> initialInput, String userId,
-                                 String triggerRecordId, boolean isTest) {
+                                 ActorSource actorSource, String triggerRecordId, boolean isTest) {
         FlowDefinition definition = parser.parse(definitionJson);
-        String executionId = flowStore.createExecution(tenantId, flowId, userId, triggerRecordId,
-                initialInput, isTest);
+        String executionId = flowStore.createExecution(tenantId, flowId, userId, actorSource,
+                triggerRecordId, initialInput, isTest);
 
         threadPool.submit(() -> TenantContext.runWithTenant(tenantId, () -> {
             listener.onExecutionStarted(flowId);
             long start = System.currentTimeMillis();
             try {
-                executeFlow(executionId, tenantId, flowId, userId, definition, initialInput);
+                executeFlow(executionId, tenantId, flowId, userId, actorSource, definition, initialInput);
             } catch (Exception e) {
                 log.error("Flow execution {} failed unexpectedly", executionId, e);
                 flowStore.completeExecution(executionId, FlowExecutionData.STATUS_FAILED,
@@ -175,13 +177,14 @@ public class FlowEngine {
      * Starts the saved flow {@code flowId} asynchronously on behalf of a
      * {@code TRIGGER_FLOW} step, recording {@code triggerDepth} in its initial input
      * under {@link #TRIGGER_DEPTH_KEY} so the next hop can be bounded by
-     * {@link #MAX_TRIGGER_DEPTH}.
+     * {@link #MAX_TRIGGER_DEPTH}. The started run keeps the triggering run's user and
+     * {@code actorSource}.
      *
      * @return the new execution's id, or empty when the tenant has no flow {@code flowId}
      */
     public Optional<String> startTriggeredExecution(String tenantId, String flowId,
                                                     Map<String, Object> input, String userId,
-                                                    int triggerDepth) {
+                                                    ActorSource actorSource, int triggerDepth) {
         Optional<String> definitionJson = flowStore.findFlowDefinitionById(tenantId, flowId);
         if (definitionJson.isEmpty()) {
             return Optional.empty();
@@ -189,7 +192,7 @@ public class FlowEngine {
         Map<String, Object> initialInput = input != null ? new LinkedHashMap<>(input) : new LinkedHashMap<>();
         initialInput.put(TRIGGER_DEPTH_KEY, triggerDepth);
         return Optional.of(startExecution(tenantId, flowId, definitionJson.get(), initialInput,
-            userId, null, false));
+            userId, actorSource, null, false));
     }
 
     /**
@@ -200,7 +203,8 @@ public class FlowEngine {
      * @param flowId          flow ID
      * @param definitionJson  the flow definition JSON
      * @param initialInput    the initial state data
-     * @param userId          user who initiated the execution
+     * @param userId          user who initiated the execution; its {@link ActorSource} is not
+     *                        recorded, so an action that needs it sees {@code null}
      * @return the final state data after execution completes
      */
     public Map<String, Object> executeSynchronous(String tenantId, String flowId,
@@ -208,8 +212,8 @@ public class FlowEngine {
                                                    Map<String, Object> initialInput,
                                                    String userId) {
         FlowDefinition definition = parser.parse(definitionJson);
-        String executionId = flowStore.createExecution(tenantId, flowId, userId, null, initialInput, false);
-        return executeFlow(executionId, tenantId, flowId, userId, definition, initialInput);
+        String executionId = flowStore.createExecution(tenantId, flowId, userId, null, null, initialInput, false);
+        return executeFlow(executionId, tenantId, flowId, userId, null, definition, initialInput);
     }
 
     /**
@@ -347,6 +351,7 @@ public class FlowEngine {
                     definition, fresh.stateData(), 0,
                     flowStore.findStepLogging(resumeTenantId, flowId));
                 context.setTriggerDepth(triggerDepthOf(fresh.initialInput()));
+                context.setActorSource(fresh.startedBySource());
                 context.setAwaitable(true);
                 context.setCurrentStateId(nextStateId);
                 if (waitState instanceof StateDefinition.TaskState) {
@@ -541,6 +546,7 @@ public class FlowEngine {
             parent.tenantId(), parent.flowId(), parent.userId(),
             subFlow, input, parent.invokeDepth(), parent.stepLogging());
         subContext.setTriggerDepth(parent.triggerDepth());
+        subContext.setActorSource(parent.actorSource());
 
         Map<String, Object> finalData = runStateLoop(subContext);
         return buildSubFlowResult(finalData, subContext);
@@ -563,6 +569,7 @@ public class FlowEngine {
             parent.tenantId(), parent.flowId(), parent.userId(),
             targetFlow, input, parent.invokeDepth() + 1, parent.stepLogging());
         invokedContext.setTriggerDepth(parent.triggerDepth());
+        invokedContext.setActorSource(parent.actorSource());
 
         Map<String, Object> finalData = runStateLoop(invokedContext);
         return buildSubFlowResult(finalData, invokedContext);
@@ -613,12 +620,14 @@ public class FlowEngine {
     // -------------------------------------------------------------------------
 
     private Map<String, Object> executeFlow(String executionId, String tenantId, String flowId,
-                                            String userId, FlowDefinition definition,
+                                            String userId, ActorSource actorSource,
+                                            FlowDefinition definition,
                                             Map<String, Object> initialInput) {
         FlowExecutionContext context = new FlowExecutionContext(
             executionId, tenantId, flowId, userId, definition, initialInput, 0,
             flowStore.findStepLogging(tenantId, flowId));
         context.setTriggerDepth(triggerDepthOf(initialInput));
+        context.setActorSource(actorSource);
         context.setAwaitable(true);
 
         log.info("Starting flow execution {} (flow={}, startAt={})",

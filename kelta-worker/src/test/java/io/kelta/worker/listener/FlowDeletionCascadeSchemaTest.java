@@ -120,7 +120,7 @@ class FlowDeletionCascadeSchemaTest {
     }
 
     private static FlowExecutionData withStatus(String status) {
-        return new FlowExecutionData(null, null, null, status, null, null, null, null, null, null,
+        return new FlowExecutionData(null, null, null, status, null, null, null, null, null, null, null,
                 0, null, null, false, null, null);
     }
 }

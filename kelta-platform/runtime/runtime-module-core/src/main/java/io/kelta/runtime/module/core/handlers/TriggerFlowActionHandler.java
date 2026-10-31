@@ -30,6 +30,12 @@ import java.util.Optional;
  * succeeds once the execution is created and returns its {@code executionId}; it does not wait
  * for the target flow to finish (use an {@code InvokeFlow} state for that).
  *
+ * <p>The started execution runs as this run's user, with the same
+ * {@link io.kelta.runtime.workflow.ActorSource}: a {@code TRIGGER_FLOW} hop never turns a run-as or
+ * owner fallback into an initiator. A flow's record <em>write</em> that a record trigger picks up
+ * is different: the record event carries the user but no source, so that run starts with the
+ * fallback user as its initiator (see {@code .claude/docs/concerns.md}).
+ *
  * <p>Each hop increments the trigger depth the engine carries in the started execution's
  * initial input; a step running at {@link FlowEngine#MAX_TRIGGER_DEPTH} fails instead of
  * starting another execution, so a flow that triggers itself (directly or through other flows)
@@ -98,7 +104,7 @@ public class TriggerFlowActionHandler implements ActionHandler {
 
             int depth = context.triggerDepth() + 1;
             Optional<String> executionId = flowEngine.startTriggeredExecution(
-                context.tenantId(), flowId, state, context.userId(), depth);
+                context.tenantId(), flowId, state, context.userId(), context.actorSource(), depth);
             if (executionId.isEmpty()) {
                 return ActionResult.failure("TRIGGER_FLOW: flow '" + flowId + "' not found");
             }

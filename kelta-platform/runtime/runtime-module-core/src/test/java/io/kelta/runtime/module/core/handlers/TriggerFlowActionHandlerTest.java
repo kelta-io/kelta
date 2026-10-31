@@ -6,6 +6,7 @@ import io.kelta.runtime.flow.FlowStore;
 import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionHandlerRegistry;
 import io.kelta.runtime.workflow.ActionResult;
+import io.kelta.runtime.workflow.ActorSource;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,7 +39,7 @@ class TriggerFlowActionHandlerTest {
     void setUp() {
         flowStore = mock(FlowStore.class);
         AtomicInteger ids = new AtomicInteger();
-        when(flowStore.createExecution(anyString(), anyString(), any(), any(), any(), anyBoolean()))
+        when(flowStore.createExecution(anyString(), anyString(), any(), any(), any(), any(), anyBoolean()))
             .thenAnswer(inv -> "exec-" + ids.incrementAndGet());
         registry = new ActionHandlerRegistry();
         engine = new FlowEngine(flowStore, registry, objectMapper, 4);
@@ -68,7 +69,7 @@ class TriggerFlowActionHandlerTest {
 
     private static ActionContext context(String config, int triggerDepth) {
         return ActionContext.builder()
-            .tenantId(TENANT).userId("user-1").data(Map.of())
+            .tenantId(TENANT).userId("user-1").actorSource(ActorSource.OWNER).data(Map.of())
             .actionConfigJson(config).triggerDepth(triggerDepth).build();
     }
 
@@ -107,7 +108,7 @@ class TriggerFlowActionHandlerTest {
     class ExecutionTests {
 
         @Test
-        @DisplayName("Starts the target flow and returns the id of the execution row it created")
+        @DisplayName("Starts the target flow as this run's user and source, and returns the new execution id")
         void startsTargetFlowAndReturnsExecutionId() {
             when(flowStore.findFlowDefinitionById(TENANT, "target-flow")).thenReturn(Optional.of(succeedFlow()));
 
@@ -118,8 +119,8 @@ class TriggerFlowActionHandlerTest {
             assertTrue(result.successful(), result.errorMessage());
             @SuppressWarnings("unchecked")
             ArgumentCaptor<Map<String, Object>> input = ArgumentCaptor.forClass(Map.class);
-            verify(flowStore).createExecution(eq(TENANT), eq("target-flow"), eq("user-1"), isNull(),
-                input.capture(), eq(false));
+            verify(flowStore).createExecution(eq(TENANT), eq("target-flow"), eq("user-1"), eq(ActorSource.OWNER),
+                isNull(), input.capture(), eq(false));
             assertEquals("exec-1", result.outputData().get("executionId"));
             assertEquals("target-flow", result.outputData().get("flowId"));
             assertFalse(result.outputData().containsKey("status"), "no hard-coded QUEUED status");
@@ -139,7 +140,7 @@ class TriggerFlowActionHandlerTest {
 
             assertFalse(result.successful());
             assertTrue(result.errorMessage().contains("'ghost' not found"), result.errorMessage());
-            verify(flowStore, never()).createExecution(any(), any(), any(), any(), any(), anyBoolean());
+            verify(flowStore, never()).createExecution(any(), any(), any(), any(), any(), any(), anyBoolean());
         }
 
         @Test
@@ -192,7 +193,8 @@ class TriggerFlowActionHandlerTest {
         void selfTriggerStopsAtDepthLimit() {
             when(flowStore.findFlowDefinitionById(TENANT, "flow-a")).thenReturn(Optional.of(triggeringFlow("flow-a")));
 
-            engine.startExecution(TENANT, "flow-a", triggeringFlow("flow-a"), Map.of(), "user-1", null, false);
+            engine.startExecution(TENANT, "flow-a", triggeringFlow("flow-a"), Map.of(), "user-1",
+                ActorSource.INITIATOR, null, false);
 
             assertChainStoppedAtLimit();
         }
@@ -203,10 +205,12 @@ class TriggerFlowActionHandlerTest {
             when(flowStore.findFlowDefinitionById(TENANT, "flow-a")).thenReturn(Optional.of(triggeringFlow("flow-b")));
             when(flowStore.findFlowDefinitionById(TENANT, "flow-b")).thenReturn(Optional.of(triggeringFlow("flow-a")));
 
-            engine.startExecution(TENANT, "flow-a", triggeringFlow("flow-b"), Map.of(), "user-1", null, false);
+            engine.startExecution(TENANT, "flow-a", triggeringFlow("flow-b"), Map.of(), "user-1",
+                ActorSource.INITIATOR, null, false);
 
             assertChainStoppedAtLimit();
-            verify(flowStore, times(5)).createExecution(eq(TENANT), eq("flow-b"), any(), any(), any(), anyBoolean());
+            verify(flowStore, times(5)).createExecution(eq(TENANT), eq("flow-b"), any(), any(), any(), any(),
+                anyBoolean());
         }
 
         private void assertChainStoppedAtLimit() {
@@ -220,8 +224,8 @@ class TriggerFlowActionHandlerTest {
             // The original run plus one execution per allowed hop — then nothing more.
             @SuppressWarnings("unchecked")
             ArgumentCaptor<Map<String, Object>> inputs = ArgumentCaptor.forClass(Map.class);
-            verify(flowStore, times(limit + 1)).createExecution(eq(TENANT), anyString(), any(), any(),
-                inputs.capture(), anyBoolean());
+            verify(flowStore, times(limit + 1)).createExecution(eq(TENANT), anyString(), any(),
+                eq(ActorSource.INITIATOR), any(), inputs.capture(), anyBoolean());
             List<Map<String, Object>> all = inputs.getAllValues();
             for (int hop = 1; hop <= limit; hop++) {
                 assertEquals(hop, all.get(hop).get(FlowEngine.TRIGGER_DEPTH_KEY));

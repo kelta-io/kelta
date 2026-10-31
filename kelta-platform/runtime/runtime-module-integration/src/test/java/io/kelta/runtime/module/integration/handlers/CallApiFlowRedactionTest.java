@@ -46,7 +46,7 @@ class CallApiFlowRedactionTest {
     void setUp() throws IOException {
         server = new LoopbackServer();
         flowStore = mock(FlowStore.class);
-        when(flowStore.createExecution(any(), any(), any(), any(), any(), anyBoolean()))
+        when(flowStore.createExecution(any(), any(), any(), any(), any(), any(), anyBoolean()))
             .thenReturn("exec-1");
         when(flowStore.logStepExecution(any(), any(), any(), any(), any(), any(), any(), any(), any(),
             any(), anyInt())).thenReturn("step-1");

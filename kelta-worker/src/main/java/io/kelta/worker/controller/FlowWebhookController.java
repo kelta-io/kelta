@@ -213,10 +213,11 @@ public class FlowWebhookController {
         try {
             // Actor (run-as user -> flow owner) replaces the legacy "webhook"
             // provenance marker so records the flow writes get audit users.
-            String actor = flowActorResolver.resolve(tenantId, flowId, null);
+            FlowActorResolver.Resolved actor = flowActorResolver.resolve(tenantId, flowId, null);
             TenantContextUtils.withTenant(tenantId, tenantSlug, () ->
                     resultRef.set(flowEngine.startExecution(
-                            tenantId, flowId, definitionJson, initialState, actor, null, false)));
+                            tenantId, flowId, definitionJson, initialState, actor.userId(), actor.source(),
+                            null, false)));
         } catch (Exception e) {
             log.error("Failed to start webhook-triggered flow execution: flowId={}", flowId, e);
             return ResponseEntity.internalServerError().body(

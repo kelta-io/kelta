@@ -149,12 +149,15 @@ public class FlowEventListener {
                             log.info("Starting flow execution: flowId={}, executionId={}, trigger=RECORD_CHANGE",
                                     config.flowId(), executionId);
 
+                            FlowActorResolver.Resolved actor =
+                                    flowActorResolver.resolve(tenantId, config.flowId(), boundUserId);
                             flowEngine.startExecution(
                                     tenantId,
                                     config.flowId(),
                                     config.definitionJson(),
                                     initialState,
-                                    flowActorResolver.resolve(tenantId, config.flowId(), boundUserId),
+                                    actor.userId(),
+                                    actor.source(),
                                     payload.getRecordId(),
                                     false);
                         }

@@ -87,7 +87,7 @@ class FlowReadRouteMappingTest {
         flowRepository = mock(FlowRepository.class);
         scheduledJobRepository = mock(ScheduledJobRepository.class);
         when(flowStore.loadExecution("e-1")).thenReturn(Optional.of(new FlowExecutionData("e-1", "tenant-1",
-                "f-1", FlowExecutionData.STATUS_COMPLETED, STARTER, null, Map.of("k", "v"), null, null, null, 1,
+                "f-1", FlowExecutionData.STATUS_COMPLETED, STARTER, null, null, Map.of("k", "v"), null, null, null, 1,
                 10, Map.of(), false, Instant.parse("2026-10-31T00:00:00Z"), null)));
         when(flowStore.loadStepLogs("e-1")).thenReturn(List.of(new FlowStepLogData("s-1", "e-1", "a", "A", "Task",
                 FlowStepLogData.STATUS_SUCCEEDED, Map.of(), Map.of(), null, null, 1, 5, null, null)));

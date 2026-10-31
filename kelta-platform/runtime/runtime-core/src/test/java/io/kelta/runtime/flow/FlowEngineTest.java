@@ -7,6 +7,7 @@ import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionHandler;
 import io.kelta.runtime.workflow.ActionHandlerRegistry;
 import io.kelta.runtime.workflow.ActionResult;
+import io.kelta.runtime.workflow.ActorSource;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
 
@@ -827,7 +828,7 @@ class FlowEngineTest {
                 }
                 """;
 
-            String executionId = engine.startExecution("t1", "f1", json, Map.of(), "u1", null, false);
+            String executionId = engine.startExecution("t1", "f1", json, Map.of(), "u1", null, null, false);
             assertNotNull(executionId);
             assertFalse(executionId.isEmpty());
         }
@@ -835,7 +836,7 @@ class FlowEngineTest {
         @Test
         @DisplayName("cancel execution marks as cancelled")
         void cancelExecution() {
-            String executionId = flowStore.createExecution("t1", "f1", "u1", null, Map.of(), false);
+            String executionId = flowStore.createExecution("t1", "f1", "u1", null, null, Map.of(), false);
             engine.cancelExecution(executionId);
 
             Optional<FlowExecutionData> exec = flowStore.loadExecution(executionId);
@@ -1062,21 +1063,119 @@ class FlowEngineTest {
                 """;
             flowStore.registerFlow("t1", "flow-probe", "Probe", probeFlow);
 
-            String executionId = engine.startTriggeredExecution("t1", "flow-probe", Map.of("k", "v"), "u1", 3)
+            String executionId = engine.startTriggeredExecution("t1", "flow-probe", Map.of("k", "v"), "u1",
+                    ActorSource.RUN_AS, 3)
                 .orElseThrow();
             awaitStatus(executionId, FlowExecutionData.STATUS_WAITING);
             engine.resumeExecution(executionId);
             awaitStatus(executionId, FlowExecutionData.STATUS_COMPLETED);
 
             assertEquals(List.of(3, 3), seenDepths);
-            assertEquals(3, flowStore.loadExecution(executionId).orElseThrow()
-                .initialInput().get(FlowEngine.TRIGGER_DEPTH_KEY));
+            FlowExecutionData triggered = flowStore.loadExecution(executionId).orElseThrow();
+            assertEquals(3, triggered.initialInput().get(FlowEngine.TRIGGER_DEPTH_KEY));
+            // The hop keeps the triggering run's user and source.
+            assertEquals("u1", triggered.startedBy());
+            assertEquals(ActorSource.RUN_AS, triggered.startedBySource());
+        }
+
+        @Test
+        @DisplayName("the actor source is recorded, reaches every Task (branches included) and survives a Wait/resume")
+        void actorSourceReachesTasksAndSurvivesResume() throws Exception {
+            List<String> seen = Collections.synchronizedList(new ArrayList<>());
+            handlerRegistry.register(new ActionHandler() {
+                @Override
+                public String getActionTypeKey() { return "ACTOR_PROBE"; }
+
+                @Override
+                public ActionResult execute(ActionContext context) {
+                    seen.add(context.userId() + "/" + context.actorSource());
+                    return ActionResult.success(Map.of());
+                }
+            });
+            String probeFlow = """
+                {
+                    "StartAt": "Before",
+                    "States": {
+                        "Before": { "Type": "Task", "Resource": "ACTOR_PROBE", "ResultPath": null, "Next": "Fan" },
+                        "Fan": {
+                            "Type": "Parallel",
+                            "Branches": [
+                                { "StartAt": "InBranch",
+                                  "States": { "InBranch": { "Type": "Task", "Resource": "ACTOR_PROBE", "End": true } } }
+                            ],
+                            "ResultPath": null,
+                            "Next": "Sleep"
+                        },
+                        "Sleep": { "Type": "Wait", "Seconds": 60, "Next": "After" },
+                        "After": { "Type": "Task", "Resource": "ACTOR_PROBE", "OutputPath": "$.nothing", "End": true }
+                    }
+                }
+                """;
+            flowStore.registerFlow("t1", "flow-actor", "ActorProbe", probeFlow);
+
+            String executionId = engine.startExecution("t1", "flow-actor", probeFlow, Map.of(), "owner-1",
+                    ActorSource.OWNER, null, false);
+            awaitStatus(executionId, FlowExecutionData.STATUS_WAITING);
+            assertEquals(ActorSource.OWNER, flowStore.loadExecution(executionId).orElseThrow().startedBySource());
+            engine.resumeExecution(executionId);
+            awaitStatus(executionId, FlowExecutionData.STATUS_COMPLETED);
+
+            assertEquals(List.of("owner-1/OWNER", "owner-1/OWNER", "owner-1/OWNER"), seen);
+        }
+
+        @Test
+        @DisplayName("the actor source reaches the Tasks of every Map iteration and of an InvokeFlow target")
+        void actorSourceReachesMapIterationsAndInvokedFlows() throws Exception {
+            List<String> seen = Collections.synchronizedList(new ArrayList<>());
+            handlerRegistry.register(new ActionHandler() {
+                @Override
+                public String getActionTypeKey() { return "ACTOR_PROBE"; }
+
+                @Override
+                public ActionResult execute(ActionContext context) {
+                    seen.add(context.userId() + "/" + context.actorSource());
+                    return ActionResult.success(Map.of());
+                }
+            });
+            String targetFlow = """
+                {
+                    "StartAt": "InTarget",
+                    "States": { "InTarget": { "Type": "Task", "Resource": "ACTOR_PROBE", "End": true } }
+                }
+                """;
+            flowStore.registerFlow("t1", "flow-target", "Target", targetFlow);
+            String fanFlow = """
+                {
+                    "StartAt": "Each",
+                    "States": {
+                        "Each": {
+                            "Type": "Map",
+                            "ItemsPath": "$.items",
+                            "ResultPath": null,
+                            "Iterator": {
+                                "StartAt": "InItem",
+                                "States": { "InItem": { "Type": "Task", "Resource": "ACTOR_PROBE", "End": true } }
+                            },
+                            "Next": "Call"
+                        },
+                        "Call": { "Type": "InvokeFlow", "FlowId": "flow-target", "ResultPath": null, "End": true }
+                    }
+                }
+                """;
+            flowStore.registerFlow("t1", "flow-fan", "Fan", fanFlow);
+
+            String executionId = engine.startExecution("t1", "flow-fan", fanFlow,
+                    Map.of("items", List.of("a", "b")), "runas-1", ActorSource.RUN_AS, null, false);
+            awaitStatus(executionId, FlowExecutionData.STATUS_COMPLETED);
+
+            // Two Map iterations, then the invoked flow's Task: none turns the fallback into an initiator.
+            assertEquals(List.of("runas-1/RUN_AS", "runas-1/RUN_AS", "runas-1/RUN_AS"), seen);
         }
 
         @Test
         @DisplayName("startTriggeredExecution returns empty for an unknown flow")
         void triggeredExecutionOfUnknownFlowIsEmpty() {
-            assertTrue(engine.startTriggeredExecution("t1", "ghost", Map.of(), "u1", 1).isEmpty());
+            assertTrue(engine.startTriggeredExecution("t1", "ghost", Map.of(), "u1", null, 1).isEmpty());
             assertTrue(flowStore.getAllExecutions().isEmpty());
         }
 
@@ -1187,7 +1286,7 @@ class FlowEngineTest {
 
         private FlowExecutionData runToCompletion(String tenantId, String definitionJson) {
             String executionId = engine.startExecution(
-                tenantId, "f1", definitionJson, Map.of(), "u1", null, false);
+                tenantId, "f1", definitionJson, Map.of(), "u1", null, null, false);
             long deadline = System.currentTimeMillis() + 5000;
             while (System.currentTimeMillis() < deadline) {
                 Optional<FlowExecutionData> current = flowStore.loadExecution(executionId);
@@ -1261,11 +1360,11 @@ class FlowEngineTest {
 
         @Override
         public String createExecution(String tenantId, String flowId, String startedBy,
-                                      String triggerRecordId, Map<String, Object> initialInput,
-                                      boolean isTest) {
+                                      ActorSource startedBySource, String triggerRecordId,
+                                      Map<String, Object> initialInput, boolean isTest) {
             String id = UUID.randomUUID().toString();
             executions.put(id, new FlowExecutionData(
-                id, tenantId, flowId, FlowExecutionData.STATUS_RUNNING, startedBy,
+                id, tenantId, flowId, FlowExecutionData.STATUS_RUNNING, startedBy, startedBySource,
                 triggerRecordId, initialInput != null ? initialInput : Map.of(),
                 null, null, null, 0, null, initialInput, isTest, Instant.now(), null));
             stepLogs.put(id, new ArrayList<>());
@@ -1284,7 +1383,7 @@ class FlowEngineTest {
             if (existing != null) {
                 executions.put(executionId, new FlowExecutionData(
                     existing.id(), existing.tenantId(), existing.flowId(), status,
-                    existing.startedBy(), existing.triggerRecordId(), stateData,
+                    existing.startedBy(), existing.startedBySource(), existing.triggerRecordId(), stateData,
                     currentNodeId, existing.errorMessage(), existing.errorCode(), stepCount, existing.durationMs(),
                     existing.initialInput(), existing.isTest(), existing.startedAt(), null));
             }
@@ -1297,7 +1396,7 @@ class FlowEngineTest {
             if (existing != null) {
                 executions.put(executionId, new FlowExecutionData(
                     existing.id(), existing.tenantId(), existing.flowId(), status,
-                    existing.startedBy(), existing.triggerRecordId(), stateData,
+                    existing.startedBy(), existing.startedBySource(), existing.triggerRecordId(), stateData,
                     existing.currentNodeId(), errorMessage, null, stepCount, durationMs,
                     existing.initialInput(), existing.isTest(), existing.startedAt(), Instant.now()));
             }
@@ -1310,7 +1409,7 @@ class FlowEngineTest {
                 executions.put(executionId, new FlowExecutionData(
                     existing.id(), existing.tenantId(), existing.flowId(),
                     FlowExecutionData.STATUS_CANCELLED,
-                    existing.startedBy(), existing.triggerRecordId(), existing.stateData(),
+                    existing.startedBy(), existing.startedBySource(), existing.triggerRecordId(), existing.stateData(),
                     existing.currentNodeId(), null, null, existing.stepCount(), existing.durationMs(),
                     existing.initialInput(), existing.isTest(), existing.startedAt(), Instant.now()));
             }
