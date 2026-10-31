@@ -139,7 +139,7 @@ not a supported integration surface and may change without notice.
 | POST | `/api/ai/chat` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#the-panel) |
 | POST | `/api/ai/chat/stream` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#the-panel) |
 | GET | `/api/ai/config` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#requirements) |
-| PUT | `/api/ai/config` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#requirements) |
+| PUT | `/api/ai/config` | ai | API_ACCESS + MANAGE_TENANTS | [console/ai-assistant](/docs/console/ai-assistant/#requirements) |
 | GET | `/api/ai/conversations` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#the-panel) |
 | GET | `/api/ai/conversations/{id}` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#the-panel) |
 | GET | `/api/ai/conversations/{id}/messages` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#the-panel) |

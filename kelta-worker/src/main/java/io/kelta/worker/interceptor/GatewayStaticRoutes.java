@@ -45,7 +45,9 @@ public final class GatewayStaticRoutes {
             "migration-runs",
             "metadata", "config-health", "packages", "environments", "promotions",
             "docs", "files", "images", "operations", "devices",
-            "analytics", "wins");
+            "analytics", "wins",
+            // kelta-ai, registered by the gateway's RouteInitializer rather than RouteConfigService.
+            "ai");
 
     /**
      * A static route that fronts a system collection and is authorized against it

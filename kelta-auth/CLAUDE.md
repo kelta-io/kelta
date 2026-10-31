@@ -285,6 +285,16 @@ plain surefire here and skip without Docker.
 - `TotpService` — TOTP generation and verification
 - `MfaController` — enrollment and challenge pages
 - Session attributes: `SESSION_MFA_USER_ID`, `SESSION_MFA_PENDING`, `SESSION_MFA_SETUP_REQUIRED`
+- `service/LoginMfaPolicy` — the one rule for "which MFA step follows a correct password":
+  `CHALLENGE` for a verified TOTP enrollment, else `SETUP` when the tenant's
+  `password_policy.mfa_required` is set, else `NONE`. Used by the browser success handler
+  (`AuthorizationServerConfig`) and by `POST /auth/direct-login` (`DirectLoginController`), which has
+  no second step and so refuses any step with `401 {"error":"mfa_required"}` and no token. A new MFA
+  trigger goes here, or direct login becomes a way around it.
+- Direct login authenticates through the same global `AuthenticationManager` as the form, so its
+  wrong passwords count toward lockout (`AuthenticationEventListener`) and a locked account is
+  refused. Tests: `LoginMfaPolicyTest`, `DirectLoginControllerTest`,
+  `FailedSignInLockoutIntegrationTest` (Postgres).
 
 ### Error Handling
 Standard Spring Security exceptions (`AuthenticationException` hierarchy). No custom exception classes in this service.

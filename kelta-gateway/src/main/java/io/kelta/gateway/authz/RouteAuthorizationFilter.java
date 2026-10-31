@@ -303,6 +303,10 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
         // real collections — they only require the API_ACCESS check
         // above.  Skip the collection-level Cerbos check for them.
         if (isStaticRoute(route)) {
+            // Path-prefix rules test the path as the service behind the route matches it
+            // (percent-decoded): the raw path would let /api/ai/%63onfig past a
+            // /api/ai/config rule while kelta-ai still serves it as /api/ai/config.
+            String matchedPath = MatchedPath.of(path);
             // Designating a module signing key is a grant of code-execution
             // authority: a module JAR signed by a trusted key runs arbitrary Java in
             // the worker JVM (SandboxedModuleClassLoader allows java.* wholesale).
@@ -311,7 +315,7 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
             // at API_ACCESS: the keys are public, and the dependentModules count is
             // what makes a rotation safe to plan.
             if ("static-modules".equals(collectionId)
-                    && path.startsWith("/api/modules/signing-keys")
+                    && matchedPath.startsWith("/api/modules/signing-keys")
                     && StaticCollectionCheck.isWrite(method)) {
                 return cerbosService.checkSystemPermission(principal, "MANAGE_CREDENTIALS")
                         .map(allowed -> {
@@ -321,6 +325,25 @@ public class RouteAuthorizationFilter implements GlobalFilter, Ordered {
                                         principal.getUsername(), path);
                                 return new Deny(collectionName,
                                         "Insufficient permissions: MANAGE_CREDENTIALS required");
+                            }
+                            return new Allow(exchange, false);
+                        });
+            }
+            // AI settings writes (kelta-ai AiConfigController) require MANAGE_TENANTS, the
+            // platform-admin grant governor-limit writes carry: the monthly token quota, the
+            // AI on/off switch, the model and max tokens are platform controls. kelta-ai has
+            // no permission data of its own, so this is the gate. Reads stay at API_ACCESS.
+            // Not mirrored in the worker's GatewayStaticRoutes: /api/ai/** never reaches it.
+            if ("static-ai".equals(collectionId)
+                    && matchedPath.startsWith("/api/ai/config")
+                    && StaticCollectionCheck.isWrite(method)) {
+                return cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")
+                        .map(allowed -> {
+                            if (!allowed) {
+                                log.warn("User {} denied MANAGE_TENANTS for AI config write on path: {}",
+                                        principal.getUsername(), path);
+                                return new Deny(collectionName,
+                                        "Insufficient permissions: MANAGE_TENANTS required");
                             }
                             return new Allow(exchange, false);
                         });

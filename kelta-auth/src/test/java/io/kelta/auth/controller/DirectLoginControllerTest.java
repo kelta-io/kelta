@@ -2,6 +2,8 @@ package io.kelta.auth.controller;
 
 import io.kelta.auth.config.AuthProperties;
 import io.kelta.auth.model.KeltaUserDetails;
+import io.kelta.auth.service.PasswordPolicyService;
+import io.kelta.auth.service.TotpService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +30,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -49,6 +52,12 @@ class DirectLoginControllerTest {
     @Mock
     private Authentication authentication;
 
+    @Mock
+    private TotpService totpService;
+
+    @Mock
+    private PasswordPolicyService passwordPolicyService;
+
     private DirectLoginController controller;
 
     @BeforeEach
@@ -56,7 +65,8 @@ class DirectLoginControllerTest {
         AuthProperties props = new AuthProperties();
         props.getDirectLogin().setEnabled(true);
         props.setIssuerUri("https://auth.kelta.io");
-        controller = new DirectLoginController(authenticationManager, jwtEncoder, props);
+        controller = new DirectLoginController(authenticationManager, jwtEncoder, props,
+                totpService, passwordPolicyService);
 
         lenient().when(httpRequest.getRequestURI()).thenReturn("/auth/direct-login");
         lenient().when(httpRequest.getScheme()).thenReturn("https");
@@ -150,5 +160,65 @@ class DirectLoginControllerTest {
         // rejects this shape; its test builds a token with exactly these claims.
         assertThat((Object) refresh.getClaim("token_type")).isEqualTo("refresh");
         assertThat(refresh.getClaims()).doesNotContainKey("tenant_id");
+    }
+
+    private static KeltaUserDetails plainUser() {
+        return new KeltaUserDetails(
+                "user-1", "sbx-admin@kelta.local", "tenant-1", "profile-1", "Admin",
+                "Admin", "{bcrypt}hash", true, false, false);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> bodyOf(ResponseEntity<?> response) {
+        return (Map<String, Object>) response.getBody();
+    }
+
+    @Test
+    @DisplayName("refuses an account with a verified TOTP enrollment with 401 mfa_required and issues no token")
+    void enrolledAccountIsRefused() {
+        when(authenticationManager.authenticate(any())).thenReturn(authentication);
+        when(authentication.getPrincipal()).thenReturn(plainUser());
+        when(totpService.isEnrolled("user-1")).thenReturn(true);
+
+        ResponseEntity<?> response = controller.login(
+                new DirectLoginController.DirectLoginRequest("sbx-admin", "correct-password", "sbx"),
+                session, httpRequest);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(401);
+        assertThat(bodyOf(response)).containsEntry("error", "mfa_required");
+        assertThat((String) bodyOf(response).get("error_description")).contains("browser sign-in");
+        assertThat(bodyOf(response)).doesNotContainKeys("access_token", "id_token", "refresh_token");
+        verifyNoInteractions(jwtEncoder);
+    }
+
+    @Test
+    @DisplayName("refuses an unenrolled account when the tenant's password policy requires MFA")
+    void policyRequiredAccountIsRefused() {
+        when(authenticationManager.authenticate(any())).thenReturn(authentication);
+        when(authentication.getPrincipal()).thenReturn(plainUser());
+        when(totpService.isEnrolled("user-1")).thenReturn(false);
+        when(passwordPolicyService.isMfaRequired("tenant-1")).thenReturn(true);
+
+        ResponseEntity<?> response = controller.login(
+                new DirectLoginController.DirectLoginRequest("sbx-admin", "correct-password", "sbx"),
+                session, httpRequest);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(401);
+        assertThat(bodyOf(response)).containsEntry("error", "mfa_required");
+        verifyNoInteractions(jwtEncoder);
+    }
+
+    @Test
+    @DisplayName("a wrong password stays invalid_credentials — the MFA rule is asked only after the password matched")
+    void mfaIsNotConsultedForAWrongPassword() {
+        when(authenticationManager.authenticate(any())).thenThrow(new BadCredentialsException("Bad credentials"));
+
+        ResponseEntity<?> response = controller.login(
+                new DirectLoginController.DirectLoginRequest("sbx-admin", "wrong-password", "sbx"),
+                session, httpRequest);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(401);
+        assertThat(bodyOf(response)).containsEntry("error", "invalid_credentials");
+        verifyNoInteractions(totpService, passwordPolicyService, jwtEncoder);
     }
 }

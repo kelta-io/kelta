@@ -3,6 +3,8 @@ package io.kelta.auth.controller;
 import io.kelta.auth.config.AuthProperties;
 import io.kelta.auth.config.AuthorizationServerConfig;
 import io.kelta.auth.model.KeltaUserDetails;
+import io.kelta.auth.service.PasswordPolicyService;
+import io.kelta.auth.service.TotpService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import org.junit.jupiter.api.BeforeEach;
@@ -67,7 +69,8 @@ class ProvisionedAdminLoginTest {
         AuthProperties props = new AuthProperties();
         props.getDirectLogin().setEnabled(true);
         props.setIssuerUri("https://auth.kelta.io");
-        return new DirectLoginController(new ProviderManager(provider), jwtEncoder, props);
+        return new DirectLoginController(new ProviderManager(provider), jwtEncoder, props,
+                mock(TotpService.class), mock(PasswordPolicyService.class));
     }
 
     @SuppressWarnings("unchecked")

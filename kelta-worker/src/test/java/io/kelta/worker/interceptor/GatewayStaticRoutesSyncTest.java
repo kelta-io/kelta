@@ -40,7 +40,14 @@ class GatewayStaticRoutesSyncTest {
             gateway.add(m.group(1));
         }
 
-        assertThat(gateway).isNotEmpty();
+        // Auxiliary-service routes (kelta-ai) are registered by RouteInitializer.
+        Matcher aux = Pattern.compile("new RouteDefinition\\(\\s*\"static-[a-z-]+\",\\s*\"/api/([^/\"]+)/\\*\\*\"")
+                .matcher(read("config/RouteInitializer.java"));
+        while (aux.find()) {
+            gateway.add(aux.group(1));
+        }
+
+        assertThat(gateway).isNotEmpty().contains("ai");
         assertThat(new TreeSet<>(GatewayStaticRoutes.SEGMENTS)).isEqualTo(gateway);
     }
 
@@ -84,6 +91,9 @@ class GatewayStaticRoutesSyncTest {
             specialCased.add(m.group(1));
         }
 
+        // static-ai (/api/ai/config writes need MANAGE_TENANTS) is routed to kelta-ai, never to
+        // the worker, so no child-resource request here can be authorized by it.
+        specialCased.remove("static-ai");
         assertThat(specialCased).containsExactly(
                 "static-" + GatewayStaticRoutes.MODULES, "static-" + GatewayStaticRoutes.TENANTS);
         assertThat(source)

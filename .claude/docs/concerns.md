@@ -884,6 +884,13 @@ reconcile adds duplicates — `buildBoundedIdentifier` names them after the tabl
 worker and gateway, since direct SQL skips the `collection.changed` broadcast. A real rename
 feature would do this and publish the event.
 
+**Two sources for a tenant's AI token quota (open).** kelta-ai enforces `aiTokensPerMonth` and
+`aiEnabled` from its own `ai_config` rows (`TokenTrackingService`, `TokenLimitFilter`), written by
+`PUT /api/ai/config`. The worker's governor limits (`TenantTierQuotas`, `GovernorLimitsController`)
+carry tier `aiTokensPerMonth` / `aiEnabled` values of their own that kelta-ai never reads. Both writes need `MANAGE_TENANTS`, so
+neither is a tenant administrator's to raise, but the two values can disagree; the `ai_config` one
+is the one enforced. Folding one into the other is a design decision (which service owns quotas).
+
 **Feature flags that look dead but are not (2026-07-02 audit) — do not inline:**
 - `kelta.scheduler.enabled`, `kelta.bulk.processor.enabled` are `false` in
   `application-migrate.yml` so the PreSync migrate pod starts no background workers and exits.
@@ -1037,7 +1044,7 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 
 - **Static routes that share a path with a collection must be in
   `RouteRegistry.AUTHORITATIVE_STATIC_PATHS`** — member controllers (`/api/watches|wins|devices/**`)
-  and platform prefixes (`/api/modules|files|images|alerts/**`) — or a same-named collection's
+  and platform prefixes (`/api/modules|files|images|alerts|ai/**`) — or a same-named collection's
   generic route overwrites the `static-` route (portal members get 403; a tenant collection named
   `modules` captures the prefix). Not a blanket "static wins": config collections rely on their
   generic route's per-resource Cerbos.
@@ -1060,6 +1067,17 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 - **Error bodies are built from `JsonApiError.toMap()`**, never the bean — on native images the
   bean serializes as `{"errors":[{}]}` (runtime-core `GlobalExceptionHandler`, gateway
   `GlobalErrorHandler`).
+- **Path-prefix rules must test the decoded path.** Routing is on the raw path, while the Spring
+  MVC service behind a route matches percent-decoded segments. A prefix rule therefore tests the
+  matched form: `MatchedPath.of(path)` in the static-route special cases of
+  `RouteAuthorizationFilter`, and the same normalization in kelta-ai's `TokenLimitFilter`. Open:
+  `RouteRegistry.findByPath` and the `StaticCollectionCheck` exemptions still match the raw path;
+  move them to the matched form too.
+- **Gateway routes registered outside `RouteConfigService` need the same reservation.** `static-ai`
+  is registered by `RouteInitializer`; `/api/ai/**` is in `RouteRegistry.AUTHORITATIVE_STATIC_PATHS`
+  and `ai` in the worker's `GatewayStaticRoutes.SEGMENTS` (reserved collection name). Without both,
+  a tenant collection named `ai` would replace the static route for that tenant's authorization
+  while forwarding still went to kelta-ai. `GatewayStaticRoutesSyncTest.segments` reads both files.
 
 ### Storage, DDL and collection deletion
 
@@ -1150,6 +1168,23 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 - **Cerbos `collectionId` keying:** the `collection` policy is UUID-keyed (gateway passes the
   route id); the `record` policy keys on the collection **name** (`architecture.md`). Mixing them
   silently denies every record to non-admin profiles.
+- **The Cerbos Admin API password has no built-in default** (2026-10-31). The worker pushes
+  policies with `kelta.worker.cerbos.admin-password` (`KELTA_WORKER_CERBOS_ADMIN_PASSWORD`, declared
+  blank in `application.yml`). Blank: the worker still starts and gRPC checks keep answering from
+  what Cerbos already holds, but it logs one ERROR at startup, every tenant sync and base seed logs
+  an ERROR and pushes nothing, and `CerbosPolicySeeder` skips without writing its done-marker
+  (counter `cerbos.policy.seed.skipped{reason=admin-password-missing}`), so a later start with the
+  password seeds. Permission, profile and collection changes do not reach Cerbos until it is set.
+  **Deploy ordering: set `KELTA_WORKER_CERBOS_ADMIN_PASSWORD` in every environment whose Cerbos runs
+  the Admin API before deploying a worker with this change.** The dev, CI and harness Cerbos
+  (`docker/cerbos/config.yaml`, disk store, no Admin API) push nothing either way; there the ERROR is
+  expected.
+- **Direct login and MFA must agree with the browser sign-in.** `POST /auth/direct-login` refuses
+  (`401 mfa_required`) every account the browser flow would send to an MFA step, by calling the same
+  `LoginMfaPolicy` as `AuthorizationServerConfig`'s success handler. A new MFA trigger (a per-profile
+  policy, say) goes into `LoginMfaPolicy`, or direct login becomes a way around it. A direct login
+  for a user with no profile fails building the token (a null `profile_id` claim → 500); seeded and
+  invited users always have one.
 - **Every Cerbos decision cache key must carry `:geo:<country>`** wherever geo can influence a
   decision (gateway system/object caches, worker field-access + collection-wide record caches) —
   dropping it reintroduces cross-location stale allows. New caches too.
@@ -1370,6 +1405,9 @@ One line each; full write-ups are in git history.
 
 **Security**
 - 2026-10-31 (write-path-tenant-scope) — the record write path kept a body `tenantId` that differed from the request's tenant (`RecordTenantScope.injectTenantId` is `putIfAbsent` and a no-op on user collections), and `DefaultQueryEngine.extractTenantId` preferred that value over the bound `TenantContext`, so before/after-save hooks (tenant-installed module hooks included) and the record-changed event could be selected by the payload; only RLS stopped the row. The write path now refuses a body `tenantId` that differs from the request's tenant (router create/PUT/PATCH incl. sub-resources, `/api/operations` add and update, and the engine itself; `400 systemMaintained` on `tenantId`), and hooks always run for the bound tenant. Separately, `collections.systemCollection` was writable by API callers and exempted a create from `ReservedCollectionNameHook`; `CollectionLifecycleHook` now refuses `systemCollection: true` on create and any change of it on update (`400 systemMaintained`), and the reserved-name check trusts only the stored row's flag. `DefaultQueryEngineWriteTenantTest`, `DynamicCollectionRouterSystemCollectionTest`, `AtomicOperationExecutorTest`, router goldens `*_foreign_tenant`, `CollectionLifecycleHookTest`, `ReservedCollectionNameHookTest`, harness `WriteTenantScopeScenarioTest`.
+- 2026-10-31 (auth-config-hardening) — direct login now refuses accounts that require MFA: `POST /auth/direct-login` answers `401 mfa_required` for a verified TOTP enrollment or a tenant policy that requires MFA (`LoginMfaPolicy`, shared with the browser success handler); failed attempts and lockout were already shared with the browser form (global `AuthenticationManager` events). `DirectLoginControllerTest`, `LoginMfaPolicyTest`, `FailedSignInLockoutIntegrationTest`.
+- 2026-10-31 (auth-config-hardening) — AI config writes now require `MANAGE_TENANTS` and accept only known keys: the gateway gates writes on `/api/ai/config` (decoded path, `MatchedPath`), `/api/ai/**` is an authoritative static path and `ai` a reserved collection name, and `AiConfigController` accepts `model`, `maxTokens`, `temperature`, `aiTokensPerMonth`, `aiEnabled` with type and range checks (`400 VALIDATION_FAILED` otherwise, nothing written). The module signing-key rule uses the decoded path too. `RouteAuthorizationFilterTest`, `MatchedPathTest`, `RouteRegistryTest`, `AiConfigControllerTest`.
+- 2026-10-31 (auth-config-hardening) — the Cerbos admin password has no built-in default: `KELTA_WORKER_CERBOS_ADMIN_PASSWORD` must be set (deploy ordering above, Auth and Cerbos); blank skips every policy push with an ERROR instead. `CerbosPolicySyncAdminPasswordTest`, `CerbosPolicySeederTest`.
 - 2026-10-31 (custom-rule-policy-generation) — profile custom rules: a stored `deny` compiles to `EFFECT_DENY`, the rule's CEL sits in parentheses under its collection guard, visual values are escaped CEL literals and `in` becomes a list; `CustomRuleController` validates effect, action, operator, value shape and CEL syntax at save (`400 VALIDATION_FAILED`) and writes only into the bound tenant (`architecture.md` → Custom rules). `CustomRuleCelTest`, `CustomRuleControllerTest`, `CerbosPolicyGeneratorTest`, `CerbosGeneratedPolicyIT`.
 - 2026-10-26 (PLT-826) — validation-rule reloads failed open: a DB error while loading a collection's rules registered an empty set (validation off until the next reload), deleting a rule broadcast nothing (other pods kept enforcing it), and a system collection first loaded inside one tenant's request registered only that tenant's rules (the rest went unvalidated until an unbound reload). Now a failed load keeps the previous rules (`ValidationRuleRegistry.markLoadFailed`/`markSystemCollectionLoadFailed`) and a collection whose rules never loaded refuses writes with 503 (`RulesUnavailableException`) until a load succeeds; `ValidationRuleRefreshHook` captures the rule's `collection_id` in `beforeDelete` and publishes the same `collection.changed` event on delete; `CollectionLifecycleManager` initialize (and a refresh of a never-fully-loaded system collection) reads every tenant's rules, off the bound `ScopedValue` scope on a fresh virtual thread so RLS selects `admin_bypass`, while a tenant-bound refresh still replaces only that tenant's set; a tenant-owned collection loaded while another tenant is bound reads its owner's rules the same way instead of skipping the load. `CollectionLifecycleManagerValidationRuleLoadFailureTest`, `ValidationRuleRefreshHookTest`, `ValidationRuleRegistryTest`. Still open: a delete whose `beforeDelete` lookup fails is logged and not broadcast (other pods keep the rule until the collection's next refresh).
 - 2026-10-25 (KLT-790) — deleting a collection unregistered it from each pod's `ConcurrentCollectionRegistry` by bare name, whose fallback removes the first entry with that name in any tenant: deleting tenant A's `orders` could drop tenant B's, so B's `/api/orders` 404'd on that pod until restart (the likely cause of the PR #2011 `ChildResourceScopingScenarioTest` failure: `/orders` never answered 200 in its 20 s wait). `CollectionLifecycleManager.teardownCollection` now unregisters the definition's `registryKey()`. `CollectionLifecycleManagerTeardownTest`. `ValidationRuleRegistry` was keyed by bare name too; resolved by kelta#2046 (keyed by tenant).

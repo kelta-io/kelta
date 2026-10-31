@@ -12,8 +12,13 @@ its own.
 ## Requirements
 
 - The `kelta-ai` service deployed with an `ANTHROPIC_API_KEY` ([Configuration](/docs/deploy/configuration/)).
-- `aiEnabled` and a monthly `aiTokensPerMonth` budget on the tenant's [governor limits](/docs/platform/governor-limits/).
-- Tenant settings at `/ai-settings` (`GET|PUT /api/ai/config`): model, max tokens, temperature.
+- AI settings at `/ai-settings` (`GET|PUT /api/ai/config`): `model`, `maxTokens`, `temperature`, the monthly
+  `aiTokensPerMonth` budget and the `aiEnabled` switch. The assistant enforces the budget and the switch stored
+  here, not the AI values on the tenant's [governor limits](/docs/platform/governor-limits/). Changing them needs
+  `MANAGE_TENANTS`, the platform-administrator permission; reading them needs only API access. A `PUT` accepts
+  only those five keys: `maxTokens` and `aiTokensPerMonth` are positive whole numbers, `temperature` is from 0
+  to 1 and `aiEnabled` is `true` or `false`. Anything else is a `400 VALIDATION_FAILED` naming the key, and
+  nothing is changed.
 
 ## The panel
 
