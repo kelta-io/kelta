@@ -73,6 +73,9 @@ no default (the service fails to start, or the feature stays off). Defaults that
 | `KELTA_MODULES_SIGNING_REQUIRED` | `false` | **Set `true`** in production ([Modules](/docs/platform/modules/)) |
 | `KELTA_MODULES_SIGNING_PUBLIC_KEY`, `KELTA_MODULES_SIGNING_ALGORITHM` | —, `Ed25519` | Legacy platform-wide signing anchor (prefer per-tenant keys) |
 | `KELTA_MODULES_STUB_MODE` | `false` | Development only |
+| `KELTA_MODULE_SIGNING_KEY` | — | PKCS#8 PEM P-256 key(s) the platform signs [external-module](/docs/platform/modules/#external-modules-installed-by-url) requests with; the first signs, all are published at `/api/modules/.well-known/jwks.json`. Blank blocks external installs |
+| `KELTA_MODULE_ISSUER` | `${EXTERNAL_BASE_URL}/api/modules` | `iss` of those assertions |
+| `KELTA_MODULE_ALLOWED_HOSTS` | — | External-module hosts allowed `http` and private addresses (hostnames or `*.suffix`); module traffic only, never widens `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` |
 | `LOKI_URL`, `TEMPO_URL`, `MIMIR_URL` | — | Backends the console's monitoring pages query for logs, traces and metrics |
 | `CAMPAIGN_*`, `KELTA_MAILBOX_*`, `KELTA_TELEHEALTH_VISIT_SECRET`, `KELTA_LIVEKIT_*`, `TELEHEALTH_REMINDER*`, `KELTA_WATCH_PROMOTABLE_SOURCES` | — | Optional feature areas (campaigns, support mailboxes, telehealth video, availability watches). Some HMAC secrets fail startup when unset — see `.env.example` |
 

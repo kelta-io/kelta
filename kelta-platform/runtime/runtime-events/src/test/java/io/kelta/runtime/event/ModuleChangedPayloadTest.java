@@ -100,11 +100,12 @@ class ModuleChangedPayloadTest {
 
         @Test
         void shouldHaveAllExpectedValues() {
-            assertEquals(4, ModuleChangeType.values().length);
+            assertEquals(5, ModuleChangeType.values().length);
             assertNotNull(ModuleChangeType.valueOf("INSTALLED"));
             assertNotNull(ModuleChangeType.valueOf("ENABLED"));
             assertNotNull(ModuleChangeType.valueOf("DISABLED"));
             assertNotNull(ModuleChangeType.valueOf("UNINSTALLED"));
+            assertNotNull(ModuleChangeType.valueOf("UPGRADED"));
         }
     }
 
