@@ -37,13 +37,15 @@ public class JdbcModuleStore implements ModuleStore {
             INSERT INTO tenant_module
                 (id, tenant_id, module_id, name, version, description, source_url,
                  jar_checksum, jar_size_bytes, module_class, manifest, status,
-                 installed_by, s3_key, installed_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, NOW(), NOW())
+                 installed_by, s3_key, base_url, protocol_version, connected_app_id,
+                 service_user_id, installed_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
             """,
             id, data.tenantId(), data.moduleId(), data.name(), data.version(),
             data.description(), data.sourceUrl(), data.jarChecksum(), data.jarSizeBytes(),
             data.moduleClass(), data.manifest(), data.status(), data.installedBy(),
-            data.s3Key());
+            data.s3Key(), data.baseUrl(), data.protocolVersion(), data.connectedAppId(),
+            data.serviceUserId());
         return id;
     }
 
@@ -173,6 +175,41 @@ public class JdbcModuleStore implements ModuleStore {
     }
 
     @Override
+    public void updateStatusWithError(String id, String status, String error) {
+        jdbcTemplate.update(
+            "UPDATE tenant_module SET status = ?, last_error = ?, "
+                + "last_error_at = CASE WHEN ?::text IS NULL THEN last_error_at ELSE NOW() END, "
+                + "updated_at = NOW() WHERE id = ?",
+            status, error, error, id);
+    }
+
+    @Override
+    public void updateServicePrincipal(String id, String connectedAppId, String serviceUserId) {
+        jdbcTemplate.update(
+            "UPDATE tenant_module SET connected_app_id = ?, service_user_id = ?, updated_at = NOW() "
+                + "WHERE id = ?",
+            connectedAppId, serviceUserId, id);
+    }
+
+    @Override
+    public void updateExternalManifest(String id, String version, String name, String description,
+                                       String manifestJson, int protocolVersion) {
+        jdbcTemplate.update("""
+            UPDATE tenant_module
+               SET version = ?, name = ?, description = ?, manifest = ?::jsonb,
+                   protocol_version = ?, updated_at = NOW()
+             WHERE id = ?
+            """,
+            version, name, description, manifestJson, protocolVersion, id);
+    }
+
+    @Override
+    public void replaceActions(String moduleRowId, List<TenantModuleData.TenantModuleActionData> actions) {
+        jdbcTemplate.update("DELETE FROM tenant_module_action WHERE tenant_module_id = ?", moduleRowId);
+        createActions(actions);
+    }
+
+    @Override
     public void deleteModule(String id) {
         // Actions are cascade-deleted via FK
         jdbcTemplate.update("DELETE FROM tenant_module WHERE id = ?", id);
@@ -190,12 +227,7 @@ public class JdbcModuleStore implements ModuleStore {
         List<TenantModuleData.TenantModuleActionData> actions = jdbcTemplate.query(
             "SELECT * FROM tenant_module_action WHERE tenant_module_id = ? ORDER BY action_key",
             this::mapAction, module.id());
-        return new TenantModuleData(
-            module.id(), module.tenantId(), module.moduleId(), module.name(),
-            module.version(), module.description(), module.sourceUrl(),
-            module.jarChecksum(), module.jarSizeBytes(), module.moduleClass(),
-            module.manifest(), module.status(), module.installedBy(),
-            module.installedAt(), module.updatedAt(), module.s3Key(), actions);
+        return module.withActions(actions);
     }
 
     private TenantModuleData mapModule(ResultSet rs, int rowNum) throws SQLException {
@@ -216,7 +248,11 @@ public class JdbcModuleStore implements ModuleStore {
             toInstant(rs.getTimestamp("installed_at")),
             toInstant(rs.getTimestamp("updated_at")),
             rs.getString("s3_key"),
-            List.of() // Actions loaded separately
+            List.of(), // Actions loaded separately
+            rs.getString("base_url"),
+            rs.getObject("protocol_version") != null ? rs.getInt("protocol_version") : null,
+            rs.getString("connected_app_id"),
+            rs.getString("service_user_id")
         );
     }
 

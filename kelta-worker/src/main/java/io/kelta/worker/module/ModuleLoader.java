@@ -201,6 +201,14 @@ final class ModuleLoader {
      * @param module the module data
      */
     public void loadModule(String tenantId, TenantModuleData module) {
+        if (module.isExternal()) {
+            // An external module runs out of process: there is nothing to classload or verify on
+            // a pod, and quarantining it for having no JAR would write a status every pod honours.
+            // Its remote handlers are registered from the module's rows (part 9d).
+            log.debug("Module '{}' for tenant {} is external; nothing to load on this pod",
+                module.moduleId(), tenantId);
+            return;
+        }
         Set<String> loaded = loadedModules.computeIfAbsent(tenantId, k -> ConcurrentHashMap.newKeySet());
         if (loaded.contains(module.moduleId())) {
             log.debug("Module '{}' already loaded for tenant {}", module.moduleId(), tenantId);

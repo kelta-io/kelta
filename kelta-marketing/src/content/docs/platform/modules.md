@@ -80,6 +80,45 @@ Stub mode (`KELTA_MODULES_STUB_MODE`) exists for development only.
 Uninstall unloads the module but keeps the collections and data it created; reinstalling skips collections that
 already exist.
 
+## External modules (installed by URL)
+
+An **external module** is an HTTPS service instead of a JAR. It publishes a v2 manifest at
+`{baseUrl}/.well-known/kelta-module.json` and is installed by URL, in two steps: review a plan, then approve it by
+its hash.
+
+```http
+POST   /api/modules/plan                      { "baseUrl": "https://…" }   (the plan and its planHash; writes nothing)
+POST   /api/modules/install                   { "baseUrl": "https://…", "planHash": "…" }
+POST   /api/modules/{id}/upgrade              { "planHash": "…" }
+GET    /api/modules/{id}/uninstall-plan?purgeData=false
+DELETE /api/modules/{id}?planHash=…&purgeData=false
+```
+
+- The plan lists what the module asks for and anything that blocks it:
+  - object, field and system permissions;
+  - the collections and fields its metadata creates or adopts.
+
+  The status codes are:
+  - `200`: the plan itself, even when it has blockers.
+  - `409 PlanChanged`: install, upgrade or uninstall with a `planHash` that no longer matches. Nothing is written, and the fresh plan is in `meta.plan`.
+  - `422`: a plan with blockers, one error per blocker.
+  - `502 ModuleUnreachable`: the module could not be reached.
+- Install provisions the metadata and creates the module's **service user**. It is a `SERVICE` user whose profile
+  holds exactly the granted permissions, and it cannot sign in. Install then calls the module's `lifecycle` endpoint.
+  If that call fails, the install is `FAILED`, and `POST /api/modules/{id}/enable` retries it.
+- Every request the platform sends a module carries:
+  - an ES256-signed assertion, as `Authorization: Bearer …`;
+  - the service user's access token, as `Kelta-Access-Token`.
+
+  The module verifies the assertion against the public keys at `GET /api/modules/.well-known/jwks.json`.
+- Upgrade needs a strictly higher `version` and regenerates the service user's profile.
+- Uninstall removes only what the module created and nobody has changed since. Collections that hold data are kept
+  unless `purgeData=true`. The service user is deactivated.
+- A module host must be public `https`, unless the operator lists it in `KELTA_MODULE_ALLOWED_HOSTS`. Redirects
+  are never followed.
+
+The platform does not yet call an external module's actions, hooks, routes or webhook.
+
 ## What a module can contribute
 
 | Contribution | Mechanism |

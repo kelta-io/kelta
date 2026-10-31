@@ -84,6 +84,9 @@ public class ModuleEventListener {
                     // pod but one, while /api/modules still reported ACTIVE.
                     case DISABLED, UNINSTALLED ->
                         runtimeModuleManager.unloadModule(tenantId, moduleId);
+                    // Only external modules upgrade in place, and nothing of theirs is loaded on
+                    // a pod yet (part 9d's endpoint registry refreshes from the row instead).
+                    case UPGRADED -> log.debug("Module '{}' upgraded for tenant {}", moduleId, tenantId);
                 }
             });
         } catch (Exception e) {

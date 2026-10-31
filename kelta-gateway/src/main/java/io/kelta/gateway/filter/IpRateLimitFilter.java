@@ -66,7 +66,9 @@ public class IpRateLimitFilter implements GlobalFilter, Ordered {
      * IPs, so a tight bucket would drop legitimate deliveries rather than abuse.
      * Operators can exempt those ranges outright via {@code exempt-cidrs}.
      * {@code /api/modules/webhooks} carries the same shape of traffic for
-     * runtime-installed modules and gets the same budget.
+     * runtime-installed modules and gets the same budget. {@code /api/modules/.well-known}
+     * is the external-module signing JWKS: modules cache it (it is served with a 5-minute
+     * {@code max-age}), so a tighter budget only ever slows a misbehaving fetcher.
      *
      * <p>{@code /api/webhooks} covers unauthenticated flow webhooks
      * ({@code POST /api/webhooks/{flowId}}), where each call starts a flow run; it
@@ -82,8 +84,8 @@ public class IpRateLimitFilter implements GlobalFilter, Ordered {
      * budgets are enforced by kelta-auth's own {@code PortalPublicRateLimitFilter}.
      */
     static final String DEFAULT_IP_PATHS =
-            "/actuator/health=100,/api/modules/webhooks=300,/api/webhooks=300,"
-                    + "/api/webhooks/mail=600,/api/webhooks/ses=600";
+            "/actuator/health=100,/api/modules/webhooks=300,/api/modules/.well-known=120,"
+                    + "/api/webhooks=300,/api/webhooks/mail=600,/api/webhooks/ses=600";
 
     /** path prefix -> requests permitted per window, longest prefix first. */
     private final Map<String, Integer> pathBudgets;

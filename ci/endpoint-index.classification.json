@@ -117,6 +117,8 @@
     "* /api/modules": { "docs": "/docs/platform/modules/#installing" },
     "* /api/modules/install": { "docs": "/docs/platform/modules/#installing" },
     "* /api/modules/install-jar": { "docs": "/docs/platform/modules/#installing" },
+    "POST /api/modules/plan": { "docs": "/docs/platform/modules/#external-modules-installed-by-url" },
+    "GET /api/modules/.well-known/jwks.json": { "docs": "/docs/platform/modules/#external-modules-installed-by-url" },
     "* /api/modules/{moduleId}/**": { "docs": "/docs/platform/modules/#installing" },
     "GET /api/modules/{moduleId}/ui-bundle.js": { "docs": "/docs/sdk/plugin-sdk/#how-plugins-load-in-the-app" },
     "* /api/modules/{moduleId}/x/**": { "docs": "/docs/platform/modules/#what-a-module-can-contribute" },

@@ -1,7 +1,8 @@
 # Slice 9 — External Modules: Out-of-Process Add-Ons over HTTP
 
 > **Status:** 🟡 **In progress** — 9a (spec + contract) merged 2026-10-30; 9b (service principal)
-> built 2026-10-30, not yet called by install. Planning spec for replacing the
+> built 2026-10-30; 9c (install by URL) built 2026-10-30 — external modules install, upgrade and
+> uninstall, but nothing invokes them until 9d. Planning spec for replacing the
 > in-process JAR module path with modules that run as **separate HTTP services, in any language**.
 > The machine-readable protocol contract is
 > [`docs/module-protocol/openapi.yaml`](../../../../docs/module-protocol/openapi.yaml); this
@@ -79,7 +80,7 @@ by hash at install so a running module cannot swap it later (§3.9).
 |---|---|---|---|
 | 9a | Protocol contract + this spec (docs only) | — | — |
 | 9b | Module service principal: `SERVICE` user type, manifest-generated profile, client_credentials token resolves to it — **built** (V220, `ModuleServicePrincipalService`; install does not call it until 9c) | **yes, no auto-merge** | 9a |
-| 9c | Registry + install by URL: manifest v2 parser, plan/consent, metadata provisioning, worker signing key + JWKS, `KELTA_MODULE_ALLOWED_HOSTS` | **yes, no auto-merge** | 9b |
+| 9c | Registry + install by URL: manifest v2 parser, plan/consent, metadata provisioning, worker signing key + JWKS, `KELTA_MODULE_ALLOWED_HOSTS` — **built** (V221, `ExternalModuleService`, `ExternalModulePlanner`, `ModuleUninstaller`, `ModuleAssertionSigner`, `ModuleHostGuard`). Deferred: UI bundle pinning (9e), schedule registration (9d), `settings` validation (column only) | **yes, no auto-merge** | 9b |
 | 9d | Invocation layer: remote actions, before-save hooks, service ports, route + webhook proxies, schedules, timeouts, circuit breaker, `DEGRADED`, metrics | **yes, no auto-merge** | 9c |
 | 9e | Event delivery (NATS → HTTP) + UI bundle pinning + Modules page install-by-URL and consent screen | — | 9d |
 | 9f | Rust billing module + `kelta-module` Rust SDK; cut the prod tenant over | — | 9e |
@@ -289,9 +290,10 @@ All on the existing `ModuleController`, gated on `CUSTOMIZE_APPLICATION` as toda
 | Endpoint | Behavior |
 |---|---|
 | `POST /api/modules/plan` `{ "baseUrl": "…", "purgeData": false }` | Fetches the manifest (through the module-host guard, §3.10), validates it, dry-runs `metadata` through `ModuleMetadataProvisioner`, diffs against the installed version if any, and returns the plan: grants (objects/fields/system/credentials), capabilities (hooks/events/services/routes/schedules/UI), metadata (create/adopt/keep), blockers, and `planHash` |
-| `POST /api/modules/install` `{ "baseUrl": "…", "planHash": "…" }` | Recomputes the plan; refuses with `409` and the new plan when `planHash` differs. Otherwise: creates the service principal (§3.3), provisions metadata (provenance rows as slice 2), fetches and pins the UI bundle (§3.9), registers schedules, writes `tenant_module` with `base_url`, then calls the module's `lifecycle` (`installed`). A non-2xx from `lifecycle` marks the install `FAILED` with `last_error`; metadata stays (provisioning is idempotent) and `POST /{id}/enable` retries |
+| `POST /api/modules/install` `{ "baseUrl": "…", "planHash": "…" }` | Recomputes the plan; refuses with `409` and the new plan when `planHash` differs. Otherwise: creates the service principal (§3.3), provisions metadata (provenance rows as slice 2), fetches and pins the UI bundle (§3.9), registers schedules, writes `tenant_module` with `base_url`, then calls the module's `lifecycle` (`installed`). A non-2xx from `lifecycle` marks the install `FAILED` with `last_error`; metadata stays (provisioning is idempotent) and `POST /{id}/enable` retries. *As built (9c):* the row is written `INSTALLING` first, metadata is provisioned **before** the principal (its grants include full access to the collections the module just `CREATED`, so their ids must exist), then action rows, `lifecycle`, and `ACTIVE` + the event; blockers are `422`, an unreachable module `502` |
 | `POST /api/modules/{id}/upgrade` `{ "planHash": "…" }` | Same, from the stored `base_url`; requires a strictly higher `version`; regenerates the profile; `lifecycle` (`upgraded`, with `fromVersion`) |
 | `POST /api/modules/{id}/enable` / `disable` | Status change + `lifecycle`; disable stops all invocations |
+| `GET /api/modules/{id}/uninstall-plan?purgeData=…` | (9c) What `DELETE` would remove and keep, one decision per provenance row (slice 3 §3.5 table), and its `planHash`. Writes nothing |
 | `DELETE /api/modules/{id}?purgeData=…&planHash=…` | `lifecycle` (`uninstalled`, best effort), removes schedules, deactivates the connected app and the service user, removes `CREATED` resources whose `content_hash` still matches (slice 3 §3.5 contract) |
 
 Every state change publishes `kelta.config.module.changed.<tenantId>.<moduleId>`
@@ -412,8 +414,9 @@ None in 9a. Later parts, numbered at their own head+1 when written (head is **V2
 - 9b (V220, built): `platform_user_user_type_check` gains `SERVICE`; `connected_app.run_as_user_id`
   (FK `platform_user`) and `connected_app.client_secret_enc` (the kept secret, moved here from
   `tenant_module`).
-- 9c: the `tenant_module` columns in §3.11; `scheduled_jobs` accepts `MODULE_ACTION` if a check
-  constraint limits `job_type`.
+- 9c (V221, built): the `tenant_module` columns in §3.11 (`jar_checksum`, `module_class` drop
+  `NOT NULL`; `s3_key`, `jar_signature` already allowed it), `version` widened to 64, and
+  `scheduled_job.chk_job_type` accepts `MODULE_ACTION`.
 - 9e: `module_event_dead_letter`.
 - 9g: drop the JAR columns and `tenant_module_signing_key` (V186), and remove `QUARANTINED`/`STUB`
   from `chk_module_status` once no row holds them.
@@ -428,7 +431,7 @@ Later parts, representative files (each part's PR lists all):
 | Part | Files |
 |---|---|
 | 9b | `kelta-auth/.../service/ConnectedAppRegisteredClientRepository.java`, `KeltaTokenCustomizer.java`; `kelta-gateway/.../UserIdentityResolutionFilter.java`, `authz/RouteAuthorizationFilter.java`; worker `CerbosPolicyGenerator.java`, new `ModuleServicePrincipalService`; user listing / governor-limit counting to exclude `SERVICE` |
-| 9c | `runtime-core/.../module/ModuleManifest.java` + `ModuleManifestParser.java` (v2), `ModuleController.java`, `ModuleInstaller.java`, `ModuleMetadataProvisioner.java`, new `ModuleAssertionSigner` + JWKS endpoint, `runtime-core/.../outbound/OutboundUrlGuard.java` (module-host mode), gateway `application.yml` `unauthenticated-paths` += `/api/modules/.well-known` |
+| 9c | (as built) runtime-core: new `ExternalModuleManifest`, `ModuleVersion`, `ModuleManifestParser.parseExternal` (v2), new `outbound/ModuleHostGuard` + `OutboundTargetGuard` (so `OutboundHttpClient` takes either guard); worker: `ModuleController.java`, `ModuleMetadataProvisioner.java` (plan/provision with ownership), new `ModuleAssertionSigner`, `ModuleJwksController`, `ModuleHttpClient`, `ModuleAccessTokenService`, `ExternalModulePlanner`, `ExternalModuleService`, `ModuleUninstaller`, `PlatformVersion`; `ModuleServicePrincipalService.updatePermissions`; `CollectionDeletionGuardHook.FORCE`; gateway `application.yml` `unauthenticated-paths` += `/api/modules/.well-known/jwks.json` (the file, not the directory) |
 | 9d | new `RemoteActionHandler`, `RemoteBeforeSaveHook`, `ModuleHttpClient` (assertion, token, timeouts, breaker, metrics); `ModuleRegistrar.java`, `ModuleHttpController.java`, `ModuleWebhookController.java`, `ModuleEntitlementService.java`, `ScheduledJobExecutorService.java` |
 | 9e | new `ModuleEventDeliveryListener` (beside `RecordWebhookPublisher.java`), `NatsSubscriptionConfig.java`; `ModuleController.java` (bundle pin); `kelta-ui/app/src/pages/ModulesPage/` (install by URL, consent, settings form) |
 | 9f | `kelta-modules/billing/` (Rust, replaces the Java module), new `kelta-modules/sdk-rust/`; homelab-argo manifests (outside this repo) |
@@ -456,7 +459,11 @@ beans.
   module token cannot read a collection it was not granted (Cerbos), across RLS. 9b ships
   `ModuleServicePrincipalScenarioTest` (token claims, granted read/write audited as the user, a
   profile-permission refusal, tenant confinement, plain-app token unchanged, inactive user, seat
-  count, no sign-in). The stack's Cerbos is allow-all and its gateway runs with
+  count, no sign-in). 9c ships `ExternalModuleInstallScenarioTest` (WireMock module: plan →
+  install with `planHash` → owned collection exists → the principal's `Kelta-Access-Token` reads
+  its grant and owned collection and is refused `VIEW_SETUP` → the lifecycle assertion verifies
+  against the anonymous JWKS → uninstall plan + `DELETE` remove the collection and deactivate the
+  principal; a changed manifest is `409 PlanChanged`). The stack's Cerbos is allow-all and its gateway runs with
   `PERMISSIONS_ENABLED=false`, so the object-permission deny is proven on a real PDP by
   `CerbosGeneratedPolicyIT.moduleServicePrincipalReadsOnlyItsGrant` and the plain-app 403 by
   `RouteAuthorizationFilterTest.connectedAppTokenShapes`.

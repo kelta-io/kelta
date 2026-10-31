@@ -49,7 +49,7 @@ it before routing.
 `internal` marks an endpoint only the platform's own admin UI or services call; it is reachable, but
 not a supported integration surface and may change without notice.
 
-**405** public endpoints: **313** linked to docs, **29** internal,
+**409** public endpoints: **317** linked to docs, **29** internal,
 **63** not yet documented.
 
 ## Endpoints
@@ -273,8 +273,10 @@ not a supported integration surface and may change without notice.
 | GET | `/api/migrations/versions` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/environments-and-promotion](/docs/platform/environments-and-promotion/#schema-migrations) |
 | POST | `/api/migrations/{runId}/rollback` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/environments-and-promotion](/docs/platform/environments-and-promotion/#schema-migrations) |
 | GET | `/api/modules` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#installing) |
+| GET | `/api/modules/.well-known/jwks.json` | worker | none (unauthenticated) | [platform/modules](/docs/platform/modules/#external-modules-installed-by-url) |
 | POST | `/api/modules/install` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#installing) |
 | POST | `/api/modules/install-jar` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#installing) |
+| POST | `/api/modules/plan` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#external-modules-installed-by-url) |
 | GET | `/api/modules/signing-keys` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#signing) |
 | POST | `/api/modules/signing-keys` | worker | API_ACCESS + MANAGE_CREDENTIALS | [platform/modules](/docs/platform/modules/#signing) |
 | DELETE | `/api/modules/signing-keys/{id}` | worker | API_ACCESS + MANAGE_CREDENTIALS | [platform/modules](/docs/platform/modules/#signing) |
@@ -288,6 +290,8 @@ not a supported integration surface and may change without notice.
 | GET | `/api/modules/{moduleId}/health` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#installing) |
 | GET | `/api/modules/{moduleId}/provisioned-resources` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#installing) |
 | GET | `/api/modules/{moduleId}/ui-bundle.js` | worker | API_ACCESS | [sdk/plugin-sdk](/docs/sdk/plugin-sdk/#how-plugins-load-in-the-app) |
+| GET | `/api/modules/{moduleId}/uninstall-plan` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#installing) |
+| POST | `/api/modules/{moduleId}/upgrade` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#installing) |
 | GET | `/api/modules/{moduleId}/x/**` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#what-a-module-can-contribute) |
 | POST | `/api/modules/{moduleId}/x/**` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#what-a-module-can-contribute) |
 | PUT | `/api/modules/{moduleId}/x/**` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#what-a-module-can-contribute) |

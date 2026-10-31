@@ -31,7 +31,7 @@ import java.util.Locale;
  * with timeouts and a response-size limit. The check resolves the host itself; see
  * {@link OutboundHttpClient} for how that relates to the address the connection uses.
  */
-public class OutboundUrlGuard {
+public class OutboundUrlGuard implements OutboundTargetGuard {
 
     /** Comma-separated CIDRs (or bare addresses) that are reachable despite being non-public. */
     public static final String ALLOWED_CIDRS_PROPERTY = "kelta.outbound.allowed-private-cidrs";
@@ -52,6 +52,7 @@ public class OutboundUrlGuard {
      *
      * @throws RejectedUrlException with a caller-safe reason when it may not
      */
+    @Override
     public URI check(String url) {
         if (url == null || url.isBlank()) {
             throw new RejectedUrlException(Reason.INVALID_URL, "no URL");

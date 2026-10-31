@@ -60,6 +60,16 @@ public class CollectionDeletionGuardHook implements BeforeSaveHook {
     private static final String FORCE_PARAM = "force";
 
     /**
+     * Platform code's explicit answer to "is this delete forced?", for deletes that run on a
+     * request thread but are not the request's own (a module uninstall removing what the module
+     * provisioned). When bound it <b>replaces</b> the request's {@code ?force} parameter in both
+     * directions, so a {@code force=true} sent on {@code DELETE /api/modules/{id}} can never force
+     * an unrelated collection delete. A {@code ScopedValue}, not a {@code ThreadLocal}: it cannot
+     * outlive the call on a pooled thread (see {@code PENDING_DROP}).
+     */
+    public static final ScopedValue<Boolean> FORCE = ScopedValue.newInstance();
+
+    /**
      * A child table destroyed by the V181 cascade.
      *
      * <p>The FK column is <b>not</b> uniformly {@code collection_id} and the tables are not
@@ -230,6 +240,21 @@ public class CollectionDeletionGuardHook implements BeforeSaveHook {
     }
 
     /**
+     * Rows that deleting collection {@code collectionId} would destroy through the V181 cascade,
+     * by child-table label (non-zero counts only). Must run with the tenant bound; module
+     * uninstall plans use it to keep a collection that has dependents unless data is purged.
+     */
+    public Map<String, Integer> dependents(String collectionId, String tenantId) {
+        Map<String, Integer> nonZero = new LinkedHashMap<>();
+        countChildren(collectionId, tenantId).forEach((label, count) -> {
+            if (count > 0) {
+                nonZero.put(label, count);
+            }
+        });
+        return nonZero;
+    }
+
+    /**
      * Counts rows in each cascading child table for this collection.
      *
      * <p>A table that cannot be counted is reported as zero rather than failing the delete:
@@ -305,12 +330,16 @@ public class CollectionDeletionGuardHook implements BeforeSaveHook {
     }
 
     /**
-     * True when the caller passed {@code ?force=true} on an HTTP request.
+     * True when the caller passed {@code ?force=true} on an HTTP request, or bound {@link #FORCE}
+     * to true; a bound {@link #FORCE} wins over the request.
      *
      * <p>No request context means no way to confirm, so this returns false and the delete
      * is blocked — automated callers fail closed.
      */
     private boolean forceRequested() {
+        if (FORCE.isBound()) {
+            return Boolean.TRUE.equals(FORCE.get());
+        }
         if (!(RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attrs)) {
             return false;
         }

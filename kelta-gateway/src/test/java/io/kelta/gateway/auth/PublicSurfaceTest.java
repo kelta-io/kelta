@@ -45,7 +45,8 @@ class PublicSurfaceTest {
             "/api/track",                   // campaign open-pixel / click / unsubscribe (HMAC)
             "/api/telehealth/visits",       // signed visit links
             "/api/telehealth/webhooks",     // LiveKit webhook (signed JWT + body digest)
-            "/api/modules/webhooks");       // runtime-module webhook (module owns verification)
+            "/api/modules/webhooks",        // runtime-module webhook (module owns verification)
+            "/api/modules/.well-known/jwks.json"); // public module-signing keys (no secret, no tenant)
 
     /**
      * GET/HEAD-only bootstrap data the UI needs before anyone has signed in — exactly the
@@ -150,6 +151,15 @@ class PublicSurfaceTest {
             assertThat(isPublic("/api/modules/webhooks/t1/m1", HttpMethod.POST)).isTrue();
             assertThat(isPublic("/api/modules", HttpMethod.GET)).isFalse();
             assertThat(isPublic("/api/modules/install-jar", HttpMethod.POST)).isFalse();
+            // External modules: the signing JWKS is open; plan/install by URL and the rest of
+            // /api/modules/.well-known are not.
+            assertThat(isPublic("/api/modules/.well-known/jwks.json", HttpMethod.GET)).isTrue();
+            assertThat(isPublic("/api/modules/.well-known", HttpMethod.GET)).isFalse();
+            assertThat(isPublic("/api/modules/.well-known/kelta-module.json", HttpMethod.GET)).isFalse();
+            assertThat(isPublic("/api/modules/plan", HttpMethod.POST)).isFalse();
+            assertThat(isPublic("/api/modules/install", HttpMethod.POST)).isFalse();
+            assertThat(isPublic("/api/modules/acme/upgrade", HttpMethod.POST)).isFalse();
+            assertThat(isPublic("/api/modules/acme/uninstall-plan", HttpMethod.GET)).isFalse();
             assertThat(isPublic("/api/telehealth/encounters", HttpMethod.GET)).isFalse();
         }
     }

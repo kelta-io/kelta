@@ -7,10 +7,21 @@ import io.kelta.runtime.module.service.ModuleServiceRegistry;
 import io.kelta.runtime.module.integration.spi.CredentialResolverPort;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.router.UserIdResolver;
 import io.kelta.runtime.workflow.ActionHandlerRegistry;
 import io.kelta.runtime.workflow.BeforeSaveHookRegistry;
 import io.kelta.runtime.workflow.module.ModuleContext;
+import io.kelta.runtime.outbound.ModuleHostGuard;
+import io.kelta.worker.listener.CollectionDeletionGuardHook;
+import io.kelta.worker.module.ExternalModulePlanner;
+import io.kelta.worker.module.ExternalModuleService;
 import io.kelta.worker.module.JdbcModuleSigningKeyStore;
+import io.kelta.worker.module.ModuleAccessTokenService;
+import io.kelta.worker.module.ModuleAssertionSigner;
+import io.kelta.worker.module.ModuleHttpClient;
+import io.kelta.worker.module.ModuleUninstaller;
+import io.kelta.worker.module.PlatformVersion;
+import io.kelta.worker.service.ModuleServicePrincipalService;
 import io.kelta.worker.module.JdbcModuleStore;
 import io.kelta.worker.module.ModuleConfigEventPublisher;
 import io.kelta.worker.module.ModuleJarService;
@@ -161,6 +172,59 @@ public class ModuleConfig {
             retryInitialBackoffMs, retryMaxBackoffMs, retryEscalateAfterAttempts));
         manager.setMeterRegistry(meterRegistry);
         return manager;
+    }
+
+    /**
+     * The module-host guard: module traffic only, never the general outbound guard
+     * ({@code kelta.modules.allowed-hosts}, declared in {@code application.yml} as
+     * {@code ${KELTA_MODULE_ALLOWED_HOSTS:}}). A malformed entry fails startup.
+     */
+    @Bean
+    public ModuleHostGuard moduleHostGuard(
+            @Value("${" + ModuleHostGuard.ALLOWED_HOSTS_PROPERTY + ":}") String allowedHosts) {
+        return new ModuleHostGuard(allowedHosts);
+    }
+
+    @Bean
+    public ModuleHttpClient moduleHttpClient(ModuleHostGuard moduleHostGuard, ModuleAssertionSigner signer,
+                                             ObjectMapper objectMapper) {
+        return new ModuleHttpClient(moduleHostGuard, signer, objectMapper);
+    }
+
+    @Bean
+    public ExternalModulePlanner externalModulePlanner(ModuleHttpClient moduleHttpClient, ModuleStore moduleStore,
+                                                       ModuleProvenanceStore provenanceStore,
+                                                       ModuleMetadataProvisioner metadataProvisioner,
+                                                       PlatformVersion platformVersion,
+                                                       ModuleAssertionSigner signer, JdbcTemplate jdbcTemplate,
+                                                       ObjectMapper objectMapper) {
+        return new ExternalModulePlanner(moduleHttpClient, moduleStore, provenanceStore, metadataProvisioner,
+            platformVersion, signer, jdbcTemplate, objectMapper);
+    }
+
+    @Bean
+    public ModuleUninstaller moduleUninstaller(ModuleProvenanceStore provenanceStore,
+                                               ModuleMetadataProvisioner metadataProvisioner,
+                                               CollectionDeletionGuardHook deletionGuard, QueryEngine queryEngine,
+                                               CollectionRegistry collectionRegistry,
+                                               TenantSlugResolver tenantSlugResolver, ObjectMapper objectMapper) {
+        return new ModuleUninstaller(provenanceStore, metadataProvisioner, deletionGuard, queryEngine,
+            collectionRegistry, tenantSlugResolver, objectMapper);
+    }
+
+    @Bean
+    public ExternalModuleService externalModuleService(ExternalModulePlanner planner, ModuleStore moduleStore,
+                                                       ModuleProvenanceStore provenanceStore,
+                                                       ModuleMetadataProvisioner metadataProvisioner,
+                                                       ModuleServicePrincipalService principals,
+                                                       ModuleAccessTokenService tokens,
+                                                       ModuleHttpClient moduleHttpClient,
+                                                       ModuleConfigEventPublisher eventPublisher,
+                                                       TenantSlugResolver tenantSlugResolver,
+                                                       UserIdResolver userIdResolver,
+                                                       ObjectMapper objectMapper) {
+        return new ExternalModuleService(planner, moduleStore, provenanceStore, metadataProvisioner, principals,
+            tokens, moduleHttpClient, eventPublisher, tenantSlugResolver, userIdResolver, objectMapper);
     }
 
     @Bean

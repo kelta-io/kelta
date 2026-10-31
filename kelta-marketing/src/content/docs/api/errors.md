@@ -74,8 +74,10 @@ Several problems in one request produce several entries (one per field).
 | `DEFAULT_VIEW_EXISTS` | 409 | a second default list view for the same collection and visibility; `meta.existingId` |
 | `USER_ANONYMIZED` | 409 | a `users` update that moves an anonymized user to another status or gives them an email, or sets `status: ANONYMIZED` outside [anonymize](/docs/security/users-and-groups/#anonymizing-a-user); `meta.userId` |
 | `ENVIRONMENT_NAME_CONFLICT`, `EMPTY_SANDBOX_REFRESH` | 409 | a sandbox environment name already in use, or a refresh with nothing to copy |
+| `PlanChanged` | 409 | an [external-module](/docs/platform/modules/#external-modules-installed-by-url) install, upgrade or uninstall whose `planHash` no longer matches; nothing is written and `meta.plan` holds the fresh plan |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | the `Content-Type` is not one the endpoint accepts |
 | `TARGET_NOT_SYNTHETIC` | 422 | [`POST /api/admin/availability/synthetic-events`](/docs/platform/messaging/#synthetic-events) names a real, polled watch target |
+| `UNSUPPORTED_MANIFEST_VERSION`, `INVALID_MANIFEST`, `PLATFORM_TOO_OLD`, `DOWNGRADE`, `SAME_VERSION_DIFFERENT_MANIFEST`, `INSTALLED_AS_JAR`, `BASE_URL_MISMATCH`, `SIGNING_NOT_CONFIGURED`, `METADATA_INVALID`, `UNKNOWN_COLLECTION`, `UNKNOWN_FIELD`, `UNKNOWN_PERMISSION`, `CAPABILITY_WITHOUT_GRANT` | 422 | an [external-module](/docs/platform/modules/#external-modules-installed-by-url) install or upgrade whose plan is blocked, one entry per blocker: an unusable manifest, a platform older than its `minPlatformVersion`, a version that does not go up, a module id already installed as a JAR or from another URL, no signing key configured, metadata that does not apply, a permission naming an unknown collection, field or system permission, or a hook or event on a collection the module cannot read |
 | `VALIDATION_RULE_FAILED` | 422 | a collection validation rule rejected the record; `source.pointer` names its error field |
 | `TOO_MANY_OPERATIONS`, `OPERATION_FAILED` | 422 | `POST /api/operations` over the operation limit, or one operation failed (`source.pointer` is `/atomic:operations/<n>`) and the batch rolled back |
 | `RATE_LIMIT_EXCEEDED` | 429 | tenant quota or per-user share used up; carries `Retry-After` and `X-RateLimit-*` headers — body below, details in [Rate limits](/docs/api/rate-limits/#handling-429) |
@@ -84,6 +86,7 @@ Several problems in one request produce several entries (one per field).
 | `AI_PROVIDER_ERROR`, `TOKEN_BUDGET_EXCEEDED` | — | in an AI chat response's `error.code` (or a streamed `error` event): the model provider failed, or the tool loop hit its token budget |
 | `INTERNAL_ERROR` | 500 | unexpected; `meta.requestId` is what to report |
 | `STORAGE_ERROR`, `JSONAPI_PARSE_ERROR`, `APPLY_FAILED` | 500 | the database, the gateway's response parsing, or applying an AI proposal failed; `meta.requestId` is what to report |
+| `ModuleUnreachable` | 502 | an external module's manifest or `lifecycle` endpoint could not be reached or answered with an error |
 | `TENANT_CONCURRENCY_LIMIT` | 503 | too many concurrent requests for the tenant; retry after `Retry-After` |
 
 Hook-raised validation errors use `VALIDATION_FAILED` unless the hook defines a more specific code.

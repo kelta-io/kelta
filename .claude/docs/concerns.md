@@ -523,14 +523,42 @@ mail, seat counts, SCIM, PATs, the delegated-admin list and API writes to `users
   the admin UI read-only; an admin with the permission collections can still change its
   `profile-object/field/system-permissions` rows, and the module then runs with the edited grants.
 - **A module can be granted anything in `TenantProvisioningHook.ALL_PERMISSIONS`**, including
-  `MANAGE_USERS` or `MODIFY_ALL_DATA`, if the admin approves it; the consent screen (part 9c) is the
-  only check. `API_ACCESS` is always granted.
+  `MANAGE_USERS` or `MODIFY_ALL_DATA`, if the admin approves it; the plan the admin approves by its
+  `planHash` (part 9c; the consent screen over it is 9e) is the only check. `API_ACCESS` is always
+  granted.
 - **Mail by recipient id.** `AlertDispatchService`, the support mailbox and appointment reminders
   resolve a recipient's email from a user id; for a SERVICE user they hit `DefaultEmailService`'s
   `.invalid` guard and the `email_log` row ends `FAILED`. Nothing is delivered.
 - **Its connected app is an ordinary `connected-apps` row.** An admin can deactivate or delete it
   through the API (the module then gets no token); `run_as_user_id` and `client_secret_enc` are
   JDBC-only and never served.
+
+### External modules — install-time trust (part 9c, accepted)
+
+`architecture.md` → External modules installed by URL. What the 9c install path trusts, and what
+it does not check:
+
+- **`KELTA_MODULE_ALLOWED_HOSTS` is platform-wide.** A listed host may be `http` and private for
+  every tenant's admin, so any tenant admin can point a plan at it. List module services only —
+  never shared infrastructure (databases, kelta-auth, the worker itself); a plan fetches
+  `{baseUrl}/.well-known/kelta-module.json` without credentials, and an install then POSTs signed
+  lifecycle calls with the module's own access token to that host. It is deliberately separate from
+  `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS`, which also opens flow `HTTP_CALLOUT`/`CALL_API`.
+- **The manifest is not signed.** Its integrity is TLS to the module host (none for an allow-listed
+  `http` host). `planHash` binds what the admin reviewed: the apply re-fetches and re-plans, and any
+  change in grants, metadata, version or installed state is a `409`. The JAR path's publisher
+  signature has no 9c equivalent; whoever controls the module host controls what it declares.
+- **The JWKS is public by design** (`/api/modules/.well-known/jwks.json`, listed in
+  `unauthenticated-paths` as the exact file). It is public key material with no tenant. The signing
+  key (`KELTA_MODULE_SIGNING_KEY`) is one platform-wide key: a leak lets the holder forge requests
+  to every tenant's modules until it is rotated (put a new key first, drop the old one after 5 min).
+- **Uninstall removes provisioned resources after the module row is gone.** A delete that fails is
+  reported under `failed` with its provenance row kept, and there is no endpoint to retry it — the
+  admin removes it by hand. `?force` on `DELETE /api/modules/{id}` never reaches collection deletes;
+  only `purgeData` does (`CollectionDeletionGuardHook.FORCE`).
+- **Nothing invokes an external module yet** (9d). Its action rows exist (keyed `<moduleId>:<key>`),
+  but a flow step naming one fails as an unknown handler, and its webhook route answers as for a
+  module without a webhook handler.
 
 ### Outbound requests to tenant-supplied URLs
 

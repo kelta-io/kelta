@@ -76,6 +76,24 @@ kelta:
       initial-backoff-ms: ${KELTA_MODULES_LOAD_RETRY_INITIAL_BACKOFF_MS:30000}
       max-backoff-ms: ${KELTA_MODULES_LOAD_RETRY_MAX_BACKOFF_MS:600000}
       escalate-after-attempts: ${KELTA_MODULES_LOAD_RETRY_ESCALATE_AFTER_ATTEMPTS:8}
+    # External modules (specs/module-platform/9-external-modules.md). Every request the platform
+    # sends a module is an ES256 assertion signed with this key: one or more PKCS#8 PEM P-256
+    # private keys (openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256). The first
+    # signs; all are published at GET /api/modules/.well-known/jwks.json, so rotate by putting the
+    # new key first and dropping the old one later. Blank = external modules cannot be installed.
+    platform-signing-key: ${KELTA_MODULE_SIGNING_KEY:}
+    # The assertions' iss claim; a module fetches {issuer}/.well-known/jwks.json. Must be the
+    # public URL of /api/modules as modules reach it.
+    issuer: ${KELTA_MODULE_ISSUER:${EXTERNAL_BASE_URL:http://localhost:8080}/api/modules}
+    # Module hosts that may use http and resolve to private addresses (in-cluster modules), for
+    # module traffic only: comma-separated hostnames or *.suffix patterns. Public https hosts need
+    # no entry. Never widen KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS for a module instead -- that
+    # variable also opens HTTP_CALLOUT, CALL_API and outbound messages.
+    allowed-hosts: ${KELTA_MODULE_ALLOWED_HOSTS:}
+  # The running Kelta release (e.g. 0.1.0), compared against a module's minPlatformVersion at
+  # install and upgrade. Blank = unknown: the check is skipped with a WARN, never failed.
+  platform:
+    version: ${KELTA_VERSION:}
   # AES-256 master key for envelope encryption (Base64-encoded 32 bytes)
   # Generate with: openssl rand -base64 32
   encryption:

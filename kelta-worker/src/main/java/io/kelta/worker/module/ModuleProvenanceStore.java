@@ -75,6 +75,12 @@ public class ModuleProvenanceStore {
             tenantId, moduleId);
     }
 
+    /** Drops one provenance record, after its resource was removed or found gone (uninstall). */
+    public void deleteRow(String tenantId, String id) {
+        jdbcTemplate.update("DELETE FROM module_provisioned_resource WHERE tenant_id = ? AND id = ?",
+            tenantId, id);
+    }
+
     /**
      * Drops the provenance records for a module.
      *
