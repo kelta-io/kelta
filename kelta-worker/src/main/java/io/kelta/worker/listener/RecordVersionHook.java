@@ -1,6 +1,7 @@
 package io.kelta.worker.listener;
 
 import tools.jackson.databind.ObjectMapper;
+import io.kelta.runtime.context.ActingUser;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
@@ -16,6 +17,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -222,8 +224,16 @@ public class RecordVersionHook implements BeforeSaveHook {
         }
     }
 
-    /** Change author from the record's audit fields, falling back to the platform user. */
+    /**
+     * Change author: the user doing this write ({@link ActingUser} — the same user its
+     * record-changed event names), else the record's audit fields, else the platform user. A
+     * delete stamps nothing on the row, so reading the fields alone credits it to the last updater.
+     */
     private String resolveUser(Map<String, Object> record) {
+        Optional<String> actor = ActingUser.current();
+        if (actor.isPresent()) {
+            return actor.get();
+        }
         String user = asString(record.get("updatedBy"));
         if (user == null) {
             user = asString(record.get("updated_by"));

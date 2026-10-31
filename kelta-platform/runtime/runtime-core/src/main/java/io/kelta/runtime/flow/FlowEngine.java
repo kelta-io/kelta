@@ -1,5 +1,6 @@
 package io.kelta.runtime.flow;
 
+import io.kelta.runtime.context.ActingUser;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.context.TenantPropagatingExecutors;
 import io.kelta.runtime.flow.executor.*;
@@ -744,7 +745,10 @@ public class FlowEngine {
 
             StateExecutionResult result;
             try {
-                result = executor.execute(currentState, context);
+                // Writes a step makes are the execution actor's: their record-changed events name
+                // it, so the flows they trigger start as it (ActingUser — attribution only).
+                result = ActingUser.callAs(context.userId(),
+                    () -> executor.execute(currentState, context));
             } catch (RuntimeException e) {
                 if (stepLogId == null) {
                     flowStore.logStepExecution(context.executionId(), stateId, currentState.name(),

@@ -201,6 +201,31 @@ class UpdateRecordActionHandlerTest {
     }
 
     @Test
+    @DisplayName("Should replace an updatedBy/createdBy update with the execution actor")
+    void shouldReplaceMappedAuditUsersWithActor() {
+        CollectionDefinition collDef = mock(CollectionDefinition.class);
+        when(registry.get("orders")).thenReturn(collDef);
+        when(queryEngine.update(eq(collDef), eq("r1"), anyMap()))
+            .thenReturn(Optional.of(Map.of("id", "r1")));
+        String actor = "3f2b6c1e-9d4a-4f0b-8e2d-1a2b3c4d5e6f";
+
+        String config = """
+            {"targetCollectionName": "orders", "updates": [
+                {"field": "status", "value": "Approved"},
+                {"field": "updatedBy", "value": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"},
+                {"field": "createdBy", "value": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"}
+            ]}
+            """;
+        ActionResult result = handler.execute(makeContext(config, actor));
+        assertTrue(result.successful());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> updatedFields = (Map<String, Object>) result.outputData().get("updatedFields");
+        assertEquals(actor, updatedFields.get("updatedBy"));
+        assertFalse(updatedFields.containsKey("createdBy"));
+        assertEquals("Approved", updatedFields.get("status"));
+    }
+
+    @Test
     @DisplayName("Should not stamp updatedBy from a non-UUID actor")
     void shouldNotStampNonUuidActor() {
         CollectionDefinition collDef = mock(CollectionDefinition.class);

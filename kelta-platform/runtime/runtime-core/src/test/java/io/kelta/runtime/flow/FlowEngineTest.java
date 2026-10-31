@@ -1,5 +1,7 @@
 package io.kelta.runtime.flow;
 
+import io.kelta.runtime.context.ActingUser;
+import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionHandler;
@@ -1487,6 +1489,65 @@ class FlowEngineTest {
 
         public List<FlowExecutionData> getAllExecutions() {
             return new ArrayList<>(executions.values());
+        }
+    }
+
+    @Nested
+    @DisplayName("Acting user")
+    class ActingUserBinding {
+
+        private static final String FLOW = """
+            {
+                "StartAt": "Who",
+                "States": {
+                    "Who": { "Type": "Task", "Resource": "WHO_ACTS", "ResultPath": "$.who", "End": true }
+                }
+            }
+            """;
+
+        @BeforeEach
+        void registerWhoActs() {
+            handlerRegistry.register(new ActionHandler() {
+                @Override
+                public String getActionTypeKey() { return "WHO_ACTS"; }
+
+                @Override
+                public ActionResult execute(ActionContext context) {
+                    return ActionResult.success(Map.of("actingUser", ActingUser.current().orElse("none")));
+                }
+            });
+        }
+
+        @SuppressWarnings("unchecked")
+        private String actingUserSeenBy(Map<String, Object> result) {
+            return (String) ((Map<String, Object>) result.get("who")).get("actingUser");
+        }
+
+        @Test
+        @DisplayName("a step's writes are attributed to the execution actor")
+        void stepRunsAsExecutionActor() {
+            Map<String, Object> result = engine.executeSynchronous("t1", "f1", FLOW, Map.of(), "u1");
+
+            assertEquals("u1", actingUserSeenBy(result));
+        }
+
+        @Test
+        @DisplayName("the execution actor wins over a request caller the flow runs under")
+        void executionActorWinsOverCaller() {
+            CallerContext caller = new CallerContext("request-caller", CallerContext.UserType.INTERNAL, false, false);
+
+            Map<String, Object> result = CallerContext.callAs(caller,
+                () -> engine.executeSynchronous("t1", "f1", FLOW, Map.of(), "run-as-user"));
+
+            assertEquals("run-as-user", actingUserSeenBy(result));
+        }
+
+        @Test
+        @DisplayName("an execution with no actor binds nobody")
+        void noActorBindsNobody() {
+            Map<String, Object> result = engine.executeSynchronous("t1", "f1", FLOW, Map.of(), null);
+
+            assertEquals("none", actingUserSeenBy(result));
         }
     }
 }

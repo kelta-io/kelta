@@ -1,5 +1,6 @@
 package io.kelta.runtime.query;
 
+import io.kelta.runtime.context.ActingUser;
 import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.event.EventFactory;
@@ -327,7 +328,7 @@ public class DefaultQueryEngine implements QueryEngine {
 
         // Publish record change event
         publishRecordEvent(EventFactory.createRecordEvent("record.created",
-                extractTenantId(recordData), extractUserId(recordData),
+                extractTenantId(recordData), actingUserId(recordData.get("createdBy")),
                 RecordChangedPayload.created(definition.name(), id, visible)
                         .withContainsMaskedFields(definition.hasMaskingConfiguredFields())
                         .withOwnerScoped(definition.isOwnerScoped())));
@@ -459,7 +460,7 @@ public class DefaultQueryEngine implements QueryEngine {
 
             // Publish record change event — without server-only values in either snapshot
             publishRecordEvent(EventFactory.createRecordEvent("record.updated",
-                    extractTenantId(writtenData), extractUserId(writtenData),
+                    extractTenantId(writtenData), actingUserId(recordData.get("updatedBy")),
                     RecordChangedPayload.updated(definition.name(), id,
                             definition.withoutServerOnlyFields(writtenData),
                             definition.withoutServerOnlyFields(previousData), changedFields)
@@ -515,7 +516,7 @@ public class DefaultQueryEngine implements QueryEngine {
             // Publish record change event with the pre-fetched data
             if (recordData != null) {
                 publishRecordEvent(EventFactory.createRecordEvent("record.deleted",
-                        extractTenantId(recordData), extractUserId(recordData),
+                        extractTenantId(recordData), actingUserId(null),
                         RecordChangedPayload.deleted(definition.name(), id,
                                 definition.withoutServerOnlyFields(recordData))
                                 .withContainsMaskedFields(definition.hasMaskingConfiguredFields())
@@ -910,14 +911,22 @@ public class DefaultQueryEngine implements QueryEngine {
     }
 
     /**
-     * Extracts the user ID from record data, defaulting to "system".
+     * The user a write's record-changed event names: the user doing THIS write, never the
+     * record's stored creator or last updater — an update or delete by B on A's record is B's,
+     * and every record-triggered flow it starts runs as B. The bound {@link ActingUser} (a flow
+     * step's actor, else the request caller) wins; with neither bound, a platform writer's own
+     * audit stamp on this write ({@code createdBy} of a create, {@code updatedBy} in an update's
+     * patch — not the stored row's) stands in, then {@code "system"}.
      */
-    private String extractUserId(Map<String, Object> data) {
-        Object userId = data.get("createdBy");
-        if (userId == null) {
-            userId = data.get("updatedBy");
+    private static String actingUserId(Object writeStamp) {
+        Optional<String> actor = ActingUser.current();
+        if (actor.isPresent()) {
+            return actor.get();
         }
-        return userId != null ? userId.toString() : "system";
+        if (writeStamp != null && !String.valueOf(writeStamp).isBlank()) {
+            return String.valueOf(writeStamp);
+        }
+        return "system";
     }
 
     /**

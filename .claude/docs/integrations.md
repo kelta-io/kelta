@@ -201,7 +201,7 @@ endpoint rolls out — until a field is media-enabled its collection's downloads
 | `kelta.config.environment.changed.<tenantId>.<envId>` | Sandbox environment lifecycle (created/cloned/refreshed/archived) |
 | `kelta.config.promotion.executed.<tenantId>.<promotionId>` | Metadata promotion executed/failed/rolled back |
 | `kelta.worker.assignment.changed` | Worker assignment changes |
-| `kelta.record.changed` | Record CRUD events (`RecordChangedPayload`; carries `containsMaskedFields` when the collection has data-masking config — the gateway `RealtimeBridge` then omits record `data` from WebSocket fan-out; and `payloadOmitted: true` with no `data`/`previousData` when the full event exceeded `kelta.nats.max-event-payload-bytes` — consumers re-read or refetch by `recordId`, see `architecture.md` → Oversized events) |
+| `kelta.record.changed` | Record CRUD events (`RecordChangedPayload`; carries `containsMaskedFields` when the collection has data-masking config — the gateway `RealtimeBridge` then omits record `data` from WebSocket fan-out; and `payloadOmitted: true` with no `data`/`previousData` when the full event exceeded `kelta.nats.max-event-payload-bytes` — consumers re-read or refetch by `recordId`, see `architecture.md` → Oversized events). The envelope `userId` is the user who made the write (`ActingUser`), never the record's stored author |
 
 Event envelope: `PlatformEvent<T>` with `eventId`, `eventType`, `tenantId`, `correlationId`, `timestamp`, `payload`
 Publishing: `PlatformEventPublisher` (transport-agnostic interface; the NATS impl is `NatsEventPublisher` in `runtime-messaging-nats`. The former Kafka publisher was removed in Phase 0 — do not reintroduce Kafka.)
@@ -328,8 +328,21 @@ to `FlowEngine.startExecution` as the execution user, so:
 
 - `CreateRecordActionHandler` stamps `createdBy`/`updatedBy` and
   `UpdateRecordActionHandler` stamps `updatedBy` on records the flow writes
-  (`FlowAuditStamp` — UUID-shaped actors only, explicit field mappings win).
-  Before this, all flow-written records had null audit users.
+  (`FlowAuditStamp` — UUID-shaped actors only). The audit fields are
+  **server-controlled**: a `createdBy`/`updatedBy` field mapping or update is
+  dropped, never stored — `createdBy` is the default owner field, so a mapping
+  that won let any flow author create a record owned by, or attributed to, any
+  user. With no stampable actor the fields stay unset. Before this, all
+  flow-written records had null audit users.
+- **A record-change run starts as the user who made the change.** The record
+  event's `userId` is the acting user of that write (`ActingUser` —
+  `architecture.md` → Acting user): the request caller for an API write, the
+  run's actor for a flow step's write, else the write's own audit stamp, else
+  `"system"` (not a UUID, so the resolver falls back to run-as, then owner).
+  An update or delete by B on a record A created starts its runs as B. A flow
+  step's write publishes as the run's actor, so the record-triggered run it
+  starts takes that actor as its initiator — even one that was itself a run-as
+  or owner fallback (`concerns.md` → External modules, in-cluster).
 - `flow_execution.started_by` records the actor. The webhook path previously
   stored the literal `"webhook"`; it now stores the resolved actor UUID
   (provenance stays visible via the state envelope's `trigger.type`).

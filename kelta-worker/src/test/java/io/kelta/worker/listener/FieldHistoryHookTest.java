@@ -1,5 +1,6 @@
 package io.kelta.worker.listener;
 
+import io.kelta.runtime.context.ActingUser;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.query.QueryEngine;
@@ -114,6 +115,19 @@ class FieldHistoryHookTest {
         assertThat(changes.get(0).fieldName()).isEqualTo("status");
         assertThat(changes.get(0).oldValue()).isNull();
         assertThat(changes.get(0).newValue()).isEqualTo("\"NEW\"");
+    }
+
+    @Test
+    @DisplayName("a delete is credited to the user doing it, not the record's last updater")
+    void deleteCreditedToActingUser() {
+        CollectionDefinition def = userCollectionWithTrackedField();
+        when(queryEngine.getById(def, "rec-1"))
+                .thenReturn(Optional.of(new HashMap<>(Map.of("status", "DONE", "updatedBy", "user-1"))));
+
+        ActingUser.runAs("user-2", () -> hook.beforeDelete("orders", "rec-1", "tenant-1"));
+
+        verify(historyRepository).recordChanges(eq("tenant-1"), eq("col-1"), eq("rec-1"),
+                eq("user-2"), eq("UI"), any());
     }
 
     @Test
