@@ -203,7 +203,7 @@ compact token:
 | `aud` | the module `id` |
 | `sub` | the module install id (`tenant_module.id`) |
 | `tenant_id`, `tenant_slug` | the tenant being served |
-| `act` | the acting user, when there is one: `{ "sub": userId, "user_type": "INTERNAL"\|"PORTAL", "profile_id": … }` (RFC 8693 actor claim). Absent for webhooks, schedules and events |
+| `act` | the acting user, when there is one: `{ "sub": userId, "user_type": "INTERNAL"\|"PORTAL", "profile_id": … }` (RFC 8693 actor claim). On a flow action it is the run's user (the caller, the record's changer, or the flow's run-as user or owner), sent only when that is an active `INTERNAL` or `PORTAL` user. Absent for module schedules, webhooks and events |
 | `htm`, `htu` | HTTP method and full target URL (as in DPoP, RFC 9449) |
 | `body_sha256` | base64url SHA-256 of the exact request body bytes (of the empty string for GET) |
 | `iat`, `exp` | `exp = iat + 60 s` |
