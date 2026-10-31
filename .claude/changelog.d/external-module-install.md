@@ -1,0 +1,1 @@
+- 2026-10-30 feat(modules): install external modules by URL — manifest v2, plan + planHash consent, install/upgrade/enable/disable/uninstall-plan, ES256-signed module requests with a public JWKS, and a module-only host allow-list (external modules part 9c)

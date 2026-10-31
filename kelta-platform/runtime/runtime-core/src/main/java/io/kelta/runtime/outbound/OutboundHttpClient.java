@@ -26,7 +26,8 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * Fetches URLs that come from tenant or administrator configuration, with every target checked
- * by an {@link OutboundUrlGuard}.
+ * by an {@link OutboundTargetGuard} — normally the {@link OutboundUrlGuard}; module traffic uses
+ * the {@link ModuleHostGuard}.
  *
  * <ul>
  *   <li><b>Every hop is validated.</b> Automatic redirects are off. When {@link Limits#maxRedirects()}
@@ -58,11 +59,11 @@ public final class OutboundHttpClient {
     private static final Set<String> CREDENTIAL_HEADERS =
             Set.of("authorization", "cookie", "proxy-authorization");
 
-    private final OutboundUrlGuard guard;
+    private final OutboundTargetGuard guard;
     private final Limits limits;
     private final HttpClient httpClient;
 
-    public OutboundHttpClient(OutboundUrlGuard guard, Limits limits) {
+    public OutboundHttpClient(OutboundTargetGuard guard, Limits limits) {
         this.guard = Objects.requireNonNull(guard, "guard");
         this.limits = Objects.requireNonNull(limits, "limits");
         this.httpClient = HttpClient.newBuilder()

@@ -142,6 +142,26 @@ public interface ModuleStore {
     java.util.Map<String, Object> findLoadDiagnostics(String id);
 
     /**
+     * Writes a status and the error that caused it ({@code null} clears the error), without
+     * touching the load counters. External modules use it for lifecycle outcomes: nothing is
+     * loaded on a pod for them, so {@link #recordLoadOutcome} would misreport a load.
+     */
+    void updateStatusWithError(String id, String status, String error);
+
+    /** Records an external install's service principal (part 9b's connected app and SERVICE user). */
+    void updateServicePrincipal(String id, String connectedAppId, String serviceUserId);
+
+    /**
+     * Rewrites an external module row for an upgrade: version, name, description, manifest and
+     * protocol version. Status, {@code installed_at} and {@code installed_by} are untouched.
+     */
+    void updateExternalManifest(String id, String version, String name, String description,
+                                String manifestJson, int protocolVersion);
+
+    /** Replaces a module's action rows with {@code actions}. */
+    void replaceActions(String moduleRowId, List<TenantModuleData.TenantModuleActionData> actions);
+
+    /**
      * Deletes a module and its associated actions.
      *
      * @param id the module primary key

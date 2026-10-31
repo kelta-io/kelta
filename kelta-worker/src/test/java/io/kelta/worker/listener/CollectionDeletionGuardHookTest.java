@@ -167,6 +167,28 @@ class CollectionDeletionGuardHookTest {
             assertThat(result.getErrors().get(0).message()).contains("12 record versions");
             verify(storageService, never()).deleteObject(anyString());
         }
+
+        @Test
+        @DisplayName("FORCE bound to true forces a delete with no request (module uninstall with purgeData)")
+        void scopedForceAdmitsDelete() {
+            stubChildCount("report", 1);
+            RequestContextHolder.resetRequestAttributes();
+
+            BeforeSaveResult result = ScopedValue.where(CollectionDeletionGuardHook.FORCE, true).call(() -> delete());
+
+            assertThat(result.isSuccess()).isTrue();
+        }
+
+        @Test
+        @DisplayName("FORCE bound to false wins over a request's force=true, so it cannot leak into the delete")
+        void scopedFalseOverridesTheRequest() {
+            stubChildCount("report", 1);
+            bindRequest("true");
+
+            BeforeSaveResult result = ScopedValue.where(CollectionDeletionGuardHook.FORCE, false).call(() -> delete());
+
+            assertThat(result.hasErrors()).isTrue();
+        }
     }
 
     @Nested

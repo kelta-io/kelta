@@ -1,7 +1,10 @@
 package io.kelta.worker.module;
 
 import io.kelta.runtime.context.TenantContext;
+import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.module.ModuleManifest;
+import io.kelta.runtime.query.QueryEngine;
+import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.service.PackageImportService;
 import io.kelta.worker.service.PackageImportService.ConflictMode;
 import io.kelta.worker.service.PackageImportService.ImportOptions;
@@ -19,6 +22,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
@@ -37,6 +41,14 @@ import java.util.regex.Pattern;
  *
  * <p>Ownership is read from the apply pass, not the dry run, so a collection someone else created
  * between the two is still reported {@code ADOPTED}.
+ *
+ * <p><b>External modules</b> (part 9c) ship a metadata package instead of manifest collections:
+ * {@link #planPackage} classifies every item without writing, and {@link #provisionPackage}
+ * applies the same classification. The adopt rule is generalised from collections to every
+ * parent: an item whose parent (a field's collection, a picklist value's collection or global
+ * picklist, a menu item's menu) already existed and is not the module's own is
+ * {@value #ACTION_SKIP_ADOPTED} and never written. Content hashes are taken over the stored row
+ * after the apply ({@link #currentContentHash}), which is what uninstall compares against.
  */
 @Service
 public class ModuleMetadataProvisioner {
@@ -45,6 +57,21 @@ public class ModuleMetadataProvisioner {
 
     static final String COLLECTION = "COLLECTION";
     static final String FIELD = "FIELD";
+
+    /** Plan actions for a package item. */
+    public static final String ACTION_CREATE = "CREATE";
+    /** Exists already and is not the module's: reused, never written, never removable. */
+    public static final String ACTION_ADOPT = "ADOPT";
+    /** Exists already because this module created it (a reinstall or upgrade). */
+    public static final String ACTION_KEEP = "KEEP";
+    /** Its parent was adopted, so it is left alone (a module never edits a tenant's own schema). */
+    public static final String ACTION_SKIP_ADOPTED = "SKIP_ADOPTED";
+    /** The dry run rejected it; the plan carries a blocker. */
+    public static final String ACTION_FAILED = "FAILED";
+
+    /** Attributes not part of a stored row's content hash: identity and audit, which change on their own. */
+    private static final Set<String> UNHASHED_ATTRIBUTES =
+            Set.of("id", "tenantId", "createdAt", "updatedAt", "createdBy", "updatedBy");
 
     /** Collection names must be a safe identifier (also the route segment). */
     private static final Pattern COLLECTION_NAME = Pattern.compile("^[a-z][a-z0-9_]*$");
@@ -73,17 +100,208 @@ public class ModuleMetadataProvisioner {
         }
     }
 
+    /**
+     * One package item as a plan sees it.
+     *
+     * @param action {@link #ACTION_CREATE}, {@link #ACTION_ADOPT}, {@link #ACTION_KEEP},
+     *               {@link #ACTION_SKIP_ADOPTED} or {@link #ACTION_FAILED}
+     * @param error  the dry run's message for a {@link #ACTION_FAILED} item, else {@code null}
+     */
+    public record PlannedItem(String type, String naturalKey, String action, String error) {}
+
     private final PackageImportService packageImportService;
     private final TenantSlugResolver tenantSlugResolver;
     private final ObjectMapper objectMapper;
+    private final QueryEngine queryEngine;
+    private final CollectionRegistry collectionRegistry;
 
     public ModuleMetadataProvisioner(PackageImportService packageImportService,
                                      TenantSlugResolver tenantSlugResolver,
-                                     ObjectMapper objectMapper) {
+                                     ObjectMapper objectMapper,
+                                     QueryEngine queryEngine,
+                                     CollectionRegistry collectionRegistry) {
         this.packageImportService = packageImportService;
         this.tenantSlugResolver = tenantSlugResolver;
         this.objectMapper = objectMapper;
+        this.queryEngine = queryEngine;
+        this.collectionRegistry = collectionRegistry;
     }
+
+    // ── external modules: metadata packages ──────────────────────────────────────────────
+
+    /**
+     * Classifies every item of an external module's metadata package for the install plan.
+     * Writes nothing.
+     *
+     * @param ownedKeys {@code TYPE:naturalKey} of what this module already created in the tenant
+     *                  (its {@code CREATED} provenance rows); empty on a first install
+     */
+    public List<PlannedItem> planPackage(String tenantId, Map<String, Object> pkg, Set<String> ownedKeys,
+                                         String executingUserId) {
+        if (packageItems(pkg).isEmpty()) {
+            return List.of();
+        }
+        return TenantContext.callWithTenant(tenantId, resolveSlug(tenantId), () -> {
+            ImportReport dryRun = packageImportService.importPackage(tenantId, pkg,
+                    new ImportOptions(ConflictMode.SKIP, true, null, null, executingUserId));
+            return classify(pkg, dryRun, ownedKeys);
+        });
+    }
+
+    /**
+     * Applies an external module's metadata package: creates what the plan calls
+     * {@link #ACTION_CREATE}, reports what it adopts or keeps, and writes nothing under an adopted
+     * parent. Idempotent: re-running converges, since every type upserts on its natural key.
+     */
+    public ProvisionResult provisionPackage(String tenantId, String moduleId, Map<String, Object> pkg,
+                                            Set<String> ownedKeys, String executingUserId) {
+        if (packageItems(pkg).isEmpty()) {
+            return ProvisionResult.EMPTY;
+        }
+        return TenantContext.callWithTenant(tenantId, resolveSlug(tenantId),
+                () -> applyPackage(tenantId, moduleId, pkg, ownedKeys, executingUserId));
+    }
+
+    /**
+     * The content hash of a stored resource as it is now: the canonical-JSON SHA-256 of the row
+     * read back through its system collection, minus identity and audit attributes. Empty when
+     * the resource no longer exists. Must run with the tenant bound.
+     */
+    public Optional<String> currentContentHash(String type, String resourceId) {
+        String systemCollection = PackageImportService.systemCollectionFor(type);
+        CollectionDefinition definition = systemCollection == null ? null : collectionRegistry.get(systemCollection);
+        if (definition == null || resourceId == null) {
+            return Optional.empty();
+        }
+        return queryEngine.getById(definition, resourceId).map(row -> {
+            Map<String, Object> content = new TreeMap<>();
+            row.forEach((key, value) -> {
+                if (!UNHASHED_ATTRIBUTES.contains(key)) {
+                    content.put(key, value);
+                }
+            });
+            return contentHash(content);
+        });
+    }
+
+    private ProvisionResult applyPackage(String tenantId, String moduleId, Map<String, Object> pkg,
+                                         Set<String> ownedKeys, String executingUserId) {
+        ImportReport dryRun = packageImportService.importPackage(tenantId, pkg,
+                new ImportOptions(ConflictMode.SKIP, true, null, null, executingUserId));
+        Map<String, String> planned = new HashMap<>();
+        for (PlannedItem item : classify(pkg, dryRun, ownedKeys)) {
+            planned.put(item.type() + ":" + item.naturalKey(), item.action());
+        }
+        Set<String> itemKeyFilter = new HashSet<>();
+        planned.forEach((key, action) -> {
+            if (!ACTION_SKIP_ADOPTED.equals(action) && !ACTION_FAILED.equals(action)) {
+                itemKeyFilter.add(key);
+            }
+        });
+
+        ImportReport report = packageImportService.importPackage(tenantId, pkg,
+                new ImportOptions(ConflictMode.SKIP, false, null, itemKeyFilter, executingUserId));
+
+        Set<String> createdNow = new HashSet<>();
+        for (ItemResult item : report.items()) {
+            if ("CREATED".equals(item.action())) {
+                createdNow.add(item.type() + ":" + item.naturalKey());
+            }
+        }
+        Map<String, Map<String, Object>> dataByKey = dataByKey(pkg);
+        List<ProvisionedResource> resources = new ArrayList<>();
+        List<ItemResult> failures = new ArrayList<>();
+        for (ItemResult item : report.items()) {
+            String key = item.type() + ":" + item.naturalKey();
+            if ("FAILED".equals(item.action())) {
+                failures.add(item);
+                continue;
+            }
+            String parent = parentKey(item.type(), dataByKey.getOrDefault(key, Map.of()));
+            boolean created = "CREATED".equals(item.action());
+            if (created && parent != null && !createdNow.contains(parent) && !ownedKeys.contains(parent)) {
+                // Only reachable when the parent appeared between the two passes: the module does
+                // not own it, so it claims nothing written under it either.
+                log.warn("Module '{}' wrote {} '{}' under {} it does not own (created between the dry "
+                        + "run and the apply pass) — not recording it", moduleId, item.type(),
+                        item.naturalKey(), parent);
+                continue;
+            }
+            resources.add(new ProvisionedResource(item.type(), item.naturalKey(), item.resourceId(),
+                    created ? ModuleProvenanceStore.OWNERSHIP_CREATED : ModuleProvenanceStore.OWNERSHIP_ADOPTED,
+                    created ? currentContentHash(item.type(), item.resourceId()).orElse(null) : null));
+        }
+        return new ProvisionResult(List.copyOf(resources), List.copyOf(failures));
+    }
+
+    private List<PlannedItem> classify(Map<String, Object> pkg, ImportReport dryRun, Set<String> ownedKeys) {
+        Map<String, Map<String, Object>> dataByKey = dataByKey(pkg);
+        Set<String> createdInRun = new HashSet<>();
+        Set<String> skippedInRun = new HashSet<>();
+        for (ItemResult item : dryRun.items()) {
+            String key = item.type() + ":" + item.naturalKey();
+            if ("CREATED".equals(item.action())) {
+                createdInRun.add(key);
+            } else if ("SKIPPED".equals(item.action())) {
+                skippedInRun.add(key);
+            }
+        }
+        List<PlannedItem> planned = new ArrayList<>();
+        for (ItemResult item : dryRun.items()) {
+            String key = item.type() + ":" + item.naturalKey();
+            String parent = parentKey(item.type(), dataByKey.getOrDefault(key, Map.of()));
+            boolean parentAdopted = parent != null && !createdInRun.contains(parent) && !ownedKeys.contains(parent);
+            String action;
+            if ("FAILED".equals(item.action())) {
+                // Under a parent the package itself adopts the item is never written, so its dry-run
+                // failure does not matter. Anywhere else (a parent that exists nowhere) it does.
+                action = parentAdopted && skippedInRun.contains(parent) ? ACTION_SKIP_ADOPTED : ACTION_FAILED;
+            } else if (parentAdopted) {
+                action = ACTION_SKIP_ADOPTED;
+            } else if ("CREATED".equals(item.action())) {
+                action = ACTION_CREATE;
+            } else {
+                action = ownedKeys.contains(key) ? ACTION_KEEP : ACTION_ADOPT;
+            }
+            planned.add(new PlannedItem(item.type(), item.naturalKey(), action,
+                    ACTION_FAILED.equals(action) ? item.error() : null));
+        }
+        return planned;
+    }
+
+    /**
+     * {@code TYPE:naturalKey} of the item this one lives under, or {@code null} for a top-level
+     * item (collection, global picklist, page, menu).
+     */
+    static String parentKey(String type, Map<String, Object> data) {
+        return switch (type) {
+            case FIELD, "VALIDATION_RULE" -> COLLECTION + ":" + data.get("collection_name");
+            case "PICKLIST_VALUE" -> "GLOBAL".equals(data.get("picklist_source_type"))
+                    ? "GLOBAL_PICKLIST:" + data.get("picklist_name")
+                    : COLLECTION + ":" + data.get("field_collection_name");
+            case "UI_MENU_ITEM" -> "UI_MENU:" + data.get("menu_name");
+            default -> null;
+        };
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> packageItems(Map<String, Object> pkg) {
+        return pkg == null || !(pkg.get("items") instanceof List<?> items)
+                ? List.of() : (List<Map<String, Object>>) items;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Map<String, Object>> dataByKey(Map<String, Object> pkg) {
+        Map<String, Map<String, Object>> byKey = new HashMap<>();
+        for (Map<String, Object> item : packageItems(pkg)) {
+            String type = (String) item.get("type");
+            Map<String, Object> data = (Map<String, Object>) item.get("data");
+            byKey.put(type + ":" + PackageImportService.naturalKeyFor(type, data), data);
+        }
+        return byKey;
+    }
+
+    // ── JAR modules: manifest collections ────────────────────────────────────────────────
 
     /**
      * Creates the manifest's collections and their fields, adopting any collection that exists.

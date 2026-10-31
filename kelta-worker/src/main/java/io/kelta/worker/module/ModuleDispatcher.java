@@ -210,6 +210,11 @@ final class ModuleDispatcher {
         if (found.isEmpty() || !TenantModuleData.STATUS_ACTIVE.equals(found.get().status())) {
             return Optional.empty();
         }
+        if (found.get().isExternal()) {
+            // An external module's webhook is proxied to its service from part 9d on; it has no
+            // in-process handler to dispatch to.
+            return Optional.empty();
+        }
 
         String handlerKey;
         try {

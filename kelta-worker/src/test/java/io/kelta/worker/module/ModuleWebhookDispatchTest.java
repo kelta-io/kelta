@@ -192,6 +192,18 @@ class ModuleWebhookDispatchTest {
     }
 
     @Test
+    @DisplayName("Dispatches nothing for an external module: its webhook is not an in-process handler")
+    void dispatchesNothingForAnExternalModule() {
+        TenantModuleData external = new TenantModuleData("mod-2", TENANT_ID, MODULE_ID, "External", "1.0.0",
+                null, "https://module.example.test", null, null, null, "{\"manifestVersion\":2}",
+                TenantModuleData.STATUS_ACTIVE, "user-1", Instant.now(), Instant.now(), null, List.of(),
+                "https://module.example.test", 1, "app-1", "svc-1");
+        when(moduleStore.findByTenantAndModuleId(TENANT_ID, MODULE_ID)).thenReturn(Optional.of(external));
+
+        assertThat(manager.dispatchWebhook(TENANT_ID, MODULE_ID, "{}", Map.of())).isEmpty();
+    }
+
+    @Test
     @DisplayName("Dispatches nothing when the manifest declares no webhook handler")
     void dispatchesNothingWithoutADeclaredHandler() {
         String noWebhook = MANIFEST_JSON.replace("\"webhookHandlerKey\": \"test:webhook\",", "");

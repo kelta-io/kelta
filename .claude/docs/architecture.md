@@ -645,6 +645,41 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   created and deactivated only by `ModuleServicePrincipalService` (worker; records + JDBC, one
   transaction under the tenant, then a Cerbos sync and `kelta.record.changed` for the profile and
   connected-app collections). Spec: `specs/module-platform/9-external-modules.md` §3.3.
+- **External modules installed by URL** (part 9c, V221). A `tenant_module` row with a
+  `base_url` is an external module: an HTTPS service, no JAR, nothing loaded on a pod
+  (`ModuleLoader` skips it). `ModuleController` dispatches on that: `POST /api/modules/plan
+  {baseUrl}` fetches `{baseUrl}/.well-known/kelta-module.json` (manifest v2,
+  `ModuleManifestParser.parseExternal`) and dry-runs its metadata package — it writes nothing and
+  answers `200` even when blocked (the plan *is* the answer: grants, owned collections,
+  capabilities, metadata CREATE/ADOPT/KEEP/SKIP_ADOPTED/FAILED, blockers, `planHash` = SHA-256 of the
+  canonical plan JSON). `POST /api/modules/install {baseUrl, planHash}` and
+  `POST /api/modules/{id}/upgrade {planHash}` re-plan and refuse a stale hash (`409`, error code
+  `PlanChanged`, fresh plan in `meta.plan`) or blockers (`422`, one error per blocker code); an
+  unreachable module is `502 ModuleUnreachable`. The apply (`ExternalModuleService`) writes the
+  row `INSTALLING`, provisions metadata with provenance, creates the service principal (9b) with
+  the approved grants plus full access to the collections the module `CREATED`, writes action rows
+  keyed `<moduleId>:<key>`, then calls `lifecycle installed`; a failing step marks the row
+  `FAILED` with `last_error`, and `enable` retries from the stored manifest. Upgrade regenerates
+  the principal's profile in place (`updatePermissions`). `GET /api/modules/{id}/uninstall-plan`
+  is slice 3's decision table (first match wins: `KEEP_ADOPTED`, `GONE`, `KEEP_UNVERIFIABLE`,
+  `KEEP_MODIFIED`, `KEEP_HAS_DATA` / `KEEP_HAS_DEPENDENTS` unless `purgeData`, `REMOVE`);
+  `DELETE /api/modules/{id}?planHash=…&purgeData=…` sends `lifecycle uninstalled` (best effort),
+  deactivates the principal, deletes the row, then removes the plan's `REMOVE` entries through
+  `QueryEngine` under `CollectionDeletionGuardHook.FORCE` (a `ScopedValue` bound to `purgeData`,
+  which wins over the request's own `?force`). Without `planHash` nothing provisioned is removed.
+  All of these are gated on `CUSTOMIZE_APPLICATION` in the controller, and every outcome publishes
+  `kelta.config.module.changed` (`UPGRADED` is new). **Platform → module trust:** every request
+  carries an ES256 assertion (`ModuleAssertionSigner`, `KELTA_MODULE_SIGNING_KEY`) with `iss`
+  (`KELTA_MODULE_ISSUER`), `aud` = module id, `sub` = install id, `tenant_id`/`tenant_slug`, `act`,
+  `htm`/`htu`, `body_sha256`, 60 s `exp`, `jti` and a `kid` header, plus the principal's token as
+  `Kelta-Access-Token` (`ModuleAccessTokenService`, client_credentials against kelta-auth, cached
+  per install until 60 s before expiry). The public keys are served at
+  **`GET /api/modules/.well-known/jwks.json`** (`ModuleJwksController`, unconditional,
+  `Cache-Control: public, max-age=300`), listed in the gateway's `unauthenticated-paths` as the
+  exact file beside `/api/modules/webhooks` (per-IP budget 120/min). Module traffic goes
+  through `ModuleHostGuard` (`KELTA_MODULE_ALLOWED_HOSTS`), never `OutboundUrlGuard`'s private-CIDR
+  list: https unless allow-listed, re-checked per request, redirects never followed.
+  Spec: `specs/module-platform/9-external-modules.md` §3.2, §3.5, §3.10.
 - **Owner-scoped collections** (member-data-ownership slice 2, V206). A collection may declare
   `ownerField` (`createdBy` or a LOOKUP→`users`), `ownerScope` (`NONE|PORTAL|ALL`) and
   `ownerScopeReads` (default true) — `collection.owner_field/owner_scope/owner_scope_reads`, on

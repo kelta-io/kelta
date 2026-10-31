@@ -9,5 +9,7 @@ public enum ModuleChangeType {
     INSTALLED,
     ENABLED,
     DISABLED,
-    UNINSTALLED
+    UNINSTALLED,
+    /** An external module moved to a higher version in place (part 9c). */
+    UPGRADED
 }

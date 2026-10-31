@@ -56,7 +56,19 @@ public final class KeltaStack {
     private static final String SERVICE_VERSION = "1.0.0-SNAPSHOT";
     private static final String ENCRYPTION_KEY;
     private static final String JWK_SET;
+    /**
+     * The worker's external-module signing key ({@code KELTA_MODULE_SIGNING_KEY}): a P-256
+     * PKCS#8 PEM generated per run, newlines escaped as {@code \n} the way an env file carries it.
+     */
+    private static final String MODULE_SIGNING_KEY;
     private static final String INTERNAL_TOKEN = "harness-internal-token";
+
+    /**
+     * Network alias of the stub external module a scenario starts
+     * ({@code ExternalModuleInstallScenarioTest}). The worker allow-lists it for module traffic
+     * only, which is what lets it use http and a private address.
+     */
+    public static final String STUB_MODULE_HOST = "stub-module";
 
     /**
      * HMAC signing keys the worker refuses to start without — there is deliberately no
@@ -108,6 +120,7 @@ public final class KeltaStack {
         try {
             ENCRYPTION_KEY = generateEncryptionKey();
             JWK_SET       = generateJwkSet();
+            MODULE_SIGNING_KEY = generateModuleSigningKey();
         } catch (Exception e) {
             throw new ExceptionInInitializerError(e);
         }
@@ -197,6 +210,8 @@ public final class KeltaStack {
             .withEnv("KELTA_TELEHEALTH_VISIT_SECRET", VISIT_SECRET)
             .withEnv("CAMPAIGN_TRACKING_SECRET",   CAMPAIGN_TRACKING_SECRET)
             .withEnv("KELTA_MAILBOX_VERP_SECRET",  MAILBOX_VERP_SECRET)
+            .withEnv("KELTA_MODULE_SIGNING_KEY",   MODULE_SIGNING_KEY)
+            .withEnv("KELTA_MODULE_ALLOWED_HOSTS", STUB_MODULE_HOST)
             .withEnv("EMAIL_ENABLED",              "false")
             .withEnv("SMTP_AUTH",                  "false")
             .withEnv("SMTP_STARTTLS",              "false")
@@ -617,6 +632,14 @@ public final class KeltaStack {
         byte[] key = new byte[32];
         new SecureRandom().nextBytes(key);
         return Base64.getEncoder().encodeToString(key);
+    }
+
+    private static String generateModuleSigningKey() throws Exception {
+        KeyPairGenerator gen = KeyPairGenerator.getInstance("EC");
+        gen.initialize(new java.security.spec.ECGenParameterSpec("secp256r1"), new SecureRandom());
+        String body = Base64.getMimeEncoder(64, "\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII))
+                .encodeToString(gen.generateKeyPair().getPrivate().getEncoded());
+        return ("-----BEGIN PRIVATE KEY-----\n" + body + "\n-----END PRIVATE KEY-----").replace("\n", "\\n");
     }
 
     private static String generateJwkSet() throws Exception {

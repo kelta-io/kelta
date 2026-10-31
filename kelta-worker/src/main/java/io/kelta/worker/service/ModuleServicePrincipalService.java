@@ -60,7 +60,8 @@ import java.util.regex.Pattern;
  * its cached responses. The user write publishes nothing: a record event on {@code users} would
  * start tenant flows and webhooks written for people.
  *
- * <p>Not called from install yet — part 9c's install plan apply is the caller.
+ * <p>Called by the external module install ({@code ExternalModuleService}): {@link #create} on
+ * install, {@link #updatePermissions} on upgrade, {@link #deactivate} on uninstall.
  */
 @Service
 public class ModuleServicePrincipalService {
@@ -126,6 +127,18 @@ public class ModuleServicePrincipalService {
     private static final String DEACTIVATE_USER = """
             UPDATE platform_user SET status = 'INACTIVE', updated_at = NOW()
             WHERE id = ? AND tenant_id = ? AND user_type = 'SERVICE'
+            """;
+    private static final String SELECT_SERVICE_PROFILE_ID = """
+            SELECT profile_id FROM platform_user
+            WHERE id = ? AND tenant_id = ? AND user_type = 'SERVICE' AND status = 'ACTIVE'
+            """;
+    private static final String DELETE_OBJECT_PERMISSIONS =
+            "DELETE FROM profile_object_permission WHERE tenant_id = ? AND profile_id = ?";
+    private static final String DELETE_FIELD_PERMISSIONS =
+            "DELETE FROM profile_field_permission WHERE tenant_id = ? AND profile_id = ?";
+    private static final String UPDATE_SYSTEM_PERMISSION = """
+            UPDATE profile_system_permission SET granted = ?
+            WHERE tenant_id = ? AND profile_id = ? AND permission_name = ?
             """;
     private static final String SELECT_CLIENT_CREDENTIALS = """
             SELECT client_id, client_secret_enc FROM connected_app
@@ -275,6 +288,57 @@ public class ModuleServicePrincipalService {
         log.info("Created service principal for module {} in tenant {}: user {}, app {}",
                 request.moduleKey(), tenantId, userId, appId);
         return new ServicePrincipal(userId, profileId, appId, clientId);
+    }
+
+    /**
+     * Regenerates an existing principal's profile from a new manifest's permissions (module
+     * upgrade): object and field grants are replaced, system grants rewritten, in one transaction.
+     * The user, the connected app and its secret are untouched, so tokens keep working and pick up
+     * the new profile on Cerbos's next sync.
+     *
+     * @param request {@code moduleKey}/{@code displayName}/{@code createdBy} are ignored
+     * @throws IllegalArgumentException as {@link #create}, or when {@code userId} is not an active
+     *                                  SERVICE user of the tenant; nothing is changed
+     */
+    public void updatePermissions(String tenantId, String userId, CreateRequest request) {
+        requireText(tenantId, "tenantId");
+        requireText(userId, "userId");
+        Set<String> systemGrants = systemGrants(request.permissions().system());
+        String profileId = TenantContext.callWithTenant(tenantId, () -> transactionTemplate.execute(status -> {
+            List<String> profiles = jdbcTemplate.queryForList(SELECT_SERVICE_PROFILE_ID, String.class,
+                    userId, tenantId);
+            if (profiles.isEmpty() || profiles.get(0) == null) {
+                throw new IllegalArgumentException("Not an active service principal of this tenant: " + userId);
+            }
+            String id = profiles.get(0);
+            Map<String, ObjectAccess> objectGrants = objectGrants(tenantId, request);
+            List<ResolvedField> fieldGrants = fieldGrants(tenantId, request.permissions().fields());
+
+            jdbcTemplate.update(DELETE_OBJECT_PERMISSIONS, tenantId, id);
+            jdbcTemplate.update(DELETE_FIELD_PERMISSIONS, tenantId, id);
+            for (String permission : TenantProvisioningHook.ALL_PERMISSIONS) {
+                if (jdbcTemplate.update(UPDATE_SYSTEM_PERMISSION, systemGrants.contains(permission),
+                        tenantId, id, permission) == 0) {
+                    jdbcTemplate.update(INSERT_SYSTEM_PERMISSION, UUID.randomUUID().toString(), tenantId,
+                            id, permission, systemGrants.contains(permission));
+                }
+            }
+            objectGrants.forEach((collectionId, access) -> jdbcTemplate.update(INSERT_OBJECT_PERMISSION,
+                    UUID.randomUUID().toString(), tenantId, id, collectionId,
+                    access.create(), access.read(), access.edit(), access.delete()));
+            for (ResolvedField field : fieldGrants) {
+                jdbcTemplate.update(INSERT_FIELD_PERMISSION, UUID.randomUUID().toString(), tenantId,
+                        id, field.collectionId(), field.fieldId(), field.visibility());
+            }
+            return id;
+        }));
+
+        cerbosSync.requestSync(tenantId);
+        for (String collection : List.of("profile-system-permissions",
+                "profile-object-permissions", "profile-field-permissions")) {
+            broadcast(tenantId, ChangeType.UPDATED, collection, profileId);
+        }
+        log.info("Regenerated the profile of service principal {} in tenant {}", userId, tenantId);
     }
 
     /**

@@ -57,6 +57,8 @@ POST /api/modules/{moduleId}/enable
 GET /api/modules/{moduleId}/health
 GET /api/modules/{moduleId}/provisioned-resources
 GET /api/modules/{moduleId}/ui-bundle.js
+GET /api/modules/{moduleId}/uninstall-plan
+POST /api/modules/{moduleId}/upgrade
 DELETE /api/modules/{moduleId}/x/{p1}
 GET /api/modules/{moduleId}/x/{p1}
 PATCH /api/modules/{moduleId}/x/{p1}

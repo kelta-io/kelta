@@ -4,10 +4,14 @@ import io.kelta.jsonapi.JsonApiResponseBuilder;
 import io.kelta.runtime.event.ModuleChangeType;
 import io.kelta.runtime.module.TenantModuleData;
 import io.kelta.worker.interceptor.PermissionGatedController;
+import io.kelta.worker.module.ExternalModulePlan;
+import io.kelta.worker.module.ExternalModuleService;
 import io.kelta.worker.module.ModuleConfigEventPublisher;
+import io.kelta.worker.module.ModuleHttpClient;
 import io.kelta.worker.module.ModuleProvenanceStore;
 import io.kelta.worker.module.ModuleSignatureException;
 import io.kelta.worker.module.ModuleRouteRegistry;
+import io.kelta.worker.module.ModuleUninstaller;
 import io.kelta.worker.module.RuntimeModuleManager;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
@@ -22,9 +26,11 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * REST endpoints for runtime module management.
@@ -37,6 +43,16 @@ import java.util.Map;
  * uninstalling are gated here on {@code CUSTOMIZE_APPLICATION}: a module provisions collections,
  * flows and routes into the tenant. Reads stay at {@code API_ACCESS} — the UI loads module
  * bundles and actions for every user.
+ * <p>
+ * <b>External modules</b> (HTTPS services installed by URL, part 9c of
+ * {@code specs/module-platform/9-external-modules.md}) share these endpoints: {@code POST /plan}
+ * returns what installing a base URL would grant and do, {@code POST /install} with
+ * {@code baseUrl} + {@code planHash} applies exactly that plan, {@code POST /{id}/upgrade}
+ * re-plans from the stored URL, and enable / disable / delete dispatch on the row. A stale
+ * {@code planHash} is {@code 409} with the fresh plan in {@code meta.plan}; blockers are
+ * {@code 422} with one error per blocker code. All of them sit behind
+ * {@value #MANAGE_PERMISSION}, including deleting what a module provisioned with
+ * {@code purgeData=true}.
  *
  * @since 1.0.0
  */
@@ -59,18 +75,26 @@ public class ModuleController implements PermissionGatedController {
     private final CerbosPermissionResolver permissionResolver;
     private final BootstrapRepository bootstrapRepository;
 
+    /** Null when module support is switched off; external-module endpoints then answer 404. */
+    private final ExternalModuleService externalModules;
+    private final ModuleUninstaller uninstaller;
+
     public ModuleController(RuntimeModuleManager runtimeModuleManager,
                              ModuleConfigEventPublisher eventPublisher,
                             ObjectProvider<ModuleRouteRegistry> moduleRouteRegistry,
                             ObjectProvider<ModuleProvenanceStore> provenanceStore,
                             CerbosPermissionResolver permissionResolver,
-                            BootstrapRepository bootstrapRepository) {
+                            BootstrapRepository bootstrapRepository,
+                            ObjectProvider<ExternalModuleService> externalModules,
+                            ObjectProvider<ModuleUninstaller> uninstaller) {
         this.runtimeModuleManager = runtimeModuleManager;
         this.eventPublisher = eventPublisher;
         this.moduleRouteRegistry = moduleRouteRegistry.getIfAvailable();
         this.provenanceStore = provenanceStore.getIfAvailable();
         this.permissionResolver = permissionResolver;
         this.bootstrapRepository = bootstrapRepository;
+        this.externalModules = externalModules.getIfAvailable();
+        this.uninstaller = uninstaller.getIfAvailable();
     }
 
     /**
@@ -114,6 +138,9 @@ public class ModuleController implements PermissionGatedController {
             @RequestBody Map<String, Object> body,
             HttpServletRequest request) {
         requireManagePermission(request);
+        if (body.get("baseUrl") != null) {
+            return installExternal(tenantId, userId, body);
+        }
         try {
             String manifestJson = (String) body.get("manifest");
             String sourceUrl = (String) body.getOrDefault("sourceUrl", "local://upload");
@@ -142,6 +169,98 @@ public class ModuleController implements PermissionGatedController {
             return ResponseEntity.badRequest().body(
                     JsonApiResponseBuilder.error("400", "Bad Request", e.getMessage()));
         }
+    }
+
+    /**
+     * Plans installing the external module served at {@code baseUrl}: fetches and validates its
+     * manifest and dry-runs its metadata. Writes nothing. A plan with blockers is still {@code 200}
+     * — the plan is the answer; {@code 400} for an unacceptable URL or a manifest that is not
+     * JSON, {@code 502} when the manifest cannot be fetched.
+     */
+    @PostMapping("/plan")
+    public ResponseEntity<Map<String, Object>> planModule(
+            @RequestHeader("X-Tenant-ID") String tenantId,
+            @RequestHeader(value = "X-User-ID", required = false) String userId,
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        requireManagePermission(request);
+        if (externalModules == null) {
+            return ResponseEntity.notFound().build();
+        }
+        try {
+            ExternalModulePlan plan = externalModules.plan(tenantId, (String) body.get("baseUrl"),
+                    userId != null ? userId : "system");
+            return ResponseEntity.ok(planDocument(plan.attributes()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(
+                    JsonApiResponseBuilder.error("400", "Bad Request", e.getMessage()));
+        } catch (ModuleHttpClient.ModuleCallException e) {
+            return moduleUnreachable(e);
+        }
+    }
+
+    private ResponseEntity<Map<String, Object>> installExternal(String tenantId, String userId,
+                                                                Map<String, Object> body) {
+        if (externalModules == null) {
+            return ResponseEntity.notFound().build();
+        }
+        try {
+            TenantModuleData installed = externalModules.install(tenantId, (String) body.get("baseUrl"),
+                    (String) body.get("planHash"), userId != null ? userId : "system");
+            return ResponseEntity.ok(
+                    JsonApiResponseBuilder.single("modules", installed.id(), moduleToAttributes(installed)));
+        } catch (RuntimeException e) {
+            return planFailure(e, "install");
+        }
+    }
+
+    /**
+     * Upgrades an installed external module from its stored base URL, applying the plan whose
+     * {@code planHash} the admin reviewed ({@code POST /plan} with that base URL). The new version
+     * must be strictly higher; the service principal's profile is regenerated.
+     */
+    @PostMapping("/{moduleId}/upgrade")
+    public ResponseEntity<Map<String, Object>> upgradeModule(
+            @RequestHeader("X-Tenant-ID") String tenantId,
+            @RequestHeader(value = "X-User-ID", required = false) String userId,
+            @PathVariable String moduleId,
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        requireManagePermission(request);
+        if (externalModules == null) {
+            return ResponseEntity.notFound().build();
+        }
+        try {
+            TenantModuleData upgraded = externalModules.upgrade(tenantId, moduleId,
+                    (String) body.get("planHash"), userId != null ? userId : "system");
+            return ResponseEntity.ok(
+                    JsonApiResponseBuilder.single("modules", upgraded.id(), moduleToAttributes(upgraded)));
+        } catch (RuntimeException e) {
+            return planFailure(e, "upgrade");
+        }
+    }
+
+    /**
+     * What uninstalling an external module would remove and keep, per provisioned resource
+     * (slice 3's decision table). Writes nothing; send its {@code planHash} to {@code DELETE}.
+     */
+    @GetMapping("/{moduleId}/uninstall-plan")
+    public ResponseEntity<Map<String, Object>> getUninstallPlan(
+            @RequestHeader("X-Tenant-ID") String tenantId,
+            @PathVariable String moduleId,
+            @RequestParam(value = "purgeData", defaultValue = "false") boolean purgeData,
+            HttpServletRequest request) {
+        requireManagePermission(request);
+        Optional<TenantModuleData> module = findModule(tenantId, moduleId);
+        if (module.isEmpty() || uninstaller == null) {
+            return ResponseEntity.notFound().build();
+        }
+        if (!module.get().isExternal()) {
+            return ResponseEntity.status(409).body(JsonApiResponseBuilder.error("409", "Conflict",
+                    "Uninstall plans are for external modules; a JAR module's uninstall removes nothing"));
+        }
+        return ResponseEntity.ok(JsonApiResponseBuilder.single("module-uninstall-plans", moduleId,
+                uninstaller.plan(module.get(), purgeData)));
     }
 
     /**
@@ -206,6 +325,16 @@ public class ModuleController implements PermissionGatedController {
             @PathVariable String moduleId,
             HttpServletRequest request) {
         requireManagePermission(request);
+        Optional<TenantModuleData> existing = findModule(tenantId, moduleId);
+        if (existing.isPresent() && existing.get().isExternal() && externalModules != null) {
+            TenantModuleData enabled = externalModules.enable(tenantId, moduleId, userIdOf(request));
+            Map<String, Object> attrs = new LinkedHashMap<>();
+            attrs.put("status", "enabled");
+            attrs.put("moduleId", moduleId);
+            attrs.put("moduleStatus", enabled.status());
+            putLoadDiagnostics(attrs, enabled);
+            return ResponseEntity.ok(JsonApiResponseBuilder.single("modules", moduleId, attrs));
+        }
         try {
             runtimeModuleManager.enableModule(tenantId, moduleId);
 
@@ -241,6 +370,14 @@ public class ModuleController implements PermissionGatedController {
             @PathVariable String moduleId,
             HttpServletRequest request) {
         requireManagePermission(request);
+        Optional<TenantModuleData> existing = findModule(tenantId, moduleId);
+        if (existing.isPresent() && existing.get().isExternal() && externalModules != null) {
+            externalModules.disable(tenantId, moduleId);
+            Map<String, Object> attrs = new LinkedHashMap<>();
+            attrs.put("status", "disabled");
+            attrs.put("moduleId", moduleId);
+            return ResponseEntity.ok(JsonApiResponseBuilder.single("modules", moduleId, attrs));
+        }
         try {
             var module = runtimeModuleManager.listModules(tenantId).stream()
                 .filter(m -> m.moduleId().equals(moduleId))
@@ -265,13 +402,28 @@ public class ModuleController implements PermissionGatedController {
 
     /**
      * Uninstalls a module entirely.
+     *
+     * <p>For an external module, {@code planHash} (from {@code GET /{id}/uninstall-plan} with the
+     * same {@code purgeData}) also removes the provisioned resources the plan marks
+     * {@code REMOVE}; a stale hash is {@code 409} with the fresh plan. Without it nothing
+     * provisioned is removed and {@code retained} lists it all.
      */
     @DeleteMapping("/{moduleId}")
     public ResponseEntity<Map<String, Object>> uninstallModule(
             @RequestHeader("X-Tenant-ID") String tenantId,
             @PathVariable String moduleId,
+            @RequestParam(value = "planHash", required = false) String planHash,
+            @RequestParam(value = "purgeData", defaultValue = "false") boolean purgeData,
             HttpServletRequest request) {
         requireManagePermission(request);
+        Optional<TenantModuleData> existing = findModule(tenantId, moduleId);
+        if (existing.isPresent() && existing.get().isExternal() && externalModules != null && uninstaller != null) {
+            return uninstallExternal(existing.get(), planHash, purgeData);
+        }
+        if (planHash != null && existing.isPresent()) {
+            return ResponseEntity.status(409).body(JsonApiResponseBuilder.error("409", "Conflict",
+                    "planHash applies to external modules; a JAR module's uninstall removes nothing"));
+        }
         try {
             var module = runtimeModuleManager.listModules(tenantId).stream()
                 .filter(m -> m.moduleId().equals(moduleId))
@@ -292,6 +444,93 @@ public class ModuleController implements PermissionGatedController {
             return ResponseEntity.internalServerError().body(
                     JsonApiResponseBuilder.error("500", "Internal Server Error", e.getMessage()));
         }
+    }
+
+    private ResponseEntity<Map<String, Object>> uninstallExternal(TenantModuleData module, String planHash,
+                                                                  boolean purgeData) {
+        if (planHash != null) {
+            Map<String, Object> plan = uninstaller.plan(module, purgeData);
+            if (!planHash.equals(plan.get("planHash"))) {
+                return planChanged(plan, "module-uninstall-plans");
+            }
+        }
+        externalModules.uninstall(module, purgeData);
+        Map<String, Object> attrs = new LinkedHashMap<>();
+        attrs.put("status", "uninstalled");
+        attrs.put("moduleId", module.moduleId());
+        if (planHash != null) {
+            attrs.putAll(uninstaller.apply(module, purgeData));
+        } else {
+            attrs.put("removed", List.of());
+            attrs.put("retained", uninstaller.retainedAll(module.tenantId(), module.moduleId()));
+            attrs.put("failed", List.of());
+        }
+        return ResponseEntity.ok(JsonApiResponseBuilder.single("modules", module.moduleId(), attrs));
+    }
+
+    /** Maps an external install/upgrade failure to its status: 409 plan changed, 422 blockers, … */
+    private ResponseEntity<Map<String, Object>> planFailure(RuntimeException e, String operation) {
+        return switch (e) {
+            case ExternalModulePlan.PlanChangedException changed -> planChanged(changed.plan(), "module-install-plans");
+            case ExternalModulePlan.PlanBlockedException blocked -> {
+                List<Map<String, Object>> errors = new ArrayList<>();
+                for (Map<String, Object> blocker : blocked.blockers()) {
+                    Map<String, Object> error = new LinkedHashMap<>();
+                    error.put("status", "422");
+                    error.put("code", blocker.get("code"));
+                    error.put("title", "Plan Blocked");
+                    error.put("detail", blocker.get("message"));
+                    errors.add(error);
+                }
+                Map<String, Object> document = new LinkedHashMap<>();
+                document.put("errors", errors);
+                document.put("meta", Map.of("plan", planDocument(blocked.plan()).get("data")));
+                yield ResponseEntity.status(422).body(document);
+            }
+            case ModuleHttpClient.ModuleCallException call -> moduleUnreachable(call);
+            case IllegalStateException conflict -> ResponseEntity.status(409).body(
+                    JsonApiResponseBuilder.error("409", "Conflict", conflict.getMessage()));
+            case IllegalArgumentException bad -> bad.getMessage() != null && bad.getMessage().contains("not found")
+                    ? ResponseEntity.notFound().build()
+                    : ResponseEntity.badRequest().body(JsonApiResponseBuilder.error("400", "Bad Request", bad.getMessage()));
+            default -> {
+                log.error("External module {} failed: {}", operation, e.getMessage(), e);
+                yield ResponseEntity.internalServerError().body(
+                        JsonApiResponseBuilder.error("500", "Internal Server Error", e.getMessage()));
+            }
+        };
+    }
+
+    private static ResponseEntity<Map<String, Object>> planChanged(Map<String, Object> plan, String type) {
+        Map<String, Object> document = new LinkedHashMap<>(JsonApiResponseBuilder.error("409", "PlanChanged",
+                "Plan Changed", "The plan changed since it was reviewed; review meta.plan and send its planHash"));
+        document.put("meta", Map.of("plan", planDocument(plan, type).get("data")));
+        return ResponseEntity.status(409).body(document);
+    }
+
+    private static ResponseEntity<Map<String, Object>> moduleUnreachable(ModuleHttpClient.ModuleCallException e) {
+        return ResponseEntity.status(502).body(JsonApiResponseBuilder.error("502", "ModuleUnreachable",
+                "Module Unreachable", e.getMessage()));
+    }
+
+    private static Map<String, Object> planDocument(Map<String, Object> attributes) {
+        return planDocument(attributes, "module-install-plans");
+    }
+
+    private static Map<String, Object> planDocument(Map<String, Object> attributes, String type) {
+        Object id = attributes.get("moduleId");
+        return JsonApiResponseBuilder.single(type, id == null ? "unknown" : String.valueOf(id), attributes);
+    }
+
+    private Optional<TenantModuleData> findModule(String tenantId, String moduleId) {
+        return runtimeModuleManager.listModules(tenantId).stream()
+                .filter(m -> m.moduleId().equals(moduleId))
+                .findFirst();
+    }
+
+    private static String userIdOf(HttpServletRequest request) {
+        String userId = request.getHeader("X-User-ID");
+        return userId != null ? userId : "system";
     }
 
     /**
@@ -443,6 +682,9 @@ public class ModuleController implements PermissionGatedController {
         // Lets the admin UI decide which modules to fetch a bundle for, rather than probing
         // every installed module with a request that would 404 for most of them.
         map.put("uiBundlePath", uiBundlePath(m));
+        // An external module is an HTTPS service installed by URL; null for a JAR module.
+        map.put("baseUrl", m.baseUrl());
+        map.put("protocolVersion", m.protocolVersion());
         putLoadDiagnostics(map, m);
         return map;
     }
@@ -479,6 +721,9 @@ public class ModuleController implements PermissionGatedController {
 
     /** The module's declared UI bundle path, or null when it ships no UI or has a bad manifest. */
     private String uiBundlePath(TenantModuleData m) {
+        if (m.isExternal()) {
+            return null; // external UI bundles are pinned and served from part 9e on
+        }
         try {
             return runtimeModuleManager.parseManifest(m.manifest()).uiBundlePath();
         } catch (RuntimeException e) {
@@ -497,6 +742,11 @@ public class ModuleController implements PermissionGatedController {
         attrs.put("installedBy", m.installedBy());
         attrs.put("installedAt", m.installedAt() != null ? m.installedAt().toString() : null);
         attrs.put("updatedAt", m.updatedAt() != null ? m.updatedAt().toString() : null);
+        if (m.isExternal()) {
+            attrs.put("baseUrl", m.baseUrl());
+            attrs.put("protocolVersion", m.protocolVersion());
+            attrs.put("lastError", runtimeModuleManager.loadDiagnostics(m.id()).get("lastError"));
+        }
         return attrs;
     }
 }

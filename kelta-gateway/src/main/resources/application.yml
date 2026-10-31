@@ -149,8 +149,9 @@ kelta:
       # pool of AWS IPs, so a tight budget drops real customer mail rather than abuse.
       # /api/webhooks covers flow webhooks (POST /api/webhooks/{flowId}); all flow
       # webhooks from one IP share that bucket. /api/webhooks/ses keeps a mail-like budget.
+      # /api/modules/.well-known (the module-signing JWKS) is fetched rarely — modules cache it.
       # Keep this fallback equal to IpRateLimitFilter.DEFAULT_IP_PATHS (pinned by a test).
-      ip-paths: ${RATE_LIMIT_IP_PATHS:/actuator/health=100,/api/modules/webhooks=300,/api/webhooks=300,/api/webhooks/mail=600,/api/webhooks/ses=600}
+      ip-paths: ${RATE_LIMIT_IP_PATHS:/actuator/health=100,/api/modules/webhooks=300,/api/modules/.well-known=120,/api/webhooks=300,/api/webhooks/mail=600,/api/webhooks/ses=600}
       # IPs / CIDR ranges exempt from ALL rate limiting (per-IP and per-tenant).
       # For trusted infrastructure whose traffic is legitimately bursty: uptime
       # probes, in-cluster callers, a payment processor's webhook egress ranges.
@@ -224,10 +225,15 @@ kelta:
       # authenticated by their signed JWT + body digest, and runtime-module webhooks
       # where the dispatched module handler owns its own verification — e.g. the
       # billing module's payment-processor webhook, checked against its HMAC signature).
+      # /api/modules/.well-known/jwks.json is the platform's PUBLIC signing keys for
+      # external modules (module-platform part 9c): a module verifies every platform
+      # request against them, so it must fetch them with no credential. It is public key
+      # material, not tenant data, and has no tenant; it is listed as the exact file, not
+      # the directory, so nothing else under /api/modules opens with it.
       # NOTE: an unauthenticated path also bypasses TenantIpAllowlistFilter, so a
       # restricted tenant gets no network restriction there — the endpoint's own
       # signature check is the only trust anchor. Keep these prefixes narrow.
-      unauthenticated-paths: /otel,/api/webhooks,/scim,/api/track,/api/telehealth/visits,/api/telehealth/webhooks,/api/modules/webhooks
+      unauthenticated-paths: /otel,/api/webhooks,/scim,/api/track,/api/telehealth/visits,/api/telehealth/webhooks,/api/modules/webhooks,/api/modules/.well-known/jwks.json
 
 # Actuator configuration for health and metrics
 management:

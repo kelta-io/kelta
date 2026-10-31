@@ -52,7 +52,9 @@ class ModuleServicePrincipalServiceTest {
         final Map<String, String> fields = new HashMap<>();
         List<String> appIds = List.of();
         List<Map<String, Object>> credentialRows = List.of();
+        final Map<String, String> serviceProfiles = new HashMap<>();
         int deactivatedUsers = 1;
+        boolean systemPermissionRowsExist = true;
 
         @Override
         public int update(String sql, Object... args) {
@@ -61,6 +63,9 @@ class ModuleServicePrincipalServiceTest {
             row[0] = sql;
             System.arraycopy(args, 0, row, 1, args.length);
             updates.add(row);
+            if (sql.contains("UPDATE profile_system_permission")) {
+                return systemPermissionRowsExist ? 1 : 0;
+            }
             return sql.contains("UPDATE platform_user") ? deactivatedUsers : 1;
         }
 
@@ -77,6 +82,8 @@ class ModuleServicePrincipalServiceTest {
                 value = visibleCollections.get((String) args[0]);
             } else if (sql.contains("FROM connected_app")) {
                 return (List<T>) appIds;
+            } else if (sql.contains("FROM platform_user")) {
+                value = serviceProfiles.get((String) args[0]);
             } else {
                 throw new AssertionError("Unexpected query: " + sql);
             }
@@ -273,6 +280,68 @@ class ModuleServicePrincipalServiceTest {
             }
             assertThat(jdbc.updates).isEmpty();
             verifyNoInteractions(cerbosSync, eventPublisher);
+        }
+    }
+
+    @Nested
+    @DisplayName("updatePermissions")
+    class UpdatePermissions {
+
+        @Test
+        @DisplayName("replaces object and field grants and rewrites every system grant of the existing profile")
+        void replacesGrants() {
+            jdbc.serviceProfiles.put("svc-1", "profile-1");
+
+            service.updatePermissions(TENANT, "svc-1", request(new Permissions(
+                    List.of(new ObjectGrant("bookings", false, true, false, false)), List.of(),
+                    List.of("MANAGE_USERS"))));
+
+            assertThat(jdbc.updatesTo("DELETE FROM profile_object_permission")).hasSize(1)
+                    .first().satisfies(row -> assertThat(row).containsSubsequence(TENANT, "profile-1"));
+            assertThat(jdbc.updatesTo("DELETE FROM profile_field_permission")).hasSize(1);
+            Map<Object, Object> granted = new HashMap<>();
+            jdbc.updatesTo("UPDATE profile_system_permission").forEach(row -> granted.put(row[4], row[1]));
+            assertThat(granted).hasSize(TenantProvisioningHook.ALL_PERMISSIONS.size())
+                    .containsEntry("API_ACCESS", true).containsEntry("MANAGE_USERS", true)
+                    .containsEntry("VIEW_SETUP", false);
+            assertThat(jdbc.updatesTo("INSERT INTO profile_system_permission")).isEmpty();
+
+            Map<Object, List<Object>> objects = new HashMap<>();
+            jdbc.updatesTo("INSERT INTO profile_object_permission").forEach(row ->
+                    objects.put(row[4], List.of(row[5], row[6], row[7], row[8])));
+            assertThat(objects).containsOnlyKeys("col-bookings", "col-subs");
+            assertThat(objects.get("col-subs")).containsExactly(true, true, true, true);
+            assertThat(jdbc.updatesTo("INSERT INTO profile_field_permission")).isEmpty();
+            // The user, its app and its secret are untouched.
+            assertThat(jdbc.updatesTo("platform_user")).isEmpty();
+            assertThat(jdbc.updatesTo("connected_app")).isEmpty();
+
+            verify(cerbosSync).requestSync(TENANT);
+            verify(eventPublisher).publish(eq("kelta.record.changed." + TENANT + ".profile-object-permissions"),
+                    any());
+        }
+
+        @Test
+        @DisplayName("inserts a system grant row a permission added since the profile was generated is missing")
+        void insertsMissingSystemRows() {
+            jdbc.serviceProfiles.put("svc-1", "profile-1");
+            jdbc.systemPermissionRowsExist = false;
+
+            service.updatePermissions(TENANT, "svc-1", request(readUsersWithHiddenEmail()));
+
+            assertThat(jdbc.updatesTo("INSERT INTO profile_system_permission"))
+                    .hasSize(TenantProvisioningHook.ALL_PERMISSIONS.size());
+        }
+
+        @Test
+        @DisplayName("refuses a user that is not an active SERVICE user of the tenant, changing nothing")
+        void refusesUnknownPrincipal() {
+            assertThatThrownBy(() -> service.updatePermissions(TENANT, "person-1",
+                    request(readUsersWithHiddenEmail())))
+                    .isInstanceOf(IllegalArgumentException.class);
+
+            assertThat(jdbc.updates).isEmpty();
+            verify(cerbosSync, never()).requestSync(any());
         }
     }
 
