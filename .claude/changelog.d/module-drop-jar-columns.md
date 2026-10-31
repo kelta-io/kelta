@@ -1,0 +1,1 @@
+- 2026-10-31 refactor(modules): drop the JAR module columns, their index and `tenant_module_signing_key` (V226, the contract half of module-platform 9g; deploy only once no worker pod runs an image from before V225)

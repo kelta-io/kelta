@@ -1039,7 +1039,7 @@ works — which reads as a method-specific bug.
 stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 `CollectionSchemaControllerTest`).
 
-### Module-platform 9g rollout — expand (V225), then contract (separate migration)
+### Module-platform 9g rollout — expand (V225), then contract (V226)
 
 9g removes the JAR module path in two steps, because the previous worker image keeps serving while
 the rolling update replaces it, and that image reads every JAR column on every module path.
@@ -1069,8 +1069,8 @@ the rolling update replaces it, and that image reads every JAR column on every m
 - **This release neither reads nor writes the JAR columns.** They, their
   `idx_tenant_module_signature_key` index and the `tenant_module_signing_key` table are dead
   until the contract migration. They are nullable or defaulted, so the new `INSERT` omits them.
-- **The contract migration ships as its own PR** and drops them. Merge it only after the 9g release
-  is deployed and no worker pod still runs the previous image. Once it has run, the previous image
+- **V226 (contract) ships as its own PR** and drops them. Merge it only after the 9g release is
+  deployed and no worker pod still runs the previous image. Once it has run, the previous image
   fails every module read (its row mapper throws), so a rollback past it means reverting the 9g
   code and restoring the columns and table from V1, V186 and V189.
 

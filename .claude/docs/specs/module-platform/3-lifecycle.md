@@ -6,7 +6,7 @@
 > (2026-10-31, pending merge) deleted the in-process JAR path this spec was designed against:
 > `POST /api/modules/install-jar`, `RuntimeModuleManager`, JAR signatures and their keys, every use
 > of the `tenant_module` JAR columns (`s3_key`, `jar_checksum`, `jar_signature`, `module_class`, …;
-> dropped by the 9g contract migration) and the JAR manifest (v1). Every JAR-specific step below is history; read
+> dropped by the 9g contract migration, V226) and the JAR manifest (v1). Every JAR-specific step below is history; read
 > [`9-external-modules.md`](9-external-modules.md) §3.5 for what was built.
 > Originally: 🔴 spec written (KLT-537), split into three PR-sized parts (3a, 3b, 3c in §1).
 > Source-verified against main `6488c0c` on 2026-10-11. **Flyway directory head at that base:

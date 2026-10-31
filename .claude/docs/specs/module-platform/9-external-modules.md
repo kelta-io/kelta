@@ -13,7 +13,7 @@
 > (§3.6.2). 9g (delete the JAR path) built 2026-10-31, pending merge — every module is an
 > external service installed by URL; the JAR upload, signing keys, sandboxed classloader,
 > quarantine/stub statuses and load retry are gone, and V225 refuses to run while a JAR install is
-> left, then makes `base_url` `NOT NULL`; a separate contract migration drops the JAR columns and
+> left, then makes `base_url` `NOT NULL`; the contract migration V226 drops the JAR columns and
 > `tenant_module_signing_key` once no old-image worker pod is left. The settings form
 > (§3.8) and a dead-letter list are not built yet. Planning spec for replacing the
 > in-process JAR module path with modules that run as **separate HTTP services, in any language**.
@@ -99,7 +99,7 @@ by hash at install so a running module cannot swap it later (§3.9).
 | 9e | Event delivery (NATS → HTTP) + UI bundle pinning + Modules page install-by-URL and consent screen — **built** (V222 `module_event_dead_letter`, `ModuleEventDeliveryListener`, `EventSubscription.Redelivery`, `ExternalModuleUiBundles`; Modules page: install from URL with the plan review, upgrade re-consent, uninstall plan, health). Deferred: the settings form (§3.8), a dead-letter list or replay | **yes, no auto-merge** | 9d |
 | 9e.1 | Module credential read: `GET /api/modules/self/credentials/{name}` for the calling install's declared credentials, audited as the module (§3.3) — **built** (`ModuleCredentialController`, `ModuleCredentialService`; gateway forwards the token's `connected_app_id` as `X-Connected-App-Id`; no migration) | **yes, no auto-merge** | 9e |
 | 9f | Rust billing module + `kelta-module` Rust SDK; cut the prod tenant over — **built** (`kelta-modules/sdk-rust`, `kelta-modules/billing`; the JAR moved to `kelta-modules/billing-jar` for rollback, deleted in 9g; CI `test-rust-modules`, image `kelta-modules/kelta-billing` in the registry, `BillingModuleScenarioTest`). Every billing tenant cut over 2026-10-31: runbook `kelta-modules/billing/CUTOVER.md` | **yes, no auto-merge** (assertion verification + credential handling) | 9e.1 |
-| 9g | Delete the JAR path — **built** 2026-10-31, pending merge (V225, expand: refuses to run while a `tenant_module` row has no `base_url` or is `QUARANTINED`/`STUB`, then `base_url NOT NULL` and narrows `chk_module_status`; the JAR columns and `tenant_module_signing_key` stay, unread, for a separate contract migration; worker classloader/loader/installer/registrar/dispatcher/signature verifier/load retry, `RuntimeModuleManager`, `ModuleSigningKeyController` and runtime-core `ModuleManifest` (v1), `ModuleSigningKey(Store)`, `KeltaModule.getServices()` deleted; `POST /api/modules/install-jar` and the signing-key endpoints gone; `kelta-modules/billing-jar/` and CI `test-runtime-modules` removed) | — | 9f soaked one release |
+| 9g | Delete the JAR path — **built** 2026-10-31, pending merge (V225, expand: refuses to run while a `tenant_module` row has no `base_url` or is `QUARANTINED`/`STUB`, then `base_url NOT NULL` and narrows `chk_module_status`; the JAR columns and `tenant_module_signing_key` stay, unread, until the contract migration V226 drops them; worker classloader/loader/installer/registrar/dispatcher/signature verifier/load retry, `RuntimeModuleManager`, `ModuleSigningKeyController` and runtime-core `ModuleManifest` (v1), `ModuleSigningKey(Store)`, `KeltaModule.getServices()` deleted; `POST /api/modules/install-jar` and the signing-key endpoints gone; `kelta-modules/billing-jar/` and CI `test-runtime-modules` removed) | — | 9f soaked one release |
 | 9h | Long-running actions with task tokens: `202` parks the flow step; the module completes it with `POST /api/modules/self/tasks/complete`, the token in the body (§3.6.2) — **built** (V223 `module_async_task` + `flow_pending_resume.claimed_at`, `ModuleAsyncTaskStore`, `ModuleTaskService`, `ModuleTaskController`, `ModuleSelfPrincipal`; runtime-core `AwaitedTaskOutcomes`, `ActionResult.awaiting`, `FlowEngine.resumeAwaitedTask`; resume claim lease) | **yes, no auto-merge** (a completion resumes a tenant's flow with module data) | 9d |
 
 Standing acceptance lines for every code part: `/verify` green; a `.claude/changelog.d/` fragment;
@@ -550,7 +550,7 @@ can change after install) and follows no redirects.
 `ui_bundle_sha256 varchar(64)`, `ui_bundle_key text`. `s3_key`, `jar_checksum`, `jar_signature`,
 `module_class` became nullable in 9c; since 9g nothing reads them, nor `jar_size_bytes`,
 `jar_signature_key_fingerprint`, `last_loaded_at` or `load_attempts`, and the 9g contract migration
-drops them all. `base_url` is `NOT NULL` since V225.
+(V226) drops them all. `base_url` is `NOT NULL` since V225.
 
 New: `module_event_dead_letter (id, tenant_id, tenant_module_id, event_id, payload jsonb,
 last_status int, last_error text, attempts int, created_at)` with the standard tenant RLS policy.
@@ -577,7 +577,7 @@ None in 9a. Later parts, numbered at their own head+1 when written (head is **V2
   status `QUARANTINED`/`STUB`; then `base_url SET NOT NULL`; `chk_module_status` lost
   `QUARANTINED`/`STUB`. It is the expand half and drops nothing: the previous worker image reads
   every JAR column while the rollout replaces it.
-- 9g contract (separate PR, numbered at its own head+1): drops `jar_checksum`, `jar_size_bytes`,
+- 9g contract (V226, built, its own PR): drops `jar_checksum`, `jar_size_bytes`,
   `module_class`, `s3_key`, `jar_signature`, `jar_signature_key_fingerprint`
   (+ `idx_tenant_module_signature_key`), `last_loaded_at`, `load_attempts` and the
   `tenant_module_signing_key` table (V186). Merges only after the 9g release is deployed and no
