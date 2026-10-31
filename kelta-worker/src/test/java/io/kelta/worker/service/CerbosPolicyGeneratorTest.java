@@ -7,6 +7,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.List;
 import java.util.Map;
@@ -504,7 +506,115 @@ class CerbosPolicyGeneratorTest {
 
             Map<String, Object> custom = rules(policy).get(rules(policy).size() - 1);
             assertThat(custom.get("derivedRoles")).isEqualTo(List.of("profile_admin-profile"));
-            assertThat(expr(custom)).isEqualTo("R.attr.collectionId == \"accounts\" && R.attr.status == \"locked\"");
+            assertThat(expr(custom)).isEqualTo("R.attr.collectionId == \"accounts\" && (R.attr.status == \"locked\")");
+        }
+
+        @ParameterizedTest(name = "stored effect \"{0}\" compiles to {1}")
+        @CsvSource({
+                "deny, EFFECT_DENY",
+                "DENY, EFFECT_DENY",
+                "Deny, EFFECT_DENY",
+                "EFFECT_DENY, EFFECT_DENY",
+                "effect_deny, EFFECT_DENY",
+                "allow, EFFECT_ALLOW",
+                "ALLOW, EFFECT_ALLOW",
+                "EFFECT_ALLOW, EFFECT_ALLOW",
+                // an effect this version cannot read never grants
+                "block, EFFECT_DENY",
+                "'', EFFECT_DENY"
+        })
+        @DisplayName("maps the stored effect to the Cerbos effect")
+        void mapsStoredEffect(String stored, String expected) {
+            Map<String, Object> custom = singleCustomRule(new CustomRule(
+                    "rule-1", "admin-profile", "col-1", "edit", stored, "R.attr.status == \"locked\"", true));
+
+            assertThat(custom.get("effect")).isEqualTo(expected);
+        }
+
+        @Test
+        @DisplayName("a top-level || in the rule's CEL stays inside the collection guard")
+        void orStaysInsideCollectionGuard() {
+            Map<String, Object> custom = singleCustomRule(new CustomRule(
+                    "rule-1", "admin-profile", "col-1", "read", "allow",
+                    "R.attr.status == \"draft\" || R.attr.priority == \"low\"", true));
+
+            assertThat(expr(custom)).isEqualTo("R.attr.collectionId == \"accounts\""
+                    + " && (R.attr.status == \"draft\" || R.attr.priority == \"low\")");
+            assertThat(CustomRuleCel.isWellFormed(expr(custom))).isTrue();
+        }
+
+        @Test
+        @DisplayName("a root ternary in the rule's CEL stays inside the collection guard")
+        void ternaryStaysInsideCollectionGuard() {
+            Map<String, Object> custom = singleCustomRule(new CustomRule(
+                    "rule-1", "admin-profile", "col-1", "read", "allow",
+                    "R.attr.public ? true : R.attr.owner == P.attr.userId", true));
+
+            assertThat(expr(custom)).isEqualTo("R.attr.collectionId == \"accounts\""
+                    + " && (R.attr.public ? true : R.attr.owner == P.attr.userId)");
+        }
+
+        @Test
+        @DisplayName("a deny rule whose condition is unusable denies its action on the whole collection")
+        void unusableDenyConditionDeniesWholeCollection() {
+            for (String cel : java.util.Arrays.asList(null, "", "R.attr.region in US,EU",
+                    "R.attr.a == \"x\") || (true", "true // trailing comment")) {
+                Map<String, Object> custom = singleCustomRule(new CustomRule(
+                        "rule-1", "admin-profile", "col-1", "delete", "deny", cel, true));
+
+                assertThat(custom.get("effect")).as("cel %s", cel).isEqualTo("EFFECT_DENY");
+                assertThat(expr(custom)).as("cel %s", cel).isEqualTo("R.attr.collectionId == \"accounts\"");
+            }
+        }
+
+        @Test
+        @DisplayName("an allow rule whose condition is unusable is left out")
+        void unusableAllowConditionIsLeftOut() {
+            for (String cel : java.util.Arrays.asList(null, "  ", "R.attr.region in US,EU",
+                    "R.attr.a == \"x\") || (true")) {
+                Map<String, Object> policy = generator.generateRecordPolicy(TENANT_ID, List.of(adminProfile()),
+                        List.of("col-1"), List.of(new CustomRule(
+                                "rule-1", "admin-profile", "col-1", "read", "allow", cel, true)),
+                        Map.of("col-1", "accounts"));
+
+                assertThat(rules(policy)).as("cel %s", cel).noneMatch(r -> r.containsKey("derivedRoles"));
+            }
+        }
+
+        @Test
+        @DisplayName("a rule for a profile outside the tenant is left out (its derived role does not exist)")
+        void ruleForUnknownProfileIsLeftOut() {
+            Map<String, Object> policy = generator.generateRecordPolicy(TENANT_ID, List.of(adminProfile()),
+                    List.of("col-1"), List.of(new CustomRule(
+                            "rule-1", "other-profile", "col-1", "read", "deny", "true", true)),
+                    Map.of("col-1", "accounts"));
+
+            assertThat(rules(policy)).noneMatch(r -> r.containsKey("derivedRoles"));
+        }
+
+        @Test
+        @DisplayName("collection, tenant and profile literals are escaped CEL strings")
+        void literalsAreEscaped() {
+            Map<String, Object> custom = singleCustomRule(new CustomRule(
+                    "rule-1", "admin-profile", "col-1", "read", "deny", "true", true),
+                    Map.of("col-1", "odd\"name"));
+
+            assertThat(expr(custom)).isEqualTo("R.attr.collectionId == \"odd\\\"name\" && (true)");
+            assertThat(CustomRuleCel.isWellFormed(expr(custom))).isTrue();
+        }
+
+        private Map<String, Object> singleCustomRule(CustomRule customRule) {
+            return singleCustomRule(customRule, Map.of("col-1", "accounts"));
+        }
+
+        private Map<String, Object> singleCustomRule(CustomRule customRule, Map<String, String> idToName) {
+            Map<String, Object> policy = generator.generateRecordPolicy(
+                    TENANT_ID, List.of(adminProfile()), List.of("col-1"), List.of(customRule), idToName);
+            List<Map<String, Object>> custom = rules(policy).stream()
+                    .filter(r -> r.containsKey("derivedRoles"))
+                    .toList();
+            assertThat(custom).hasSize(1);
+            return custom.get(0);
         }
 
         @SuppressWarnings("unchecked")
@@ -574,14 +684,25 @@ class CerbosPolicyGeneratorTest {
             idToName.put("col-a", "accounts");
             idToName.put("col-b", "bookings");
             idToName.put("col-c", "contacts");
+            // Effects in the form profile_custom_rules stores them (the admin API keeps lower-case
+            // allow/deny), so the IT proves a stored "deny" really denies on a PDP.
             List<CustomRule> customRules = List.of(
-                    new CustomRule("rule-locked", "editor-profile", "col-a", "edit", "EFFECT_DENY",
+                    new CustomRule("rule-locked", "editor-profile", "col-a", "edit", "deny",
                             "R.attr.status == \"locked\"", true),
-                    new CustomRule("rule-disabled", "editor-profile", "col-a", "delete", "EFFECT_ALLOW",
+                    new CustomRule("rule-disabled", "editor-profile", "col-a", "delete", "allow",
                             "true", false),
                     // "Restrict to own records": P.attr.userId is the caller's platform_user UUID
-                    new CustomRule("rule-own", "editor-profile", "col-b", "edit", "EFFECT_ALLOW",
-                            "R.attr.createdBy == P.attr.userId", true));
+                    new CustomRule("rule-own", "editor-profile", "col-b", "edit", "allow",
+                            "R.attr.createdBy == P.attr.userId", true),
+                    // A top-level || must stay inside the bookings guard
+                    new CustomRule("rule-or", "editor-profile", "col-b", "delete", "allow",
+                            "R.attr.status == \"draft\" || R.attr.priority == \"low\"", true),
+                    // Visual conditions, compiled exactly as the policy sync compiles them: a value
+                    // holding a quote and a backslash, and an "in" list as the UI sends it
+                    new CustomRule("rule-quote", "editor-profile", "col-c", "read", "allow",
+                            CustomRuleCel.visualToCel("title", "equals", "Say \"hi\" \\ bye"), true),
+                    new CustomRule("rule-in", "editor-profile", "col-a", "edit", "deny",
+                            CustomRuleCel.visualToCel("region", "in", "US, EU"), true));
 
             assertGolden("derived_roles.json", generator.generateDerivedRoles(GOLDEN_TENANT, profiles));
             assertGolden("collection.json",

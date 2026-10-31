@@ -83,6 +83,23 @@ to `P.attr.userId` **only** when `<f>` is `createdBy`/`updatedBy` or a LOOKUP/MA
 REFERENCE field of the rule's collection; a comparison with any other field (e.g.
 `R.attr.ownerEmail == P.id`) is left alone. The stored `profile_custom_rules` rows are not changed.
 
+### Cerbos custom rules
+
+A profile custom rule (`/api/admin/profiles/{profileId}/custom-rules`, `MANAGE_USERS`) is stored
+with effect `allow` or `deny` (lower-case; the API refuses anything else) and a condition that is
+either visual (`{field, operator, value}`, operators `equals`, `not_equals`, `in`, `contains`,
+`greater_than`, `less_than`) or raw CEL (`{expression}`). `CustomRuleCel` compiles both, at save and
+at sync, so the API refuses at save (`400 VALIDATION_FAILED`, `source.pointer` such as
+`/condition/value`) what would not compile: an unknown operator, a field name that is not an
+identifier, an `in` with no items (a list, or comma-separated text as the admin UI sends it), a
+non-numeric value for a comparison, or CEL that cel-java cannot parse. Visual values always reach
+the policy as escaped CEL string literals. A matching deny beats every allow of the same tenant,
+including object permissions and `VIEW_ALL_DATA`/`MODIFY_ALL_DATA`, in the record check. That check
+runs on the records a response returns (`CerbosRecordAuthorizationAdvice`): on `create`, `edit` and
+`delete` it runs after the write, so a custom deny filters the response but does not stop the write
+(there is no pre-write record check; see `architecture.md`). Policy shape, collection guard and
+sync-time handling: `architecture.md` → Custom rules.
+
 ### Attachment lifecycle (S3)
 
 Files attach to any record via the `attachments` system collection (backed by `file_attachment`, `S3StorageService`). The full lifecycle:

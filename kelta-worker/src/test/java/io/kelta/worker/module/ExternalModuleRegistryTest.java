@@ -1,5 +1,6 @@
 package io.kelta.worker.module;
 
+import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.module.ModuleStore;
 import io.kelta.runtime.module.TenantModuleData;
 import io.kelta.runtime.module.service.EntitlementProvider;
@@ -10,6 +11,7 @@ import io.kelta.runtime.workflow.BeforeSaveHookRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
@@ -17,10 +19,13 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -210,5 +215,56 @@ class ExternalModuleRegistryTest {
 
         verify(store, times(1)).findAllExternal();
         assertThat(registry.eventSubscribers(ExternalModuleFixtures.TENANT, "orders", "created")).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("a flow step's actor is the run's user when it is an active INTERNAL or PORTAL user, else none")
+    void flowActor() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        ExternalModuleRegistry withDb = new ExternalModuleRegistry(store, actions, hooks, services, invoker, jdbc,
+                null, null, new ObjectMapper());
+        String sql = "SELECT user_type FROM platform_user WHERE id = ? AND tenant_id = ? AND status = 'ACTIVE'";
+        when(jdbc.queryForList(eq(sql), eq(String.class), eq("member-1"), eq(ExternalModuleFixtures.TENANT)))
+                .thenReturn(List.of("PORTAL"));
+        when(jdbc.queryForList(eq(sql), eq(String.class), eq("svc-1"), eq(ExternalModuleFixtures.TENANT)))
+                .thenReturn(List.of("SERVICE"));
+        when(jdbc.queryForList(eq(sql), eq(String.class), eq("gone-1"), eq(ExternalModuleFixtures.TENANT)))
+                .thenReturn(List.of());
+
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "member-1"))
+                .isEqualTo(new ModuleAssertionSigner.Actor("member-1", "PORTAL", null));
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "svc-1")).as("a service user").isNull();
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "gone-1")).as("unknown or inactive").isNull();
+    }
+
+    @Test
+    @DisplayName("a flow step with no run user has no actor and reads nothing")
+    void flowActorWithoutRunUser() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        ExternalModuleRegistry withDb = new ExternalModuleRegistry(store, actions, hooks, services, invoker, jdbc,
+                null, null, new ObjectMapper());
+
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, null)).isNull();
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, " ")).isNull();
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test
+    @DisplayName("the run user's type comes from platform_user even on a request thread, and a failed read is a module error")
+    void flowActorReadsTheDatabase() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        ExternalModuleRegistry withDb = new ExternalModuleRegistry(store, actions, hooks, services, invoker, jdbc,
+                null, null, new ObjectMapper());
+        when(jdbc.queryForList(anyString(), eq(String.class), eq("svc-2"), eq(ExternalModuleFixtures.TENANT)))
+                .thenReturn(List.of("SERVICE"));
+        when(jdbc.queryForList(anyString(), eq(String.class), eq("down-1"), eq(ExternalModuleFixtures.TENANT)))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("db down"));
+
+        CallerContext header = new CallerContext("svc-2", CallerContext.UserType.INTERNAL, false, false);
+        assertThat(CallerContext.callAs(header,
+                () -> withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "svc-2")))
+                .as("a SERVICE user the gateway header called INTERNAL").isNull();
+        assertThatThrownBy(() -> withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "down-1"))
+                .isInstanceOf(io.kelta.runtime.workflow.ModuleUnavailableException.class);
     }
 }
