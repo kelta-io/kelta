@@ -1,0 +1,1 @@
+- 2026-10-30 docs(modules): spec external out-of-process modules over HTTP (module-platform slice 9) and draft the module protocol OpenAPI contract (external-modules-spec)
