@@ -356,13 +356,13 @@ to `FlowEngine.startExecution` as the execution user, so:
   `INVOKE_SCRIPT`'s `userId` see the actor.
 - The resolver also names **how** it chose the actor (`ActorSource`:
   `INITIATOR` / `RUN_AS` / `OWNER`). `FlowEngine.startExecution` takes it with
-  the user, `flow_execution.started_by_source` (V225) records it, and
+  the user, `flow_execution.started_by_source` (V227) records it, and
   `ActionContext.actorSource` carries it to every Task (Parallel/Map/InvokeFlow
   branches, `DECISION` children and `TRIGGER_FLOW` hops inherit it; a resumed
   run reads it back; a retry keeps the original's). Only `INITIATOR` is a person
   who acted. An external module action sends it as `act.source` (`initiator`,
   `run_as`, `owner`) so a member-only action can refuse a fallback; a run whose
-  source is unknown (`null`: started before V225) sends no `act`.
+  source is unknown (`null`: started before V227) sends no `act`.
 
 ### NATS-triggered flows
 

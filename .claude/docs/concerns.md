@@ -726,7 +726,7 @@ homelab cluster (`ci-cd.md` → Rust external modules). What that does not guara
   therefore sends a fallback identity, marked `run_as` or `owner`, and
   `kelta-billing:create-checkout-session` and `create-portal-session` refuse it with "No calling
   member"; `me` and `resolve-entitlements` read that user's own billing. A run with no user, or one
-  started before V225 recorded its source, sends no `act`. The module never takes the member from
+  started before V227 recorded its source, sends no `act`. The module never takes the member from
   the input, which any flow author controls. Routes always carry `act`, with no `source`. Every
   module that acts for "the calling member" must check `Actor::is_fallback()` the same way: the
   platform cannot tell it which actions are member-only. *JAR:* read `ActionContext.userId()`, with

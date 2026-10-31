@@ -101,7 +101,7 @@ class JdbcFlowStorePendingResumeIntegrationTest {
     }
 
     @Test
-    @DisplayName("an execution keeps its actor and how it was chosen (V225), so a resumed run still knows it")
+    @DisplayName("an execution keeps its actor and how it was chosen (V227), so a resumed run still knows it")
     void executionActorSourceRoundTrips() {
         String owner = "eeeeeeee-0000-0000-0000-000000000001";
         String id = store.createExecution(TENANT_A, flowId(TENANT_A), owner, ActorSource.OWNER, null,
