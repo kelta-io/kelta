@@ -45,7 +45,9 @@ call.
 ### What happens under the hood
 
 Saving the `collections` record runs the schema lifecycle hooks: the name is validated, `currentVersion` starts at
-`1`, `path` defaults to `/api/<name>`, and the physical table is created (or reconciled). A
+`1`, `path` defaults to `/api/<name>`, and the physical table is created (or reconciled). `systemCollection` is set
+by the platform only: a create with `systemCollection: true`, or an update that changes it, is refused with
+`400 systemMaintained`. A
 `kelta.config.collection.changed` event is published on NATS JetStream; every worker pod refreshes its registry and
 every gateway pod adds the route. Reads on another pod are consistent as soon as that pod has consumed the event —
 in practice well under a second, but a script that creates a collection and immediately queries it through a load

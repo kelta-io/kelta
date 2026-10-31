@@ -11,6 +11,9 @@ import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.query.QueryRequest;
 import io.kelta.runtime.query.QueryResult;
 import io.kelta.runtime.registry.CollectionRegistry;
+import io.kelta.runtime.validation.FieldError;
+import io.kelta.runtime.validation.ValidationException;
+import io.kelta.runtime.validation.ValidationResult;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,7 +30,8 @@ import java.util.stream.Collectors;
  * The router's request-level tenant scoping for <em>tenant-scoped system collections</em>, keyed on
  * the gateway-forwarded {@code X-Tenant-ID} header: the list filter, the get-by-id visibility check,
  * the post-query narrowing of shared platform rows, and the {@code tenantId} stamp on create — plus
- * the sub-resource parent check ({@link #belongsToParent}).
+ * the sub-resource parent check ({@link #belongsToParent}) and, on every collection, the refusal
+ * of a body {@code tenantId} naming another tenant ({@link #rejectForeignTenantId}).
  *
  * <p>This is a second line behind Postgres RLS (which is a no-op for superuser DB roles — local
  * docker-compose, the test harness); user collections are scoped by RLS alone. It reads the
@@ -249,9 +253,11 @@ final class RecordTenantScope {
     }
 
     /**
-     * Injects {@code tenantId} into record data for tenant-scoped system collections, unless the
-     * caller already supplied one. A no-op for user collections, non-tenant-scoped system
-     * collections and a blank {@code tenantId} (an unbound platform path).
+     * Injects {@code tenantId} into record data for tenant-scoped system collections. A no-op for
+     * user collections, non-tenant-scoped system collections and a blank {@code tenantId} (an
+     * unbound platform path). Callers refuse a caller-supplied value naming another tenant first
+     * ({@link #rejectForeignTenantId} / {@link #foreignTenantId}), so a value already present
+     * here is the request's own and is kept.
      *
      * <p>Takes the tenant id rather than the request so every create path shares it: the router
      * passes the gateway-forwarded {@code X-Tenant-ID}, {@link AtomicOperationExecutor} the bound
@@ -262,7 +268,7 @@ final class RecordTenantScope {
      * @param tenantId the request's tenant id, or null/blank when none is bound
      */
     static void injectTenantId(Map<String, Object> data, CollectionDefinition definition, String tenantId) {
-        if (!stampsTenantId(definition, tenantId)) {
+        if (!definition.systemCollection() || !definition.tenantScoped() || !isBound(tenantId)) {
             return;
         }
         data.putIfAbsent("tenantId", tenantId);
@@ -270,19 +276,36 @@ final class RecordTenantScope {
 
     /**
      * The caller-supplied {@code tenantId} in {@code data} when it names a tenant other than
-     * {@code tenantId}, for a collection {@link #injectTenantId} stamps; empty otherwise.
+     * {@code tenantId}; empty when it matches, is absent, or no tenant is bound. Applies to every
+     * collection, not only the ones {@link #injectTenantId} stamps: on a tenant-scoped system
+     * collection {@code tenantId} is the stored owner column, on any other collection it names
+     * nothing the write stores, and on both the write's hooks and events run for the request's
+     * tenant, so a different value is refused rather than ignored.
      */
-    static Optional<String> foreignTenantId(Map<String, Object> data, CollectionDefinition definition,
-                                            String tenantId) {
-        if (!stampsTenantId(definition, tenantId) || data.get("tenantId") == null) {
+    static Optional<String> foreignTenantId(Map<String, Object> data, String tenantId) {
+        Object supplied = data.get("tenantId");
+        if (!isBound(tenantId) || supplied == null) {
             return Optional.empty();
         }
-        String supplied = String.valueOf(data.get("tenantId"));
-        return tenantId.equals(supplied) ? Optional.empty() : Optional.of(supplied);
+        String value = String.valueOf(supplied);
+        return tenantId.equals(value) ? Optional.empty() : Optional.of(value);
     }
 
-    private static boolean stampsTenantId(CollectionDefinition definition, String tenantId) {
-        return definition.systemCollection() && definition.tenantScoped()
-                && tenantId != null && !tenantId.isBlank();
+    /**
+     * Router form of {@link #foreignTenantId}: throws the {@code systemMaintained} validation
+     * error on {@code tenantId} ({@link FieldError#foreignTenantId}) — the same error
+     * {@code DefaultQueryEngine} raises for a payload naming another tenant than the bound one —
+     * so the request gets the {@link GlobalExceptionHandler} 400 and nothing is written.
+     */
+    static void rejectForeignTenantId(Map<String, Object> data, CollectionDefinition definition,
+                                      String tenantId) {
+        if (foreignTenantId(data, tenantId).isPresent()) {
+            throw new ValidationException(ValidationResult.failure(
+                    List.of(FieldError.foreignTenantId(definition.name()))));
+        }
+    }
+
+    private static boolean isBound(String tenantId) {
+        return tenantId != null && !tenantId.isBlank();
     }
 }

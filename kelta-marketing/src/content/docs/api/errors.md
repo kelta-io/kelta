@@ -38,7 +38,7 @@ Several problems in one request produce several entries (one per field).
 | Code | Status | When |
 |---|---|---|
 | `VALIDATION_FAILED` | 400 | a request or field failed validation and no more specific code applies (a hook error without its own code, a malformed tree or batch body); `meta` may add `field`, `constraint` |
-| `nullable`, `type`, `pattern`, `minValue`, `maxValue`, `minLength`, `maxLength`, `enum`, `picklist`, `unique`, `immutable`, `systemMaintained` | 400 | a field constraint failed — the code is the constraint's name; one entry per field, `source.pointer` names it (`nullable` is a missing required value, `systemMaintained` a write to a field only the platform sets) |
+| `nullable`, `type`, `pattern`, `minValue`, `maxValue`, `minLength`, `maxLength`, `enum`, `picklist`, `unique`, `immutable`, `systemMaintained` | 400 | a field constraint failed — the code is the constraint's name; one entry per field, `source.pointer` names it (`nullable` is a missing required value, `systemMaintained` a write to a field only the platform sets — including a `tenantId` naming a tenant other than the request's, and `systemCollection` on a collection) |
 | `reference` | 400 | a lookup value does not resolve; `meta.field`, `meta.targetCollection`, `meta.value` |
 | `INVALID_PAYLOAD` | 400 | malformed JSON:API body |
 | `INVALID_QUERY` | 400 | bad filter grammar or a client-caused SQL error (`meta.sqlState`) |

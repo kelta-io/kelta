@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -13,8 +14,9 @@ import java.util.Map;
  *
  * <p>Enforces business rules for collection CRUD operations:
  * <ul>
- *   <li>Before create: Validate name format, set version=1, generate API path</li>
- *   <li>Before update: Reject a change of name</li>
+ *   <li>Before create: Refuse {@code systemCollection: true}, validate name format, set
+ *       version=1, generate API path</li>
+ *   <li>Before update: Reject a change of {@code systemCollection} or of the name</li>
  *   <li>After create/delete: Log for audit trail</li>
  * </ul>
  *
@@ -24,6 +26,11 @@ public class CollectionLifecycleHook implements BeforeSaveHook {
 
     private static final Logger log = LoggerFactory.getLogger(CollectionLifecycleHook.class);
 
+    private static final String SYSTEM_COLLECTION = "systemCollection";
+
+    /** The field-constraint code for a write to a value only the platform sets. */
+    private static final String SYSTEM_MAINTAINED = "systemMaintained";
+
     @Override
     public String getCollectionName() {
         return "collections";
@@ -31,6 +38,12 @@ public class CollectionLifecycleHook implements BeforeSaveHook {
 
     @Override
     public BeforeSaveResult beforeCreate(Map<String, Object> record, String tenantId) {
+        // systemCollection is the platform's: system collections are declared in code and seeded
+        // by SystemCollectionSeeder over JDBC, never through a record write.
+        if (isTrue(record.get(SYSTEM_COLLECTION))) {
+            return systemCollectionRefused();
+        }
+
         // Validate collection name format
         Object nameObj = record.get("name");
         if (nameObj == null || nameObj.toString().isBlank()) {
@@ -80,6 +93,11 @@ public class CollectionLifecycleHook implements BeforeSaveHook {
     @Override
     public BeforeSaveResult beforeUpdate(String id, Map<String, Object> record,
                                          Map<String, Object> previous, String tenantId) {
+        Object nextSystem = record.get(SYSTEM_COLLECTION);
+        if (nextSystem != null
+                && isTrue(nextSystem) != isTrue(previous != null ? previous.get(SYSTEM_COLLECTION) : null)) {
+            return systemCollectionRefused();
+        }
         if (!record.containsKey("name") || previous == null) {
             return BeforeSaveResult.ok();
         }
@@ -93,6 +111,25 @@ public class CollectionLifecycleHook implements BeforeSaveHook {
         return BeforeSaveResult.error("name",
                 "Collection name cannot be changed after creation (it is '" + currentName
                         + "'); change the display name instead");
+    }
+
+    /**
+     * The refusal of a write that sets {@code systemCollection} to {@code true} on create, or
+     * changes it on update. Whether a collection is platform metadata decides how the runtime
+     * loads it (system-collection storage, validation-rule scope, shared-row visibility), so only
+     * the platform's seeder sets it. {@code false} on create and a re-sent stored value on update
+     * (a full-record round-trip) pass.
+     */
+    private static BeforeSaveResult systemCollectionRefused() {
+        return BeforeSaveResult.errors(List.of(new BeforeSaveResult.ValidationError(SYSTEM_COLLECTION,
+                "systemCollection is set by the platform and cannot be written through the API",
+                SYSTEM_MAINTAINED)));
+    }
+
+    /** A boolean flag's value, accepting the string form an uncoerced payload may carry. */
+    private static boolean isTrue(Object value) {
+        return Boolean.TRUE.equals(value)
+                || (value instanceof String text && "true".equalsIgnoreCase(text.trim()));
     }
 
     @Override

@@ -1,0 +1,25 @@
+{
+  "status" : 400,
+  "headers" : {
+    "Content-Type" : "application/json"
+  },
+  "body" : {
+    "errors" : [ {
+      "code" : "systemMaintained",
+      "detail" : "tenantId does not match the request's tenant for collection 'contacts'; the platform sets it from the request",
+      "meta" : {
+        "requestId" : "<requestId>"
+      },
+      "source" : {
+        "pointer" : "/data/attributes/tenantId"
+      },
+      "status" : "400",
+      "title" : "Validation Error"
+    } ]
+  },
+  "calls" : [ {
+    "identifier" : "alice@example.com",
+    "op" : "userIdResolver.resolve",
+    "tenant" : "tenant-a"
+  } ]
+}
