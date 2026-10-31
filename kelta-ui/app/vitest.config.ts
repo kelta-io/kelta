@@ -30,30 +30,30 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': resolve(__dirname, './src'),
+      '@': resolve(import.meta.dirname, './src'),
       // Ensure all packages (including symlinked @kelta/sdk) resolve the same
       // axios instance so that vi.mock('axios') in vitest.setup.ts intercepts
       // all Axios usage, including KeltaClient's internal axios.create().
-      axios: resolve(__dirname, 'node_modules/axios'),
+      axios: resolve(import.meta.dirname, 'node_modules/axios'),
       // The @kelta/components dist references @kelta/formula as an external
       // import. Vite needs the alias so its dependency resolver can locate
       // the workspace package; npm's symlink alone isn't always enough when
       // the import is hoisted across packages.
-      '@kelta/formula': resolve(__dirname, 'node_modules/@kelta/formula'),
+      '@kelta/formula': resolve(import.meta.dirname, 'node_modules/@kelta/formula'),
       // Force a single React instance across all workspace packages. Without
       // this, @kelta/components uses its own (hoisted) React copy and hooks
       // like useRef return null because hook dispatcher state lives in a
       // different React module instance than the test renderer's React.
-      react: resolve(__dirname, 'node_modules/react'),
-      'react-dom': resolve(__dirname, 'node_modules/react-dom'),
+      react: resolve(import.meta.dirname, 'node_modules/react'),
+      'react-dom': resolve(import.meta.dirname, 'node_modules/react-dom'),
       // Same singleton requirement for react-router (mirrors vite.config.ts'
       // dedupe): @kelta/components' Navigation calls router hooks
       // (useNavigate/useLocation). A duplicate router copy reads a different
       // (null) NavigationContext via @kelta/components' hoisted React and
       // throws "Cannot read properties of null (reading 'useContext')". Forcing
       // the app's copy keeps one router context for the Navigation widget tests.
-      'react-router-dom': resolve(__dirname, 'node_modules/react-router-dom'),
-      'react-router': resolve(__dirname, 'node_modules/react-router'),
+      'react-router-dom': resolve(import.meta.dirname, 'node_modules/react-router-dom'),
+      'react-router': resolve(import.meta.dirname, 'node_modules/react-router'),
     },
   },
 })
