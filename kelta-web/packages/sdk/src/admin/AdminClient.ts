@@ -716,11 +716,7 @@ export class AdminClient {
       id: string,
       request: Partial<CreateGlobalPicklistRequest>
     ): Promise<GlobalPicklist> => {
-      const body = toJsonApiBody(
-        'global-picklists',
-        request as unknown as Record<string, unknown>,
-        id
-      );
+      const body = toJsonApiBody('global-picklists', request, id);
       const response = await this.axios.patch(`/api/global-picklists/${id}`, body);
       return unwrapJsonApiResource<GlobalPicklist>(response.data);
     },
@@ -865,11 +861,7 @@ export class AdminClient {
       ruleId: string,
       request: Partial<CreateCollectionValidationRuleRequest> & { active?: boolean }
     ): Promise<CollectionValidationRule> => {
-      const body = toJsonApiBody(
-        'validation-rules',
-        request as unknown as Record<string, unknown>,
-        ruleId
-      );
+      const body = toJsonApiBody('validation-rules', request, ruleId);
       const response = await this.axios.patch(`/api/validation-rules/${ruleId}`, body);
       return unwrapJsonApiResource<CollectionValidationRule>(response.data);
     },
@@ -956,11 +948,7 @@ export class AdminClient {
       if (attributes.isActive === undefined && active !== undefined) {
         attributes.isActive = active;
       }
-      const body = toJsonApiBody(
-        'record-types',
-        attributes as unknown as Record<string, unknown>,
-        recordTypeId
-      );
+      const body = toJsonApiBody('record-types', attributes, recordTypeId);
       const response = await this.axios.patch(`/api/record-types/${recordTypeId}`, body);
       return normalizeRecordType(unwrapJsonApiResource<RecordType>(response.data));
     },
@@ -1412,7 +1400,7 @@ export class AdminClient {
     },
 
     update: async (id: string, request: Partial<CreatePageLayoutRequest>): Promise<PageLayout> => {
-      const body = toJsonApiBody('page-layouts', request as unknown as Record<string, unknown>, id);
+      const body = toJsonApiBody('page-layouts', request, id);
       const response = await this.axios.patch(`/api/page-layouts/${id}`, body);
       return unwrapJsonApiResource<PageLayout>(response.data);
     },
@@ -1518,7 +1506,7 @@ export class AdminClient {
     },
 
     update: async (id: string, request: UpdateLayoutRuleRequest): Promise<LayoutRule> => {
-      const body = toJsonApiBody('layout-rules', request as unknown as Record<string, unknown>, id);
+      const body = toJsonApiBody('layout-rules', request, id);
       const response = await this.axios.patch(`/api/layout-rules/${id}`, body);
       return unwrapJsonApiResource<LayoutRule>(response.data);
     },
@@ -1560,7 +1548,7 @@ export class AdminClient {
     },
 
     update: async (id: string, request: Partial<CreateListViewRequest>): Promise<ListView> => {
-      const body = toJsonApiBody('list-views', request as unknown as Record<string, unknown>, id);
+      const body = toJsonApiBody('list-views', request, id);
       const response = await this.axios.patch(`/api/list-views/${id}`, body);
       return unwrapJsonApiResource<ListView>(response.data);
     },
@@ -1596,7 +1584,7 @@ export class AdminClient {
     },
 
     update: async (id: string, request: Partial<CreateReportRequest>): Promise<Report> => {
-      const body = toJsonApiBody('reports', request as unknown as Record<string, unknown>, id);
+      const body = toJsonApiBody('reports', request, id);
       const response = await this.axios.patch(`/api/reports/${id}`, body);
       return unwrapJsonApiResource<Report>(response.data);
     },
@@ -1657,7 +1645,7 @@ export class AdminClient {
       id: string,
       request: Partial<CreateDashboardRequest>
     ): Promise<UserDashboard> => {
-      const body = toJsonApiBody('dashboards', request as unknown as Record<string, unknown>, id);
+      const body = toJsonApiBody('dashboards', request, id);
       const response = await this.axios.patch(`/api/dashboards/${id}`, body);
       return unwrapJsonApiResource<UserDashboard>(response.data);
     },
@@ -1710,11 +1698,7 @@ export class AdminClient {
       id: string,
       request: Partial<CreateEmailTemplateRequest>
     ): Promise<EmailTemplate> => {
-      const body = toJsonApiBody(
-        'email-templates',
-        request as unknown as Record<string, unknown>,
-        id
-      );
+      const body = toJsonApiBody('email-templates', request, id);
       const response = await this.axios.patch(`/api/email-templates/${id}`, body);
       return unwrapJsonApiResource<EmailTemplate>(response.data);
     },
@@ -1754,7 +1738,7 @@ export class AdminClient {
     },
 
     update: async (id: string, request: Partial<CreateCampaignRequest>): Promise<Campaign> => {
-      const body = toJsonApiBody('campaigns', request as unknown as Record<string, unknown>, id);
+      const body = toJsonApiBody('campaigns', request, id);
       const response = await this.axios.patch(`/api/admin/campaigns/${id}`, body);
       return unwrapJsonApiResource<Campaign>(response.data);
     },
@@ -1855,11 +1839,7 @@ export class AdminClient {
       id: string,
       request: Partial<CreateApprovalProcessRequest>
     ): Promise<ApprovalProcess> => {
-      const body = toJsonApiBody(
-        'approval-processes',
-        request as unknown as Record<string, unknown>,
-        id
-      );
+      const body = toJsonApiBody('approval-processes', request, id);
       const response = await this.axios.patch(`/api/approval-processes/${id}`, body);
       return unwrapJsonApiResource<ApprovalProcess>(response.data);
     },
@@ -1907,7 +1887,7 @@ export class AdminClient {
     },
 
     update: async (id: string, request: Partial<CreateFlowRequest>): Promise<FlowDefinition> => {
-      const body = toJsonApiBody('flows', request as unknown as Record<string, unknown>, id);
+      const body = toJsonApiBody('flows', request, id);
       const response = await this.axios.patch(`/api/flows/${id}`, body);
       return unwrapJsonApiResource<FlowDefinition>(response.data);
     },
@@ -1961,11 +1941,7 @@ export class AdminClient {
       id: string,
       request: Partial<CreateScheduledJobRequest>
     ): Promise<ScheduledJob> => {
-      const body = toJsonApiBody(
-        'scheduled-jobs',
-        request as unknown as Record<string, unknown>,
-        id
-      );
+      const body = toJsonApiBody('scheduled-jobs', request, id);
       const response = await this.axios.patch(`/api/scheduled-jobs/${id}`, body);
       return unwrapJsonApiResource<ScheduledJob>(response.data);
     },
@@ -2018,7 +1994,7 @@ export class AdminClient {
     },
 
     update: async (id: string, request: Partial<CreateScriptRequest>): Promise<Script> => {
-      const body = toJsonApiBody('scripts', request as unknown as Record<string, unknown>, id);
+      const body = toJsonApiBody('scripts', request, id);
       const response = await this.axios.patch(`/api/scripts/${id}`, body);
       return unwrapJsonApiResource<Script>(response.data);
     },
@@ -2106,11 +2082,7 @@ export class AdminClient {
       id: string,
       request: Partial<CreateConnectedAppRequest>
     ): Promise<ConnectedApp> => {
-      const body = toJsonApiBody(
-        'connected-apps',
-        request as unknown as Record<string, unknown>,
-        id
-      );
+      const body = toJsonApiBody('connected-apps', request, id);
       const response = await this.axios.patch(`/api/connected-apps/${id}`, body);
       return unwrapJsonApiResource<ConnectedApp>(response.data);
     },

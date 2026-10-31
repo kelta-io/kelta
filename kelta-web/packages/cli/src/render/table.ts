@@ -1,3 +1,5 @@
+import { toText } from './text.js';
+
 export interface ColumnSpec {
   key: string;
   header: string;
@@ -8,7 +10,7 @@ const MAX_CELL_WIDTH = 48;
 function cellText(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (typeof value === 'object') return JSON.stringify(value);
-  const text = String(value);
+  const text = toText(value);
   return text.length > MAX_CELL_WIDTH ? text.slice(0, MAX_CELL_WIDTH - 1) + '…' : text;
 }
 
@@ -51,7 +53,7 @@ export function renderCsv(rows: Record<string, unknown>[], columns?: ColumnSpec[
         .map((col) => {
           const value = row[col.key];
           if (value === null || value === undefined) return '';
-          return escapeCsv(typeof value === 'object' ? JSON.stringify(value) : String(value));
+          return escapeCsv(typeof value === 'object' ? JSON.stringify(value) : toText(value));
         })
         .join(',')
     );

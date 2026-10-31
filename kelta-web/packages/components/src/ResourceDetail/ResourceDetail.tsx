@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { FieldDefinition, ResourceMetadata } from '@kelta/sdk';
 import { useKeltaClient, useCurrentUser } from '../context/KeltaContext';
 import type { ResourceDetailProps, FieldRenderer, FieldRendererComponent } from './types';
+import { toText } from '../utils/text';
 
 /**
  * Optional ComponentRegistry interface for custom field renderers
@@ -46,8 +47,8 @@ export function getComponentRegistry(): ComponentRegistryInterface | undefined {
  * Default field renderers by type
  */
 const defaultRenderers: Record<string, FieldRenderer> = {
-  string: (value) => String(value ?? ''),
-  number: (value) => String(value ?? ''),
+  string: (value) => toText(value ?? ''),
+  number: (value) => toText(value ?? ''),
   boolean: (value) => <span aria-label={value ? 'Yes' : 'No'}>{value ? 'Yes' : 'No'}</span>,
   date: (value) => {
     if (!value) return '';
@@ -64,7 +65,7 @@ const defaultRenderers: Record<string, FieldRenderer> = {
       <code>{JSON.stringify(value, null, 2)}</code>
     </pre>
   ),
-  reference: (value) => String(value ?? ''),
+  reference: (value) => toText(value ?? ''),
 };
 
 /**

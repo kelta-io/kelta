@@ -11,6 +11,7 @@ import type {
 } from '@kelta/sdk';
 import type { FormBinding, BeforeSaveResult, RuleViolation, RuleEngineDiagnostic } from './types';
 import { downstreamRules, topologicalSort, type RuleNode } from './dependencyGraph';
+import { toText } from '../../utils/text';
 
 interface PreparedRule {
   rule: LayoutRule;
@@ -399,7 +400,7 @@ export class RuleEngine {
     const raw = this.evaluator.evaluate(rule.expression, form.getValues());
     if (!raw) return null;
     if (raw === true) return rule.message ?? 'Invalid value';
-    const message = typeof raw === 'string' ? raw : String(raw);
+    const message = toText(raw);
     return message.trim() === '' ? null : message;
   }
 

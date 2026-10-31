@@ -1,5 +1,6 @@
 import { FormulaException } from './errors';
 import type { FormulaContext } from './types';
+import { toText } from './text';
 
 export type FormulaAst =
   | { kind: 'literal'; value: unknown }
@@ -91,7 +92,7 @@ function add(a: unknown, b: unknown): unknown {
 function stringify(v: unknown): string {
   if (v === null) return 'null';
   if (v === undefined) return 'null';
-  return String(v);
+  return toText(v);
 }
 
 function compare(a: unknown, b: unknown): number {
@@ -104,8 +105,8 @@ function compare(a: unknown, b: unknown): number {
     const db = toDouble(b);
     return da < db ? -1 : da > db ? 1 : 0;
   }
-  const sa = String(a);
-  const sb = String(b);
+  const sa = toText(a);
+  const sb = toText(b);
   return sa < sb ? -1 : sa > sb ? 1 : 0;
 }
 
@@ -120,8 +121,9 @@ export function toDouble(value: unknown): number {
   if (value === null || value === undefined) return 0;
   if (typeof value === 'number') return value;
   if (typeof value === 'boolean') return value ? 1 : 0;
-  const n = Number(String(value));
-  if (Number.isNaN(n)) throw new FormulaException(`Cannot convert to number: ${String(value)}`);
+  const text = toText(value);
+  const n = Number(text);
+  if (Number.isNaN(n)) throw new FormulaException(`Cannot convert to number: ${text}`);
   return n;
 }
 
@@ -129,7 +131,7 @@ export function toBoolean(value: unknown): boolean {
   if (value === null || value === undefined) return false;
   if (typeof value === 'boolean') return value;
   if (typeof value === 'number') return value !== 0;
-  return String(value).toLowerCase() === 'true';
+  return toText(value).toLowerCase() === 'true';
 }
 
 export function extractFieldRefs(node: FormulaAst, out: Set<string> = new Set()): Set<string> {

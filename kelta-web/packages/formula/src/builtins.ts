@@ -1,5 +1,6 @@
 import { toDouble, toBoolean } from './ast';
 import { FormulaException } from './errors';
+import { toText } from './text';
 import type { FormulaContext, FormulaFunction } from './types';
 
 const isBlankValue = (v: unknown): boolean => {
@@ -75,7 +76,7 @@ export const LEN: FormulaFunction = {
   name: 'LEN',
   execute(args: unknown[]): number {
     if (args.length === 0 || args[0] === null || args[0] === undefined) return 0;
-    return String(args[0]).length;
+    return toText(args[0]).length;
   },
 };
 
@@ -83,8 +84,8 @@ export const CONTAINS: FormulaFunction = {
   name: 'CONTAINS',
   execute(args: unknown[]): boolean {
     if (args.length < 2) throw new FormulaException('CONTAINS requires 2 arguments');
-    const text = args[0] != null ? String(args[0]) : '';
-    const search = args[1] != null ? String(args[1]) : '';
+    const text = args[0] != null ? toText(args[0]) : '';
+    const search = args[1] != null ? toText(args[1]) : '';
     return text.includes(search);
   },
 };
@@ -93,7 +94,7 @@ export const UPPER: FormulaFunction = {
   name: 'UPPER',
   execute(args: unknown[]): string | null {
     if (args.length === 0 || args[0] === null || args[0] === undefined) return null;
-    return String(args[0]).toUpperCase();
+    return toText(args[0]).toUpperCase();
   },
 };
 
@@ -101,7 +102,7 @@ export const LOWER: FormulaFunction = {
   name: 'LOWER',
   execute(args: unknown[]): string | null {
     if (args.length === 0 || args[0] === null || args[0] === undefined) return null;
-    return String(args[0]).toLowerCase();
+    return toText(args[0]).toLowerCase();
   },
 };
 
@@ -109,7 +110,7 @@ export const TRIM: FormulaFunction = {
   name: 'TRIM',
   execute(args: unknown[]): string | null {
     if (args.length === 0 || args[0] === null || args[0] === undefined) return null;
-    return String(args[0]).trim();
+    return toText(args[0]).trim();
   },
 };
 
@@ -117,7 +118,7 @@ export const TEXT: FormulaFunction = {
   name: 'TEXT',
   execute(args: unknown[]): string {
     if (args.length === 0 || args[0] === null || args[0] === undefined) return '';
-    return String(args[0]);
+    return toText(args[0]);
   },
 };
 
@@ -168,8 +169,8 @@ export const REGEX: FormulaFunction = {
   name: 'REGEX',
   execute(args: unknown[]): boolean {
     if (args.length < 2) throw new FormulaException('REGEX requires 2 arguments');
-    const text = args[0] != null ? String(args[0]) : '';
-    const pattern = args[1] != null ? String(args[1]) : '';
+    const text = args[0] != null ? toText(args[0]) : '';
+    const pattern = args[1] != null ? toText(args[1]) : '';
     const re = new RegExp(`^${pattern}$`);
     return re.test(text);
   },

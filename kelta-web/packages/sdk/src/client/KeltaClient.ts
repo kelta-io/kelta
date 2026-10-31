@@ -226,7 +226,9 @@ export class KeltaClient {
         if (axios.isAxiosError(error)) {
           this.writeTrace(error.config?.method, error.config?.url, error.response?.status);
         }
-        return Promise.reject(error);
+        // Re-throw the original error unchanged: axios chains interceptors with
+        // promise.then(), so this rejects the request exactly like Promise.reject(error).
+        throw error;
       }
     );
   }
@@ -255,7 +257,7 @@ export class KeltaClient {
 
         // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
         if (!this.shouldRetry(error) || config.__retryCount >= this.retryConfig.maxAttempts) {
-          return Promise.reject(error);
+          throw error;
         }
 
         // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access

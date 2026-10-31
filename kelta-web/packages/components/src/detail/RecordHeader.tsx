@@ -16,6 +16,7 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '../ui/dropdown-menu';
 import { cn } from './_utils';
+import { toText } from '../utils/text';
 
 export interface RecordHeaderMetaField {
   key: string;
@@ -197,7 +198,7 @@ export function RecordHeader({
                       {m.icon}
                       <span className="truncate">
                         {m.prefix}
-                        {String(value)}
+                        {toText(value)}
                       </span>
                     </span>
                   );
