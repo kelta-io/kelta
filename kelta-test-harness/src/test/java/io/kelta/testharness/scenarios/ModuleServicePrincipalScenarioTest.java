@@ -188,8 +188,13 @@ class ModuleServicePrincipalScenarioTest extends ScenarioBase {
 
         execute("INSERT INTO profile (id, tenant_id, name, description, is_system) VALUES (?, ?, ?, ?, TRUE)",
                 profileId, tenantId, "Module: Harness (" + suffix + ")", "harness module profile");
+        // One row per system permission, as the service writes them — only API_ACCESS granted.
+        // The stack is shared: AnalyticsAuthzScenarioTest asserts every profile of this tenant
+        // carries a VIEW_ANALYTICS row, so a single-row profile would fail it.
         execute("INSERT INTO profile_system_permission (id, tenant_id, profile_id, permission_name, granted) "
-                + "VALUES (?, ?, ?, 'API_ACCESS', TRUE)", UUID.randomUUID().toString(), tenantId, profileId);
+                        + "SELECT gen_random_uuid()::text, ?, ?, p.permission_name, p.permission_name = 'API_ACCESS' "
+                        + "FROM (SELECT DISTINCT permission_name FROM profile_system_permission WHERE tenant_id = ?) p",
+                tenantId, profileId, tenantId);
         execute("INSERT INTO profile_object_permission (id, tenant_id, profile_id, collection_id, can_create, "
                         + "can_read, can_edit, can_delete) VALUES (?, ?, ?, ?, TRUE, TRUE, FALSE, FALSE)",
                 UUID.randomUUID().toString(), tenantId, profileId, collectionId);
