@@ -49,7 +49,62 @@ class ScheduledJobExecutorServiceTest {
         tenantSlugResolver = mock(TenantSlugResolver.class);
         emailService = mock(io.kelta.worker.service.email.DefaultEmailService.class);
         when(tenantSlugResolver.resolveSlug(anyString())).thenReturn(Optional.of("acme-corp"));
+        // This pod wins every claim unless a test says otherwise.
+        lenient().when(repository.claim(anyString(), any(), any())).thenReturn(true);
         executor = buildExecutor(emailService);
+    }
+
+    @Nested
+    @DisplayName("executeAll — claiming a slot before running it")
+    class Claiming {
+
+        private final Instant slot = Instant.parse("2026-10-01T04:00:00Z");
+
+        private Map<String, Object> flowJob() {
+            Map<String, Object> job = new HashMap<>();
+            job.put("id", "job-c");
+            job.put("tenant_id", "t1");
+            job.put("job_type", "FLOW");
+            job.put("job_reference_id", "flow-c");
+            job.put("cron_expression", "0 0 4 1 * *");
+            job.put("timezone", "UTC");
+            job.put("next_run_at", java.sql.Timestamp.from(slot));
+            return job;
+        }
+
+        @Test
+        @DisplayName("claims the slot it read, with the following slot, before starting the flow")
+        void claimsBeforeRunning() {
+            when(repository.findDueJobs()).thenReturn(List.of(flowJob()));
+            when(repository.findFlowById("flow-c")).thenReturn(Optional.of(Map.of(
+                    "id", "flow-c", "tenant_id", "t1", "definition", "{\"StartAt\":\"Start\"}",
+                    "trigger_config", "{}", "active", true)));
+            when(flowEngine.startExecution(anyString(), anyString(), anyString(), any(), any(), any(), anyBoolean()))
+                    .thenReturn("exec-c");
+
+            executor.executeAll();
+
+            var inOrder = inOrder(repository, flowEngine);
+            inOrder.verify(repository).claim(eq("job-c"), eq(slot),
+                    argThat(next -> next != null && next.isAfter(Instant.now())));
+            inOrder.verify(flowEngine).startExecution(eq("t1"), eq("flow-c"), anyString(), any(), any(), any(),
+                    eq(false));
+            inOrder.verify(repository).updateAfterExecution(eq("job-c"), eq("SUCCESS"), any());
+        }
+
+        @Test
+        @DisplayName("a slot another pod claimed first is skipped: nothing runs and nothing is recorded")
+        void skipsASlotAnotherPodClaimed() {
+            when(repository.findDueJobs()).thenReturn(List.of(flowJob()));
+            when(repository.claim(eq("job-c"), any(), any())).thenReturn(false);
+
+            executor.executeAll();
+
+            verify(repository, never()).findFlowById(any());
+            verify(flowEngine, never()).startExecution(any(), any(), any(), any(), any(), any(), anyBoolean());
+            verify(repository, never()).updateAfterExecution(any(), any(), any());
+            verify(repository, never()).insertExecutionLog(any(), any(), any(), any(), any(), anyLong());
+        }
     }
 
     /** Builds the service with an optional DefaultEmailService (null = email disabled, harness mode). */
@@ -99,7 +154,7 @@ class ScheduledJobExecutorServiceTest {
             executor.executeAll();
 
             verify(modules).runScheduledAction("t1", "stub", "expire", "job-9:2026-10-30T12:00:00Z");
-            verify(repository).updateAfterExecution(eq("job-9"), eq("SUCCESS"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-9"), eq("SUCCESS"), any());
             verify(repository).insertExecutionLog(eq("job-9"), eq("SUCCESS"), isNull(), any(), any(), anyLong());
         }
 
@@ -113,7 +168,7 @@ class ScheduledJobExecutorServiceTest {
             executor.executeAll();
 
             verify(modules, never()).runScheduledAction(anyString(), anyString(), anyString(), anyString());
-            verify(repository).updateAfterExecution(eq("job-9"), eq("SKIPPED"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-9"), eq("SKIPPED"), any());
             verify(repository).insertExecutionLog(eq("job-9"), eq("SKIPPED"), contains("not active"), any(), any(),
                     anyLong());
         }
@@ -169,7 +224,7 @@ class ScheduledJobExecutorServiceTest {
             executor.executeAll();
 
             verify(flowEngine).startExecution(eq("t1"), eq("flow-1"), anyString(), any(), isNull(), isNull(), eq(false));
-            verify(repository).updateAfterExecution(eq("job-1"), eq("SUCCESS"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-1"), eq("SUCCESS"), any());
             verify(repository).insertExecutionLog(eq("job-1"), eq("SUCCESS"), isNull(), any(), any(), anyLong());
         }
 
@@ -211,7 +266,7 @@ class ScheduledJobExecutorServiceTest {
             executor.executeAll();
 
             verify(flowEngine, never()).startExecution(any(), any(), any(), any(), any(), any(), anyBoolean());
-            verify(repository).updateAfterExecution(eq("job-2"), eq("FAILED"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-2"), eq("FAILED"), any());
             verify(repository).insertExecutionLog(eq("job-2"), eq("FAILED"), contains("not found"), any(), any(), anyLong());
         }
 
@@ -228,7 +283,7 @@ class ScheduledJobExecutorServiceTest {
             executor.executeAll();
 
             verify(flowEngine, never()).startExecution(any(), any(), any(), any(), any(), any(), anyBoolean());
-            verify(repository).updateAfterExecution(eq("job-3"), eq("FAILED"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-3"), eq("FAILED"), any());
         }
 
         @Test
@@ -248,8 +303,8 @@ class ScheduledJobExecutorServiceTest {
 
             executor.executeAll();
 
-            verify(repository).updateAfterExecution(eq("j1"), eq("FAILED"), any(), any());
-            verify(repository).updateAfterExecution(eq("j2"), eq("SUCCESS"), any(), any());
+            verify(repository).updateAfterExecution(eq("j1"), eq("FAILED"), any());
+            verify(repository).updateAfterExecution(eq("j2"), eq("SUCCESS"), any());
         }
     }
 
@@ -273,7 +328,7 @@ class ScheduledJobExecutorServiceTest {
             executor.executeAll();
 
             verify(scriptExecutor).execute(any(ScriptExecutionRequest.class));
-            verify(repository).updateAfterExecution(eq("job-s1"), eq("SUCCESS"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-s1"), eq("SUCCESS"), any());
             verify(repository).insertExecutionLog(eq("job-s1"), eq("SUCCESS"), isNull(), any(), any(), anyLong());
         }
 
@@ -289,7 +344,7 @@ class ScheduledJobExecutorServiceTest {
             executor.executeAll();
 
             verify(scriptExecutor, never()).execute(any());
-            verify(repository).updateAfterExecution(eq("job-s2"), eq("FAILED"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-s2"), eq("FAILED"), any());
             verify(repository).insertExecutionLog(eq("job-s2"), eq("FAILED"), contains("not found"), any(), any(), anyLong());
         }
 
@@ -307,7 +362,7 @@ class ScheduledJobExecutorServiceTest {
             executor.executeAll();
 
             verify(scriptExecutor, never()).execute(any());
-            verify(repository).updateAfterExecution(eq("job-s3"), eq("FAILED"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-s3"), eq("FAILED"), any());
         }
 
         @Test
@@ -324,7 +379,7 @@ class ScheduledJobExecutorServiceTest {
             executor.executeAll();
 
             verify(scriptExecutor, never()).execute(any());
-            verify(repository).updateAfterExecution(eq("job-s4"), eq("FAILED"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-s4"), eq("FAILED"), any());
             verify(repository).insertExecutionLog(eq("job-s4"), eq("FAILED"), contains("no source code"), any(), any(), anyLong());
         }
 
@@ -343,7 +398,7 @@ class ScheduledJobExecutorServiceTest {
 
             executor.executeAll();
 
-            verify(repository).updateAfterExecution(eq("job-s5"), eq("FAILED"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-s5"), eq("FAILED"), any());
             verify(repository).insertExecutionLog(eq("job-s5"), eq("FAILED"), eq("Error: oops"), any(), any(), anyLong());
         }
     }
@@ -375,7 +430,7 @@ class ScheduledJobExecutorServiceTest {
             executor.executeAll();
 
             verify(reportExecutionService).exportCsv(any(), any());
-            verify(repository).updateAfterExecution(eq("job-r1"), eq("SUCCESS"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-r1"), eq("SUCCESS"), any());
             verify(repository).insertExecutionLog(eq("job-r1"), eq("SUCCESS"), isNull(), any(), any(), anyLong());
         }
 
@@ -390,7 +445,7 @@ class ScheduledJobExecutorServiceTest {
 
             executor.executeAll();
 
-            verify(repository).updateAfterExecution(eq("job-r2"), eq("FAILED"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-r2"), eq("FAILED"), any());
             verify(repository).insertExecutionLog(eq("job-r2"), eq("FAILED"), contains("not found"), any(), any(), anyLong());
         }
 
@@ -409,7 +464,7 @@ class ScheduledJobExecutorServiceTest {
 
             executor.executeAll();
 
-            verify(repository).updateAfterExecution(eq("job-r3"), eq("FAILED"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-r3"), eq("FAILED"), any());
             verify(repository).insertExecutionLog(eq("job-r3"), eq("FAILED"), contains("Collection not found"), any(), any(), anyLong());
         }
 
@@ -465,7 +520,7 @@ class ScheduledJobExecutorServiceTest {
             executor.executeAll();
 
             verifyNoInteractions(emailService);
-            verify(repository).updateAfterExecution(eq("job-r5"), eq("SUCCESS"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-r5"), eq("SUCCESS"), any());
         }
 
         @Test
@@ -488,7 +543,7 @@ class ScheduledJobExecutorServiceTest {
 
             noEmailExecutor.executeAll();
 
-            verify(repository).updateAfterExecution(eq("job-r7"), eq("SUCCESS"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-r7"), eq("SUCCESS"), any());
             verify(repository).insertExecutionLog(eq("job-r7"), eq("SUCCESS"),
                     contains("email disabled"), any(), any(), anyLong());
             verifyNoInteractions(emailService);
@@ -515,7 +570,7 @@ class ScheduledJobExecutorServiceTest {
 
             executor.executeAll();
 
-            verify(repository).updateAfterExecution(eq("job-r6"), eq("SUCCESS"), any(), any());
+            verify(repository).updateAfterExecution(eq("job-r6"), eq("SUCCESS"), any());
             verify(repository).insertExecutionLog(eq("job-r6"), eq("SUCCESS"),
                     contains("Delivered to 0/1"), any(), any(), anyLong());
         }
@@ -557,9 +612,9 @@ class ScheduledJobExecutorServiceTest {
 
             executor.executeAll();
 
-            verify(repository).updateAfterExecution(eq("j-flow"), eq("SUCCESS"), any(), any());
-            verify(repository).updateAfterExecution(eq("j-script"), eq("SUCCESS"), any(), any());
-            verify(repository).updateAfterExecution(eq("j-report"), eq("SUCCESS"), any(), any());
+            verify(repository).updateAfterExecution(eq("j-flow"), eq("SUCCESS"), any());
+            verify(repository).updateAfterExecution(eq("j-script"), eq("SUCCESS"), any());
+            verify(repository).updateAfterExecution(eq("j-report"), eq("SUCCESS"), any());
         }
 
         @Test
@@ -572,7 +627,7 @@ class ScheduledJobExecutorServiceTest {
 
             executor.executeAll();
 
-            verify(repository).updateAfterExecution(eq("j-unknown"), eq("SKIPPED"), any(), any());
+            verify(repository).updateAfterExecution(eq("j-unknown"), eq("SKIPPED"), any());
         }
     }
 
@@ -589,7 +644,7 @@ class ScheduledJobExecutorServiceTest {
 
             verify(flowEngine, never()).startExecution(any(), any(), any(), any(), any(), any(), anyBoolean());
             verify(scriptExecutor, never()).execute(any());
-            verify(repository, never()).updateAfterExecution(any(), any(), any(), any());
+            verify(repository, never()).updateAfterExecution(any(), any(), any());
         }
 
         @Test

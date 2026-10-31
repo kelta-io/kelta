@@ -28,9 +28,11 @@ import java.util.UUID;
 /**
  * Executes scheduled jobs that are due based on their cron expression.
  *
- * <p>Polled by {@link io.kelta.worker.config.SchedulerConfig} on a fixed interval.
- * Uses {@code SELECT FOR UPDATE SKIP LOCKED} via {@link ScheduledJobRepository}
- * for leader election — only one worker instance executes each job.
+ * <p>Polled by {@link io.kelta.worker.config.SchedulerConfig} on a fixed interval, on every
+ * worker pod. Each due job is claimed with {@link ScheduledJobRepository#claim} before it runs —
+ * a conditional update that advances {@code next_run_at} — so exactly one pod runs each scheduled
+ * slot. The claim is the only write of {@code next_run_at} on this path; recording the outcome
+ * afterwards leaves it alone.
  *
  * <p>Supports job types:
  * <ul>
@@ -126,6 +128,16 @@ public class ScheduledJobExecutorService {
             String jobReferenceId = (String) job.get("job_reference_id");
             String cronExpression = (String) job.get("cron_expression");
             String timezone = (String) job.get("timezone");
+            Instant scheduledFor = toInstant(job.get("next_run_at"));
+
+            // Every worker pod polls this table, and the SELECT above locks nothing once it
+            // returns, so another pod may hold the same row in its own list right now. Claim the
+            // slot before running it: the UPDATE advances next_run_at only while it still holds
+            // the slot this poll read, so exactly one pod wins and the rest skip the job.
+            if (!repository.claim(jobId, scheduledFor, safeCalculateNextRun(cronExpression, timezone))) {
+                log.debug("Scheduled job {} (slot {}) was claimed by another worker — skipping", jobId, scheduledFor);
+                continue;
+            }
 
             Instant startedAt = Instant.now();
 
@@ -141,27 +153,24 @@ public class ScheduledJobExecutorService {
             try {
                 TenantContextUtils.withTenant(tenantId, tenantSlug, () -> {
                     switch (jobType) {
-                        case "FLOW" -> executeFlowJob(jobId, tenantId, jobReferenceId, cronExpression, timezone, startedAt);
-                        case "SCRIPT" -> executeScriptJob(jobId, tenantId, jobReferenceId, cronExpression, timezone, startedAt);
-                        case "REPORT_EXPORT" -> executeReportExportJob(jobId, tenantId, jobReferenceId,
-                                cronExpression, timezone, startedAt,
+                        case "FLOW" -> executeFlowJob(jobId, tenantId, jobReferenceId, startedAt);
+                        case "SCRIPT" -> executeScriptJob(jobId, tenantId, jobReferenceId, startedAt);
+                        case "REPORT_EXPORT" -> executeReportExportJob(jobId, tenantId, jobReferenceId, startedAt,
                                 (String) job.get("name"), (String) job.get("config"));
-                        case "DATA_EXPORT" -> executeDataExportJob(jobId, tenantId, jobReferenceId, cronExpression, timezone, startedAt);
-                        case "MODULE_ACTION" -> executeModuleActionJob(jobId, tenantId, cronExpression, timezone,
-                                startedAt, (String) job.get("config"), job.get("next_run_at"));
+                        case "DATA_EXPORT" -> executeDataExportJob(jobId, tenantId, jobReferenceId, startedAt);
+                        case "MODULE_ACTION" -> executeModuleActionJob(jobId, tenantId, startedAt,
+                                (String) job.get("config"), scheduledFor);
                         default -> {
                             log.warn("Unsupported job type '{}' for job {}, skipping", jobType, jobId);
-                            Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
-                            repository.updateAfterExecution(jobId, "SKIPPED", startedAt, nextRun);
+                            repository.updateAfterExecution(jobId, "SKIPPED", startedAt);
                         }
                     }
                 });
             } catch (Exception e) {
                 Instant completedAt = Instant.now();
                 long durationMs = completedAt.toEpochMilli() - startedAt.toEpochMilli();
-                Instant nextRun = safeCalculateNextRun(cronExpression, timezone);
 
-                repository.updateAfterExecution(jobId, "FAILED", startedAt, nextRun);
+                repository.updateAfterExecution(jobId, "FAILED", startedAt);
                 repository.insertExecutionLog(jobId, "FAILED", e.getMessage(), startedAt, completedAt, durationMs);
 
                 log.error("Scheduled job failed: jobId={}, type={}, refId={}, tenantId={}, error={}, duration={}ms",
@@ -176,21 +185,21 @@ public class ScheduledJobExecutorService {
 
     /**
      * Runs the action through the module's endpoint ({@code POST /kelta/v1/actions/{key}}) with
-     * {@code Idempotency-Key: <jobId>:<fireTime>}, so a module can drop a run that two pods both
-     * picked up. A disabled or failed install is {@code SKIPPED}, not failed: nothing is wrong
-     * with the schedule. A module that cannot be called throws, and the caller records FAILED.
+     * {@code Idempotency-Key: <jobId>:<fireTime>}, so a module can drop a repeated run of the same
+     * slot ({@link ScheduledJobRepository#claim} already lets only one pod start it). A disabled or
+     * failed install is {@code SKIPPED}, not failed: nothing is wrong with the schedule. A module
+     * that cannot be called throws, and the caller records FAILED.
      */
     @SuppressWarnings("unchecked")
-    private void executeModuleActionJob(String jobId, String tenantId, String cronExpression, String timezone,
-                                        Instant startedAt, String configJson, Object scheduledFor) throws Exception {
+    private void executeModuleActionJob(String jobId, String tenantId, Instant startedAt, String configJson,
+                                        Instant scheduledFor) throws Exception {
         Map<String, Object> config = configJson == null ? Map.of() : objectMapper.readValue(configJson, Map.class);
         String moduleId = config.get("moduleId") instanceof String m ? m : null;
         String action = config.get("action") instanceof String a ? a : null;
-        Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
         if (externalModules == null || moduleId == null || action == null) {
             String error = externalModules == null ? "Runtime modules are disabled on this worker"
                     : "MODULE_ACTION job has no moduleId/action in its config";
-            repository.updateAfterExecution(jobId, "FAILED", startedAt, nextRun);
+            repository.updateAfterExecution(jobId, "FAILED", startedAt);
             repository.insertExecutionLog(jobId, "FAILED", error, startedAt, Instant.now(),
                     Instant.now().toEpochMilli() - startedAt.toEpochMilli());
             return;
@@ -198,25 +207,24 @@ public class ScheduledJobExecutorService {
         if (!externalModules.callable(tenantId, moduleId)) {
             log.info("Skipping scheduled action '{}' of module '{}' for tenant {}: the install is not active",
                     action, moduleId, tenantId);
-            repository.updateAfterExecution(jobId, "SKIPPED", startedAt, nextRun);
+            repository.updateAfterExecution(jobId, "SKIPPED", startedAt);
             repository.insertExecutionLog(jobId, "SKIPPED", "Module '" + moduleId + "' is not active",
                     startedAt, Instant.now(), Instant.now().toEpochMilli() - startedAt.toEpochMilli());
             return;
         }
-        Instant fireTime = scheduledFor instanceof java.sql.Timestamp ts ? ts.toInstant()
-                : scheduledFor instanceof Instant i ? i : startedAt;
+        Instant fireTime = scheduledFor != null ? scheduledFor : startedAt;
         ActionResult result = externalModules.runScheduledAction(tenantId, moduleId, action,
                 jobId + ":" + fireTime);
 
         Instant completedAt = Instant.now();
         long durationMs = completedAt.toEpochMilli() - startedAt.toEpochMilli();
         if (result.successful()) {
-            repository.updateAfterExecution(jobId, "SUCCESS", startedAt, nextRun);
+            repository.updateAfterExecution(jobId, "SUCCESS", startedAt);
             repository.insertExecutionLog(jobId, "SUCCESS", null, startedAt, completedAt, durationMs);
             log.info("Scheduled job executed: jobId={}, type=MODULE_ACTION, module={}, action={}, tenantId={}, "
                     + "duration={}ms", jobId, moduleId, action, tenantId, durationMs);
         } else {
-            repository.updateAfterExecution(jobId, "FAILED", startedAt, nextRun);
+            repository.updateAfterExecution(jobId, "FAILED", startedAt);
             repository.insertExecutionLog(jobId, "FAILED", result.errorMessage(), startedAt, completedAt, durationMs);
             log.warn("Scheduled job failed: jobId={}, type=MODULE_ACTION, module={}, action={}, tenantId={}, "
                     + "error={}", jobId, moduleId, action, tenantId, result.errorMessage());
@@ -229,12 +237,11 @@ public class ScheduledJobExecutorService {
 
     @SuppressWarnings("unchecked")
     private void executeFlowJob(String jobId, String tenantId, String flowReferenceId,
-                                 String cronExpression, String timezone, Instant startedAt) throws Exception {
+                                 Instant startedAt) throws Exception {
         var flowOpt = repository.findFlowById(flowReferenceId);
         if (flowOpt.isEmpty()) {
             log.error("Flow {} not found for scheduled job {}", flowReferenceId, jobId);
-            Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
-            repository.updateAfterExecution(jobId, "FAILED", startedAt, nextRun);
+            repository.updateAfterExecution(jobId, "FAILED", startedAt);
             repository.insertExecutionLog(jobId, "FAILED", "Flow not found: " + flowReferenceId,
                     startedAt, Instant.now(), Instant.now().toEpochMilli() - startedAt.toEpochMilli());
             return;
@@ -244,8 +251,7 @@ public class ScheduledJobExecutorService {
         boolean flowActive = (Boolean) flow.get("active");
         if (!flowActive) {
             log.warn("Flow {} is inactive for scheduled job {}", flowReferenceId, jobId);
-            Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
-            repository.updateAfterExecution(jobId, "FAILED", startedAt, nextRun);
+            repository.updateAfterExecution(jobId, "FAILED", startedAt);
             repository.insertExecutionLog(jobId, "FAILED", "Flow inactive: " + flowReferenceId,
                     startedAt, Instant.now(), Instant.now().toEpochMilli() - startedAt.toEpochMilli());
             return;
@@ -275,8 +281,7 @@ public class ScheduledJobExecutorService {
         Instant completedAt = Instant.now();
         long durationMs = completedAt.toEpochMilli() - startedAt.toEpochMilli();
 
-        Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
-        repository.updateAfterExecution(jobId, "SUCCESS", startedAt, nextRun);
+        repository.updateAfterExecution(jobId, "SUCCESS", startedAt);
         repository.insertExecutionLog(jobId, "SUCCESS", null, startedAt, completedAt, durationMs);
 
         log.info("Scheduled job executed: jobId={}, type=FLOW, flowId={}, tenantId={}, executionId={}, duration={}ms",
@@ -288,12 +293,11 @@ public class ScheduledJobExecutorService {
     // ---------------------------------------------------------------------------
 
     private void executeScriptJob(String jobId, String tenantId, String scriptReferenceId,
-                                   String cronExpression, String timezone, Instant startedAt) {
+                                   Instant startedAt) {
         var scriptOpt = repository.findScriptById(scriptReferenceId);
         if (scriptOpt.isEmpty()) {
             log.error("Script {} not found for scheduled job {}", scriptReferenceId, jobId);
-            Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
-            repository.updateAfterExecution(jobId, "FAILED", startedAt, nextRun);
+            repository.updateAfterExecution(jobId, "FAILED", startedAt);
             repository.insertExecutionLog(jobId, "FAILED", "Script not found: " + scriptReferenceId,
                     startedAt, Instant.now(), Instant.now().toEpochMilli() - startedAt.toEpochMilli());
             return;
@@ -303,8 +307,7 @@ public class ScheduledJobExecutorService {
         boolean active = Boolean.TRUE.equals(script.get("active"));
         if (!active) {
             log.warn("Script {} is inactive for scheduled job {}", scriptReferenceId, jobId);
-            Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
-            repository.updateAfterExecution(jobId, "FAILED", startedAt, nextRun);
+            repository.updateAfterExecution(jobId, "FAILED", startedAt);
             repository.insertExecutionLog(jobId, "FAILED", "Script inactive: " + scriptReferenceId,
                     startedAt, Instant.now(), Instant.now().toEpochMilli() - startedAt.toEpochMilli());
             return;
@@ -313,8 +316,7 @@ public class ScheduledJobExecutorService {
         String sourceCode = (String) script.get("source_code");
         if (sourceCode == null || sourceCode.isBlank()) {
             log.error("Script {} has no source code for scheduled job {}", scriptReferenceId, jobId);
-            Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
-            repository.updateAfterExecution(jobId, "FAILED", startedAt, nextRun);
+            repository.updateAfterExecution(jobId, "FAILED", startedAt);
             repository.insertExecutionLog(jobId, "FAILED", "Script has no source code: " + scriptReferenceId,
                     startedAt, Instant.now(), Instant.now().toEpochMilli() - startedAt.toEpochMilli());
             return;
@@ -335,15 +337,14 @@ public class ScheduledJobExecutorService {
 
         Instant completedAt = Instant.now();
         long durationMs = completedAt.toEpochMilli() - startedAt.toEpochMilli();
-        Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
 
         if (result.success()) {
-            repository.updateAfterExecution(jobId, "SUCCESS", startedAt, nextRun);
+            repository.updateAfterExecution(jobId, "SUCCESS", startedAt);
             repository.insertExecutionLog(jobId, "SUCCESS", null, startedAt, completedAt, durationMs);
             log.info("Scheduled job executed: jobId={}, type=SCRIPT, scriptId={}, tenantId={}, duration={}ms",
                     jobId, scriptReferenceId, tenantId, durationMs);
         } else {
-            repository.updateAfterExecution(jobId, "FAILED", startedAt, nextRun);
+            repository.updateAfterExecution(jobId, "FAILED", startedAt);
             repository.insertExecutionLog(jobId, "FAILED", result.errorMessage(), startedAt, completedAt, durationMs);
             log.error("Scheduled job failed: jobId={}, type=SCRIPT, scriptId={}, tenantId={}, error={}, duration={}ms",
                     jobId, scriptReferenceId, tenantId, result.errorMessage(), durationMs);
@@ -355,13 +356,12 @@ public class ScheduledJobExecutorService {
     // ---------------------------------------------------------------------------
 
     private void executeReportExportJob(String jobId, String tenantId, String reportReferenceId,
-                                         String cronExpression, String timezone, Instant startedAt,
+                                         Instant startedAt,
                                          String jobName, String configJson) {
         var reportOpt = repository.findReportById(reportReferenceId);
         if (reportOpt.isEmpty()) {
             log.error("Report {} not found for scheduled job {}", reportReferenceId, jobId);
-            Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
-            repository.updateAfterExecution(jobId, "FAILED", startedAt, nextRun);
+            repository.updateAfterExecution(jobId, "FAILED", startedAt);
             repository.insertExecutionLog(jobId, "FAILED", "Report not found: " + reportReferenceId,
                     startedAt, Instant.now(), Instant.now().toEpochMilli() - startedAt.toEpochMilli());
             return;
@@ -376,8 +376,7 @@ public class ScheduledJobExecutorService {
         } catch (Exception e) {
             Instant completedAt = Instant.now();
             long durationMs = completedAt.toEpochMilli() - startedAt.toEpochMilli();
-            Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
-            repository.updateAfterExecution(jobId, "FAILED", startedAt, nextRun);
+            repository.updateAfterExecution(jobId, "FAILED", startedAt);
             repository.insertExecutionLog(jobId, "FAILED", "Report export failed: " + e.getMessage(),
                     startedAt, completedAt, durationMs);
             log.error("Scheduled job failed: jobId={}, type=REPORT_EXPORT, reportId={}, tenantId={}, error={}, duration={}ms",
@@ -387,7 +386,6 @@ public class ScheduledJobExecutorService {
 
         Instant completedAt = Instant.now();
         long durationMs = completedAt.toEpochMilli() - startedAt.toEpochMilli();
-        Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
 
         // Count CSV rows (subtract 1 for header line)
         String csvOutput = csvWriter.toString();
@@ -397,7 +395,7 @@ public class ScheduledJobExecutorService {
         String deliveryNote = deliverReportByEmail(jobId, tenantId, jobName, configJson,
                 csvOutput, recordsProcessed);
 
-        repository.updateAfterExecution(jobId, "SUCCESS", startedAt, nextRun);
+        repository.updateAfterExecution(jobId, "SUCCESS", startedAt);
         repository.insertExecutionLog(jobId, "SUCCESS", deliveryNote, startedAt, completedAt, durationMs);
 
         log.info("Scheduled job executed: jobId={}, type=REPORT_EXPORT, reportId={}, tenantId={}, records={}, duration={}ms",
@@ -481,14 +479,13 @@ public class ScheduledJobExecutorService {
     // ---------------------------------------------------------------------------
 
     private void executeDataExportJob(String jobId, String tenantId, String exportConfigJson,
-                                       String cronExpression, String timezone, Instant startedAt) {
+                                       Instant startedAt) {
         // The job_reference_id stores an export configuration as JSON with name, scope, collectionIds, format
         Map<String, Object> config;
         try {
             config = objectMapper.readValue(exportConfigJson, Map.class);
         } catch (Exception e) {
-            Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
-            repository.updateAfterExecution(jobId, "FAILED", startedAt, nextRun);
+            repository.updateAfterExecution(jobId, "FAILED", startedAt);
             repository.insertExecutionLog(jobId, "FAILED", "Invalid export config: " + e.getMessage(),
                     startedAt, Instant.now(), Instant.now().toEpochMilli() - startedAt.toEpochMilli());
             return;
@@ -507,9 +504,8 @@ public class ScheduledJobExecutorService {
 
         Instant completedAt = Instant.now();
         long durationMs = completedAt.toEpochMilli() - startedAt.toEpochMilli();
-        Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
 
-        repository.updateAfterExecution(jobId, "SUCCESS", startedAt, nextRun);
+        repository.updateAfterExecution(jobId, "SUCCESS", startedAt);
         repository.insertExecutionLog(jobId, "SUCCESS", null, startedAt, completedAt, durationMs);
 
         log.info("Scheduled job executed: jobId={}, type=DATA_EXPORT, exportId={}, tenantId={}, duration={}ms",
@@ -519,6 +515,14 @@ public class ScheduledJobExecutorService {
     // ---------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------
+
+    /** {@code next_run_at} as the JDBC driver returns it ({@link java.sql.Timestamp}) — or null. */
+    private static Instant toInstant(Object value) {
+        if (value instanceof java.sql.Timestamp ts) return ts.toInstant();
+        if (value instanceof Instant i) return i;
+        if (value instanceof java.time.OffsetDateTime odt) return odt.toInstant();
+        return null;
+    }
 
     private Instant safeCalculateNextRun(String cronExpression, String timezone) {
         try {

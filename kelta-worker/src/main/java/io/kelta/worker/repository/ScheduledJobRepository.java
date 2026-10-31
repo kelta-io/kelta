@@ -21,8 +21,9 @@ import java.util.UUID;
 /**
  * Repository for scheduled job persistence and execution tracking.
  *
- * <p>Uses {@code SELECT FOR UPDATE SKIP LOCKED} for leader election in
- * multi-worker deployments — only one worker picks up each due job.
+ * <p>Every worker pod polls for due jobs. {@link #findDueJobs} only lists candidates;
+ * {@link #claim} is what decides which pod runs a scheduled slot — a conditional
+ * {@code UPDATE} that advances {@code next_run_at}, so exactly one pod wins each slot.
  *
  * @since 1.0.0
  */
@@ -38,8 +39,14 @@ public class ScheduledJobRepository {
     }
 
     /**
-     * Finds due jobs that are active and past their next_run_at.
-     * Uses SKIP LOCKED for leader election — concurrent workers won't pick up the same job.
+     * Lists due jobs: active and past their {@code next_run_at}. This is a candidate list, not a
+     * claim — every pod may get the same rows, so the caller must win {@link #claim} for a job
+     * before running it.
+     *
+     * <p>It used to end in {@code FOR UPDATE SKIP LOCKED} and was documented as leader election,
+     * but a JdbcTemplate query with no tenant bound runs in autocommit, so the row locks were
+     * released as soon as the statement returned. Two pods whose polls landed within a few
+     * milliseconds of each other both ran every job they listed.
      */
     public List<Map<String, Object>> findDueJobs() {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
@@ -48,8 +55,7 @@ public class ScheduledJobRepository {
                         "FROM scheduled_job " +
                         "WHERE active = true AND next_run_at <= NOW() " +
                         "ORDER BY next_run_at " +
-                        "LIMIT 50 " +
-                        "FOR UPDATE SKIP LOCKED"
+                        "LIMIT 50"
         );
         // Normalize the jsonb config PGobject to its JSON string form (mirrors findFlowById)
         return rows.stream().map(row -> {
@@ -84,14 +90,44 @@ public class ScheduledJobRepository {
     }
 
     /**
-     * Updates the scheduled job after execution.
+     * Claims one scheduled slot of a job for this pod: moves {@code next_run_at} from
+     * {@code scheduledFor} (the value {@link #findDueJobs} read) to {@code nextRunAt}, only if the
+     * row still holds {@code scheduledFor} and is active.
+     *
+     * <p>When two pods race for the same slot, Postgres serializes the two {@code UPDATE}s on the
+     * row lock and re-checks the loser's {@code WHERE} against the winner's committed row, where
+     * {@code next_run_at} has already moved on — so the loser matches nothing. A schedule edit or
+     * pause that lands between the read and the claim makes the claim fail the same way, and the
+     * next poll sees the new schedule.
+     *
+     * <p>The claim is taken before the job runs, so a pod that dies mid-run does not repeat that
+     * slot: each slot runs at most once, and the next slot is already scheduled.
+     *
+     * @param nextRunAt the slot after this one, or null if the cron yields none (the job stops)
+     * @return whether this pod owns the slot and must run it
      */
-    public void updateAfterExecution(String jobId, String lastStatus, Instant lastRunAt, Instant nextRunAt) {
+    public boolean claim(String jobId, Instant scheduledFor, Instant nextRunAt) {
+        if (scheduledFor == null) {
+            log.warn("Scheduled job {} was listed as due with no next_run_at — not claiming it", jobId);
+            return false;
+        }
+        return jdbcTemplate.update(
+                "UPDATE scheduled_job SET next_run_at = ?, updated_at = ? " +
+                        "WHERE id = ? AND active = true AND next_run_at = ?",
+                nextRunAt != null ? Timestamp.from(nextRunAt) : null, Timestamp.from(Instant.now()),
+                jobId, Timestamp.from(scheduledFor)
+        ) == 1;
+    }
+
+    /**
+     * Records the outcome of a run. Leaves {@code next_run_at} alone: {@link #claim} already
+     * advanced it before the run, and writing it again here would overwrite a schedule edit made
+     * during the run, or another pod's claim of the following slot.
+     */
+    public void updateAfterExecution(String jobId, String lastStatus, Instant lastRunAt) {
         jdbcTemplate.update(
-                "UPDATE scheduled_job SET last_run_at = ?, last_status = ?, next_run_at = ?, updated_at = ? " +
-                        "WHERE id = ?",
-                Timestamp.from(lastRunAt), lastStatus, nextRunAt != null ? Timestamp.from(nextRunAt) : null,
-                Timestamp.from(Instant.now()), jobId
+                "UPDATE scheduled_job SET last_run_at = ?, last_status = ?, updated_at = ? WHERE id = ?",
+                Timestamp.from(lastRunAt), lastStatus, Timestamp.from(Instant.now()), jobId
         );
     }
 

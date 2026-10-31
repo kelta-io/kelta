@@ -1031,8 +1031,9 @@ unsubscribe/suppression list).
   route is read-only, so every mutation goes through this controller.
 - **Runner** — `CampaignRunnerService`, polled by `CampaignPollerConfig` (default 15s). Claims
   runnable campaigns (QUEUED, or SCHEDULED whose time has arrived) with a conditional-claim
-  `UPDATE ... WHERE status IN (...)` after a `SELECT ... FOR UPDATE SKIP LOCKED` (leader election,
-  mirrors `BulkJobProcessorService`). Runs the claim with **no tenant context** (admin_bypass) so it
+  `UPDATE ... WHERE status IN (...)` after a candidate `SELECT` — the conditional `UPDATE` is the
+  claim; the select's `FOR UPDATE SKIP LOCKED` locks nothing in autocommit (`concerns.md` →
+  Claiming rows across worker pods). Runs the claim with **no tenant context** (admin_bypass) so it
   sees campaigns across tenants; each campaign's work then runs under `TenantContext.withTenant`.
   Resolves recipients from `target_collection` via the `QueryEngine` (paged), renders subject/body
   with `${field}` merge fields (same grammar as `DefaultEmailService`), and sends via
