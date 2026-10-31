@@ -71,9 +71,9 @@ public class BeforeSaveHookRegistry {
     }
 
     /**
-     * Registers a hook scoped to one tenant — used by {@code RuntimeModuleManager} when a
-     * per-tenant JAR-installed module is loaded, so the hook only fires for that tenant's
-     * records rather than platform-wide.
+     * Registers a hook scoped to one tenant — used by {@code ExternalModuleRegistry} for an
+     * external module's before-save hooks ({@code RemoteBeforeSaveHook}), so the hook only fires
+     * for that tenant's records rather than platform-wide.
      *
      * @param tenantId the tenant ID
      * @param hook the hook to register

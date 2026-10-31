@@ -10,8 +10,11 @@
 > built 2026-10-31 and every billing tenant cut over the same day (`kelta-modules/billing/CUTOVER.md`).
 > 9h (long-running actions with task tokens) built 2026-10-31 — an action declaring
 > `maxDurationSeconds` answers `202`, its flow step parks, and the module completes it later
-> (§3.6.2). 9g (delete the JAR path) waits for the last tenant JAR module, a long-running ingest
-> action, to move out of process on 9h. The settings form
+> (§3.6.2). 9g (delete the JAR path) built 2026-10-31, pending merge — every module is an
+> external service installed by URL; the JAR upload, signing keys, sandboxed classloader,
+> quarantine/stub statuses and load retry are gone, and V225 refuses to run while a JAR install is
+> left, then makes `base_url` `NOT NULL`; a separate contract migration drops the JAR columns and
+> `tenant_module_signing_key` once no old-image worker pod is left. The settings form
 > (§3.8) and a dead-letter list are not built yet. Planning spec for replacing the
 > in-process JAR module path with modules that run as **separate HTTP services, in any language**.
 > The machine-readable protocol contract is
@@ -31,11 +34,11 @@
 
 ### Why
 
-Today a module is a signed JAR loaded into the worker JVM by `SandboxedModuleClassLoader`. The
-parent spec states the consequence plainly: **the JAR publisher signature is the entire trust
-boundary**, capabilities are disclosure rather than containment, and `data:read` / `data:write`
-cannot be enforced because a module holds `QueryEngine` directly. Every module must be written in
-Java against platform classes, and the worker can never be a native image (deploy hazard 1).
+Before this slice a module was a signed JAR loaded into the worker JVM by
+`SandboxedModuleClassLoader` (deleted in part 9g). The parent spec states the consequence
+plainly: **the JAR publisher signature is the entire trust boundary**, capabilities are
+disclosure rather than containment, and `data:read` / `data:write` cannot be enforced because a module holds `QueryEngine` directly. Every module had to be written
+in Java against platform classes, and the worker could never be a native image (deploy hazard 1).
 
 The direction decided on 2026-10-30: **all module code runs out of process.** A module is any
 HTTPS service. It publishes a manifest; a tenant admin installs it by URL; the platform calls the
@@ -49,7 +52,7 @@ public JSON:API under a service principal whose permissions the admin approved.
 | The JAR signature is the whole trust boundary | The boundary is the **network + the module's service principal**. Module code never runs in a platform process. |
 | `data:read` / `data:write` will not be shipped — a module holds `QueryEngine` | The module reaches data **only** through the public API with its own token, so Cerbos object/field permissions, RLS and rate limits apply. Permissions become real (slice 4's goal, met by a generated profile). |
 | A module cannot subscribe to NATS, has no scheduler, cannot read the actor tier | Events are delivered over HTTP (§3.6); the manifest declares schedules (§3.7); the actor rides in the signed request (§3.3). |
-| The worker must stay JVM (deploy hazard 1) | No JAR classloading after part 9g. Whether the worker goes native again is a separate decision. |
+| The worker must stay JVM (deploy hazard 1) | No JAR classloading since part 9g. Whether the worker goes native again is a separate decision (`ci.yml` `worker-image-is-jvm` keeps it deliberate). |
 
 `moduleUiBundles.ts` still evaluates a module's UI bundle same-origin in the admin session. That
 part of the parent's warning **does not change**: the UI bundle is trusted code. This slice pins it
@@ -69,7 +72,7 @@ by hash at install so a running module cannot swap it later (§3.9).
    billing module can move without losing behavior.
 6. **A Rust reference module**: billing, rewritten as an external service, plus a Rust SDK crate
    (part 9f). Billing also serves as the trial for Rust in this codebase (see §8).
-7. **Removal of the JAR path** once billing runs externally (part 9g).
+7. **Removal of the JAR path** once billing runs externally (part 9g — done).
 
 ### Does not
 
@@ -95,8 +98,8 @@ by hash at install so a running module cannot swap it later (§3.9).
 | 9d | Invocation layer: remote actions, before-save hooks, service ports, route + webhook proxies, schedules, timeouts, circuit breaker, `DEGRADED`, metrics — **built** (`ExternalModuleRegistry`, `ExternalModuleInvoker`, `ModuleCircuitBreaker`, `RemoteActionHandler`, `RemoteBeforeSaveHook`, `RemoteEntitlementProvider`, `ExternalModuleProxy`, `ModuleScheduleSync`; no migration — V221 already allows `MODULE_ACTION`) | **yes, no auto-merge** | 9c |
 | 9e | Event delivery (NATS → HTTP) + UI bundle pinning + Modules page install-by-URL and consent screen — **built** (V222 `module_event_dead_letter`, `ModuleEventDeliveryListener`, `EventSubscription.Redelivery`, `ExternalModuleUiBundles`; Modules page: install from URL with the plan review, upgrade re-consent, uninstall plan, health). Deferred: the settings form (§3.8), a dead-letter list or replay | **yes, no auto-merge** | 9d |
 | 9e.1 | Module credential read: `GET /api/modules/self/credentials/{name}` for the calling install's declared credentials, audited as the module (§3.3) — **built** (`ModuleCredentialController`, `ModuleCredentialService`; gateway forwards the token's `connected_app_id` as `X-Connected-App-Id`; no migration) | **yes, no auto-merge** | 9e |
-| 9f | Rust billing module + `kelta-module` Rust SDK; cut the prod tenant over — **built** (`kelta-modules/sdk-rust`, `kelta-modules/billing`; the JAR moved to `kelta-modules/billing-jar` for rollback; CI `test-rust-modules`, image `harbor.rzware.com/kelta-modules/kelta-billing`, `BillingModuleScenarioTest`). Prod cutover not done: runbook `kelta-modules/billing/CUTOVER.md` | **yes, no auto-merge** (assertion verification + credential handling) | 9e.1 |
-| 9g | Delete the JAR path | — | 9f soaked one release |
+| 9f | Rust billing module + `kelta-module` Rust SDK; cut the prod tenant over — **built** (`kelta-modules/sdk-rust`, `kelta-modules/billing`; the JAR moved to `kelta-modules/billing-jar` for rollback, deleted in 9g; CI `test-rust-modules`, image `kelta-modules/kelta-billing` in the registry, `BillingModuleScenarioTest`). Every billing tenant cut over 2026-10-31: runbook `kelta-modules/billing/CUTOVER.md` | **yes, no auto-merge** (assertion verification + credential handling) | 9e.1 |
+| 9g | Delete the JAR path — **built** 2026-10-31, pending merge (V225, expand: refuses to run while a `tenant_module` row has no `base_url` or is `QUARANTINED`/`STUB`, then `base_url NOT NULL` and narrows `chk_module_status`; the JAR columns and `tenant_module_signing_key` stay, unread, for a separate contract migration; worker classloader/loader/installer/registrar/dispatcher/signature verifier/load retry, `RuntimeModuleManager`, `ModuleSigningKeyController` and runtime-core `ModuleManifest` (v1), `ModuleSigningKey(Store)`, `KeltaModule.getServices()` deleted; `POST /api/modules/install-jar` and the signing-key endpoints gone; `kelta-modules/billing-jar/` and CI `test-runtime-modules` removed) | — | 9f soaked one release |
 | 9h | Long-running actions with task tokens: `202` parks the flow step; the module completes it with `POST /api/modules/self/tasks/complete`, the token in the body (§3.6.2) — **built** (V223 `module_async_task` + `flow_pending_resume.claimed_at`, `ModuleAsyncTaskStore`, `ModuleTaskService`, `ModuleTaskController`, `ModuleSelfPrincipal`; runtime-core `AwaitedTaskOutcomes`, `ActionResult.awaiting`, `FlowEngine.resumeAwaitedTask`; resume claim lease) | **yes, no auto-merge** (a completion resumes a tenant's flow with module data) | 9d |
 
 Standing acceptance lines for every code part: `/verify` green; a `.claude/changelog.d/` fragment;
@@ -176,9 +179,9 @@ secrets). Schema: `ModuleManifest` in the OpenAPI components.
 
 Rules the parser enforces (part 9c):
 
-- `manifestVersion: 2` is the external manifest. A manifest without it is the JAR manifest (v1),
-  accepted only by the JAR install endpoints until part 9g deletes them. **Slice 3's §3.1
-  "manifest v2" (an in-JAR v2) is superseded by this one and will not be built.**
+- `manifestVersion: 2` is the external manifest, and since part 9g the only one
+  `ModuleManifestParser` accepts: the JAR manifest (v1) went with the JAR install endpoints.
+  **Slice 3's §3.1 "manifest v2" (an in-JAR v2) is superseded by this one and will not be built.**
 - `protocolVersion` must be one the platform speaks (`1`). The platform calls only the endpoints
   of that version.
 - `minPlatformVersion` is checked against the running platform version as slice 3 §3.2 designs it
@@ -545,7 +548,9 @@ can change after install) and follows no redirects.
 `tenant_module` gains: `base_url text`, `protocol_version int`, `connected_app_id varchar(36)`,
 `service_user_id varchar(36)`, `settings jsonb`,
 `ui_bundle_sha256 varchar(64)`, `ui_bundle_key text`. `s3_key`, `jar_checksum`, `jar_signature`,
-`module_class` become nullable in 9c and are dropped in 9g.
+`module_class` became nullable in 9c; since 9g nothing reads them, nor `jar_size_bytes`,
+`jar_signature_key_fingerprint`, `last_loaded_at` or `load_attempts`, and the 9g contract migration
+drops them all. `base_url` is `NOT NULL` since V225.
 
 New: `module_event_dead_letter (id, tenant_id, tenant_module_id, event_id, payload jsonb,
 last_status int, last_error text, attempts int, created_at)` with the standard tenant RLS policy.
@@ -567,8 +572,17 @@ None in 9a. Later parts, numbered at their own head+1 when written (head is **V2
   `expires_at`, `last_heartbeat_at`, `created_at`, `completed_at`; indexed by `execution_id` and
   `tenant_module_id` for the cascades), tenant RLS + admin bypass; `flow_pending_resume.claimed_at`
   and a partial index on it for the claim lease.
-- 9g: drop the JAR columns and `tenant_module_signing_key` (V186), and remove `QUARANTINED`/`STUB`
-  from `chk_module_status` once no row holds them.
+- 9g (V225, built): a `DO` block raises — failing the migrate Job, the ArgoCD PreSync hook with
+  `backoffLimit: 0`, so the rollout stops — if any `tenant_module` row has `base_url IS NULL` or
+  status `QUARANTINED`/`STUB`; then `base_url SET NOT NULL`; `chk_module_status` lost
+  `QUARANTINED`/`STUB`. It is the expand half and drops nothing: the previous worker image reads
+  every JAR column while the rollout replaces it.
+- 9g contract (separate PR, numbered at its own head+1): drops `jar_checksum`, `jar_size_bytes`,
+  `module_class`, `s3_key`, `jar_signature`, `jar_signature_key_fingerprint`
+  (+ `idx_tenant_module_signature_key`), `last_loaded_at`, `load_attempts` and the
+  `tenant_module_signing_key` table (V186). Merges only after the 9g release is deployed and no
+  old-image worker pod is left (`concerns.md` → Module-platform 9g rollout). Kept: `source_url`,
+  `last_error`, `last_error_at`, `tenant_module_action` and every external column.
 
 ## 5. File-by-file code changes
 
@@ -586,7 +600,7 @@ Later parts, representative files (each part's PR lists all):
 | 9e.1 | (as built) runtime-core: `ModuleStore.findByConnectedAppId`; runtime-module-integration: `CredentialResolverPort.resolve(…, actorUserId)`; worker: new `ModuleCredentialController`, `ModuleCredentialService`, `ModuleServicePrincipalService.isActivePrincipal`, `JdbcModuleStore`, `CredentialResolverPortAdapter`, `ModuleConfig`; gateway: `HeaderTransformationFilter` + `IdentityHeaderStripFilter` (`X-Connected-App-Id`) |
 | 9f | `kelta-modules/billing/` (Rust, replaces the Java module), new `kelta-modules/sdk-rust/`; homelab-argo manifests (outside this repo) |
 | 9h | (as built) runtime-core: `ActionResult.awaiting`/`Awaiting`, `ActionContext.awaitable`, `StateExecutionResult.awaiting`, new `flow/AwaitedTaskOutcomes`, `FlowExecutionContext` (awaitable, delivered outcome), `TaskStateExecutor` (park, resume with an outcome), `FlowEngine` (`parkAwaitedTask`, `resumeAwaitedTask`, `resumeExecution(id, claim)`, `cancelExecution` abandons tasks), `FlowStore.claimPendingResumeByEvent(tenant, …)`, `claimPendingResumes(…, lease)`, `consumePendingResume`, `releasePendingResume`, `ExternalModuleManifest.Action.maxDurationSeconds`, `ModuleManifestParser`; worker: V223, new `ModuleAsyncTaskStore`, `ModuleTaskService`, `ModuleTaskController`, `ModuleSelfPrincipal` (shared with `ModuleCredentialService`), `RemoteActionHandler` (task + `202`), `ExternalModuleRegistry`, `ModuleAccessTokenService.accessToken(…, minValidity)`, `JdbcFlowStore`, `FlowResumePollerConfig` (claim lease), `ModuleConfig`, `FlowConfig`, `ExternalModulePlanner`; runtime-jsonapi `SensitiveBodyRedactor` (`kmt_…` values); UI `ModulePlanReview.tsx` |
-| 9g | delete `SandboxedModuleClassLoader`, `ModuleLoader`, `ModuleJarService`, `ModuleSignatureVerifier`, `ModuleLoadRetryScheduler`, `ModuleLoadFailureClassifier`, signing-key endpoints, `install-jar`; JAR branches in `RuntimeModuleManager`. Compiled-in `KeltaModule`s (`runtime-module-core`, `runtime-module-integration`) stay |
+| 9g | (as built) deleted `SandboxedModuleClassLoader`, `ModuleLoader`, `ModuleJarService`, `ModuleSignatureVerifier`/`ModuleSignatureException`, `ModuleLoadRetryScheduler`/`ModuleLoadRetryPolicy`, `ModuleLoadFailureClassifier`, `ModuleInstaller`, `ModuleRegistrar`, `ModuleDispatcher`, `ModuleRouteRegistry`, `JdbcModuleSigningKeyStore`, `RuntimeModuleManager`, `ModuleSigningKeyController` (`install-jar` and the signing-key endpoints with their gateway `MANAGE_CREDENTIALS` rule); runtime-core `ModuleManifest` (v1), `ModuleSigningKey`, `ModuleSigningKeyStore`, `KeltaModule.getServices()`. `ModuleController` is gated on `kelta.modules.runtime.enabled`; `ModuleHttpController`/`ModuleWebhookController` always exist and answer 404 when modules are off; `ModuleEventListener` only refreshes `ExternalModuleRegistry`; `ModuleChangedPayload` lost `s3Key`/`moduleClass` and ignores unknown properties; `ModuleMetadataProvisioner` keeps only `planPackage`/`provisionPackage`; new `ModuleHashes`. V225; `kelta-modules/billing-jar/`, CI `test-runtime-modules` + the `runtime_modules` filter removed; the Modules page installs by URL only. Compiled-in `KeltaModule`s (`runtime-module-core`, `runtime-module-integration`) stay |
 
 Pitfalls that apply (CLAUDE.md): map the JWKS endpoint as a literal path, never `/**` under `/api`
 (`DynamicCollectionRouter`); declare every gating property in `application.yml`; register
@@ -678,13 +692,13 @@ beans.
   SaaS vendor an API key. As built (9e.1), the checks run per read, so disabling or uninstalling
   the module stops further reads at once even though its last token lives up to 15 minutes; a
   secret it already read cannot be taken back — rotate the credential.
-- **UI bundle is still full-trust code** in the admin origin (unchanged from the JAR world).
+- **UI bundle is still full-trust code** in the admin origin (unchanged from the JAR era).
   Pinning prevents later swaps, not a malicious first version. Sandboxing it (iframe + postMessage
   bridge) is a separate effort.
 - **Event delivery load.** One consumer pod handles all module deliveries per event; a slow module
   delays others only through its own retries, because deliveries run concurrently with a per-install
   in-flight cap (default 8).
-- **Cutover (9f).** Billing must never stub-succeed. Order: install the external billing module
+- **Cutover (9f, done 2026-10-31).** Billing must never stub-succeed. Order: install the external billing module
   on a staging tenant, compare entitlements, then on prod disable the JAR install and install the
   external one in one maintenance step; the merge-train and PreSync hazards in the parent apply.
 

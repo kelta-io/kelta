@@ -69,8 +69,8 @@ API, send email, submit for approval, run SQL, publish an event. Flows start fro
 webhooks, NATS messages, or an explicit API call. **Approval processes** route a record through steps and lock it
 while a decision is pending.
 
-Runtime-installable **modules** (signed JARs) extend the handler catalogue, add before-save hooks, contribute
-collections and UI components.
+Runtime-installable **modules** (HTTPS services installed by URL) extend the handler catalogue, add before-save
+hooks, contribute collections and UI components.
 
 → [Flows](/docs/automation/flows/), [Runtime modules](/docs/platform/modules/)
 

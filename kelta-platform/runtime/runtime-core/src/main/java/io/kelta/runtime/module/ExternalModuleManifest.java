@@ -9,7 +9,8 @@ import java.util.Map;
  * {@code specs/module-platform/9-external-modules.md} §3.1). Served by the module at
  * {@code GET {baseUrl}/.well-known/kelta-module.json} and parsed by
  * {@link ModuleManifestParser#parseExternal(String)}, which enforces every rule documented on the
- * components below. The JAR manifest (v1) is {@link ModuleManifest}.
+ * components below. It is the only module manifest: the JAR manifest (v1) was removed with the
+ * JAR module path (part 9g).
  *
  * <p>Everything here is a declaration shown to the tenant admin for consent; nothing in it is
  * trusted beyond that. The collections, fields and the like the module needs travel as a metadata
@@ -103,7 +104,7 @@ public record ExternalModuleManifest(
     public record FieldPermission(String collection, String field, String visibility) {}
 
     /**
-     * {@code actions[]}. Schemas are kept as JSON text, as the JAR manifest keeps them.
+     * {@code actions[]}. Schemas are kept as JSON text.
      *
      * @param timeoutMs          1–120000, default 30000: how long the call itself may take
      * @param maxDurationSeconds 1–604800, or null: when set, the action may answer {@code 202} to a

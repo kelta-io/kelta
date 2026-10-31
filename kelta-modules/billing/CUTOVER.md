@@ -1,6 +1,15 @@
 # Cutover runbook: JAR billing → Rust billing
 
-Moves one tenant from the Java JAR build of `kelta-billing` (`kelta-modules/billing-jar`) to the
+> **Complete — kept as history.** Every tenant that ran the JAR build was cut over on 2026-10-31
+> (results in [`VERIFICATION.md`](VERIFICATION.md) §4). Module-platform part 9g then deleted the JAR
+> build (`kelta-modules/billing-jar`) and the platform's JAR module path (install endpoint, signing
+> keys, loader; V225 refuses JAR installs and the 9g contract migration drops the JAR columns), so
+> **there is no JAR build to roll back to**. Rolling back now means redeploying a platform release
+> from before 9g (and, once the contract migration has run, restoring the columns and table it
+> dropped) together with a JAR artifact built from that era's source — neither is in
+> this repository any more. The [Rollback](#rollback) section below applied only before 9g.
+
+Moves one tenant from the Java JAR build of `kelta-billing` (formerly `kelta-modules/billing-jar`) to the
 Rust external service (`kelta-modules/billing`). Same module id, same five collections, same data.
 The data does not move: the JAR's uninstall keeps every collection, and the Rust install adopts
 them.
@@ -54,7 +63,7 @@ quiet time.
       answers a key set.
 - [ ] The sandbox rehearsal (VERIFICATION.md §4) passed and is recorded.
 - [ ] 🔑 **Rollback is ready:** the JAR is built and signed, and the signature verified, per
-      [`../billing-jar/VERIFICATION.md`](../billing-jar/VERIFICATION.md) steps 1–2. Rollback then
+      the JAR build's `VERIFICATION.md` steps 1–2 (deleted in part 9g; in git history). Rollback then
       takes minutes instead of a build.
 
       No re-signing is needed when the tenant's installed JAR is kept: the platform stores it in
@@ -275,8 +284,8 @@ rollback swaps the code back.
    kelta api DELETE /api/modules/kelta-billing $P --yes
    ```
 
-2. 🔑 Install and enable the pre-signed JAR:
-   [`../billing-jar/VERIFICATION.md`](../billing-jar/VERIFICATION.md) step 3. Its install skips
+2. 🔑 Install and enable the pre-signed JAR: the JAR build's `VERIFICATION.md` step 3 (deleted in
+   part 9g; in git history). Its install skips
    the existing collections.
 3. Restore each flow's original `definition` from `$SNAP/flows.json`, and re-create the
    `expire-passes` flow.
@@ -290,6 +299,6 @@ The Rust deployment can stay running after a rollback: nothing calls it once it 
 
 ## After the cutover
 
-- The JAR build stays in `kelta-modules/billing-jar` for rollback until part 9g removes it, along
-  with the JAR SPI.
+- The JAR build stayed in `kelta-modules/billing-jar` for rollback until part 9g removed it, along
+  with the platform's JAR module path.
 - `.claude/docs/status.md` → the portal billing row: record which tenants run which build.

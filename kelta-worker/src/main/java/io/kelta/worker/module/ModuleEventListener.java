@@ -1,23 +1,18 @@
 package io.kelta.worker.module;
 
-import io.kelta.runtime.context.TenantContext;
-import io.kelta.runtime.event.ModuleChangeType;
 import io.kelta.runtime.event.ModuleChangedPayload;
-import io.kelta.runtime.module.ModuleStore;
-import io.kelta.runtime.module.TenantModuleData;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.util.Optional;
-
 /**
  * NATS listener for module lifecycle change events.
  * <p>
- * When a module is installed/enabled/disabled/uninstalled on any pod,
- * this listener receives the event and updates the local handler registry.
+ * When a module is installed, upgraded, enabled, disabled or uninstalled on any pod, this
+ * listener receives the event and has {@link ExternalModuleRegistry} re-read the install row and
+ * re-register (or drop) the module's handlers, hooks and service port on this pod.
  * <p>
  * Uses a unique consumer group per pod so every pod receives every event.
  *
@@ -28,18 +23,12 @@ public class ModuleEventListener {
 
     private static final Logger log = LoggerFactory.getLogger(ModuleEventListener.class);
 
-    private final RuntimeModuleManager runtimeModuleManager;
-    private final ModuleStore moduleStore;
     private final ObjectMapper objectMapper;
 
-    /** Part 9d's endpoint registry; setter-injected so the constructor stays as it is. */
+    /** Absent when module support is switched off ({@code kelta.modules.runtime.enabled=false}). */
     private ExternalModuleRegistry externalModules;
 
-    public ModuleEventListener(RuntimeModuleManager runtimeModuleManager,
-                                ModuleStore moduleStore,
-                                ObjectMapper objectMapper) {
-        this.runtimeModuleManager = runtimeModuleManager;
-        this.moduleStore = moduleStore;
+    public ModuleEventListener(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 
@@ -60,49 +49,22 @@ public class ModuleEventListener {
 
             String tenantId = payload.getTenantId();
             String moduleId = payload.getModuleId();
-            ModuleChangeType changeType = payload.getChangeType();
 
             log.info("Processing module {} event for '{}' (tenant={})",
-                changeType, moduleId, tenantId);
+                payload.getChangeType(), moduleId, tenantId);
 
             if (tenantId == null || tenantId.isBlank()) {
                 log.warn("Dropping module change event with no tenantId: module={}", moduleId);
                 return;
             }
 
-            TenantContext.runWithTenant(tenantId, () -> {
-                switch (changeType) {
-                    case INSTALLED, ENABLED -> {
-                        Optional<TenantModuleData> module =
-                            moduleStore.findByTenantAndModuleId(tenantId, moduleId);
-                        if (module.isPresent() && changeType == ModuleChangeType.ENABLED) {
-                            // An enable is an explicit request to try again: re-run a load that
-                            // failed on this pod instead of hitting the already-loaded no-op.
-                            runtimeModuleManager.ensureLoaded(tenantId, module.get());
-                        } else if (module.isPresent()) {
-                            runtimeModuleManager.loadModule(tenantId, module.get());
-                        } else {
-                            log.warn("Module '{}' not found in DB for tenant {}", moduleId, tenantId);
-                        }
-                    }
-                    // Unload by id, never by row. Uninstall deletes the row and only then
-                    // publishes UNINSTALLED, so every pod except the one that served the request
-                    // gets here after the row is gone. Looking it up found nothing, skipped the
-                    // unload, and left the id in loadedModules — after which a reinstall hit the
-                    // "already loaded" early return and registered no handlers at all, on every
-                    // pod but one, while /api/modules still reported ACTIVE.
-                    case DISABLED, UNINSTALLED ->
-                        runtimeModuleManager.unloadModule(tenantId, moduleId);
-                    // Only external modules upgrade in place; the endpoint registry below is all
-                    // there is of one on a pod.
-                    case UPGRADED -> log.debug("Module '{}' upgraded for tenant {}", moduleId, tenantId);
-                }
-                // An external module: re-read its row, whatever the change, and re-register its
-                // handlers, hooks and service port from it (a JAR module's row is ignored there).
-                if (externalModules != null) {
-                    externalModules.refresh(tenantId, moduleId);
-                }
-            });
+            // Whatever the change, re-read the row and re-register from it. By id, never by a
+            // row looked up here: uninstall deletes the row and only then publishes UNINSTALLED,
+            // so every pod but the one that served the request sees no row, and refresh() must
+            // then drop the registrations rather than skip them.
+            if (externalModules != null) {
+                externalModules.refresh(tenantId, moduleId); // binds the tenant itself
+            }
         } catch (Exception e) {
             log.error("Error processing module changed event: {}", e.getMessage(), e);
         }

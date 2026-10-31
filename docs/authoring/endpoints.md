@@ -49,7 +49,7 @@ it before routing.
 `internal` marks an endpoint only the platform's own admin UI or services call; it is reachable, but
 not a supported integration surface and may change without notice.
 
-**412** public endpoints: **320** linked to docs, **29** internal,
+**406** public endpoints: **314** linked to docs, **29** internal,
 **63** not yet documented.
 
 ## Endpoints
@@ -275,16 +275,10 @@ not a supported integration surface and may change without notice.
 | GET | `/api/modules` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#installing) |
 | GET | `/api/modules/.well-known/jwks.json` | worker | none (unauthenticated) | [platform/modules](/docs/platform/modules/#external-modules-installed-by-url) |
 | POST | `/api/modules/install` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#installing) |
-| POST | `/api/modules/install-jar` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#installing) |
 | POST | `/api/modules/plan` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#external-modules-installed-by-url) |
 | GET | `/api/modules/self/credentials/{name}` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#reading-tenant-credentials) |
 | POST | `/api/modules/self/tasks/complete` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#long-running-actions) |
 | POST | `/api/modules/self/tasks/heartbeat` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#long-running-actions) |
-| GET | `/api/modules/signing-keys` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#signing) |
-| POST | `/api/modules/signing-keys` | worker | API_ACCESS + MANAGE_CREDENTIALS | [platform/modules](/docs/platform/modules/#signing) |
-| DELETE | `/api/modules/signing-keys/{id}` | worker | API_ACCESS + MANAGE_CREDENTIALS | [platform/modules](/docs/platform/modules/#signing) |
-| POST | `/api/modules/signing-keys/{id}/activate` | worker | API_ACCESS + MANAGE_CREDENTIALS | [platform/modules](/docs/platform/modules/#signing) |
-| POST | `/api/modules/signing-keys/{id}/retire` | worker | API_ACCESS + MANAGE_CREDENTIALS | [platform/modules](/docs/platform/modules/#signing) |
 | POST | `/api/modules/webhooks/{tenantId}/{moduleId}` | worker | none (unauthenticated) | [platform/modules](/docs/platform/modules/#what-a-module-can-contribute) |
 | DELETE | `/api/modules/{moduleId}` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#installing) |
 | GET | `/api/modules/{moduleId}/actions` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#installing) |

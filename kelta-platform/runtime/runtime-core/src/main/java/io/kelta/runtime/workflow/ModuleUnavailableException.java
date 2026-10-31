@@ -1,9 +1,8 @@
 package io.kelta.runtime.workflow;
 
 /**
- * Thrown when a module cannot do the work asked of it: a quarantined JAR module's action handler
- * (installed, its action key registered, its code not running), or an external module that is
- * disabled, unreachable, answered with an error, or whose circuit breaker is open.
+ * Thrown when a module cannot do the work asked of it: a module that is disabled, unreachable,
+ * answered with an error, or whose circuit breaker is open.
  *
  * <p>Thrown rather than returned as {@link ActionResult#failure(String)} because
  * {@code TaskStateExecutor} gives every failed {@code ActionResult} the generic error code
@@ -20,18 +19,13 @@ public class ModuleUnavailableException extends RuntimeException {
 
     private final String moduleId;
 
-    public ModuleUnavailableException(String moduleId, String version, String reason) {
-        super("Module '" + moduleId + "' v" + version + " is not running: " + reason);
-        this.moduleId = moduleId;
-    }
-
-    /** A failure described by {@code message} as it stands, for subclasses and external modules. */
+    /** A failure described by {@code message} as it stands, for subclasses and {@link #of}. */
     protected ModuleUnavailableException(String moduleId, String message, boolean asIs) {
         super(message);
         this.moduleId = moduleId;
     }
 
-    /** An external module that is running but could not serve this call; {@code message} names why. */
+    /** A module that could not serve this call; {@code message} names why. */
     public static ModuleUnavailableException of(String moduleId, String message) {
         return new ModuleUnavailableException(moduleId, message, true);
     }

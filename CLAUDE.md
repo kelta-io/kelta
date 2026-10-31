@@ -123,8 +123,9 @@ kelta-modules/  External modules — separate HTTP services a tenant installs BY
                 protocol, `docs/module-protocol/openapi.yaml`), built and deployed apart from the
                 platform. Rust Cargo workspace: `sdk-rust/` = the `kelta-module` SDK crate (MIT),
                 `billing/` = the `kelta-billing` service (reference impl, own image + namespace).
-                `billing-jar/` = the legacy Java JAR module (`POST /api/modules/install-jar`), kept
-                for rollback until part 9g. See `.claude/docs/playbooks.md` → "Ship a
+                Each module runs as its own HTTP service; a tenant installs it by URL via
+                `POST /api/modules/plan` + `POST /api/modules/install` (there is no in-process JAR
+                path since part 9g). See `.claude/docs/playbooks.md` → "Ship a
                 runtime-installable module"
 kelta-cli-downloads  nginx image serving self-update CLI binaries + manifest (downloads.kelta.io)
 kelta-test-harness  Cross-service integration tests (Testcontainers full mini-stack)
@@ -264,6 +265,7 @@ Each maps to a real mistake an agent has made here. Violating one usually compil
 | `kelta.config.tenant.ip-allowlist.changed.<tenantId>` | Tenant IP allowlist (network access) changed |
 | `kelta.config.environment.changed.<tenantId>.<envId>` | Sandbox environment created/cloned/refreshed/archived |
 | `kelta.config.promotion.executed.<tenantId>.<promotionId>` | Metadata promotion executed/failed/rolled back |
+| `kelta.config.module.changed.<tenantId>.<moduleId>` | Module installed/upgraded/enabled/disabled/uninstalled — every worker pod re-reads the install and refreshes its `ExternalModuleRegistry` (`ModuleEventListener`). `ModuleChangedPayload` ignores unknown properties (it lost the JAR-era `s3Key`/`moduleClass` in 9g) |
 | `kelta.chat.message.<tenantId>.<conversationId>` | Chat message created (telehealth slice 2) — ids/sender/kind ONLY, never the body; gateway `ChatMessageBridge` fans to conversation-joined sockets (membership-checked `chat.join`) as an invalidation signal |
 | `kelta.chat.conversation.<tenantId>.<conversationId>` | Chat conversation lifecycle (OPEN\|ASSIGNED\|CLOSED\|ARCHIVED) — ids/state only; same conversation-scoped fanout |
 | `kelta.video.session.<tenantId>.<sessionId>` | Video session lifecycle (ACTIVE\|ENDED + durationSeconds, telehealth slice 5) — published by the verified LiveKit webhook; ids/state only. The same envelope is bridged onto `kelta.trigger.<tenantId>.video.session`, so NATS_TRIGGERED flows with topic `video.session` fire (post-visit follow-up; flows read `$.input.payload.*`) |

@@ -63,6 +63,9 @@ only via the K8s **PreSync job**. Safe sequence for the cut-over:
 For full automation this can instead be a Flyway `beforeMigrate` SQL callback
 (the DELETE is idempotent), removing the manual coordination — deferred here.
 
-> `spring.flyway.ignore-migration-patterns: "*:missing"` is also set in
-> `application.yml` as a secondary guard, but it is **not** a substitute for the
-> DELETE — it did not reliably suppress the pure no-op failure in testing.
+> `spring.flyway.ignore-migration-patterns: "*:missing,*:future"` is also set in
+> `application.yml`. `*:missing` is a secondary guard for the flatten, but it is
+> **not** a substitute for the DELETE — it did not reliably suppress the pure
+> no-op failure in testing. `*:future` restores Flyway's default (setting the
+> property replaces it), so an older image's migrate Job can still validate
+> after a rollback.

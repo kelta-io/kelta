@@ -200,6 +200,7 @@ endpoint rolls out — until a field is media-enabled its collection's downloads
 | `kelta.config.tenant.ip-allowlist.changed.<tenantId>` | Tenant IP allowlist changed → gateway refreshes its allowlist cache |
 | `kelta.config.environment.changed.<tenantId>.<envId>` | Sandbox environment lifecycle (created/cloned/refreshed/archived) |
 | `kelta.config.promotion.executed.<tenantId>.<promotionId>` | Metadata promotion executed/failed/rolled back |
+| `kelta.config.module.changed.<tenantId>.<moduleId>` | Module lifecycle change (`ModuleConfigEventPublisher`, `ModuleChangedPayload`: ids, name, version, manifest, change type; unknown properties ignored, so the pre-9g `s3Key`/`moduleClass` from an old pod still parse) → every worker pod refreshes `ExternalModuleRegistry` for that install (`ModuleEventListener`, broadcast) |
 | `kelta.worker.assignment.changed` | Worker assignment changes |
 | `kelta.record.changed` | Record CRUD events (`RecordChangedPayload`; carries `containsMaskedFields` when the collection has data-masking config — the gateway `RealtimeBridge` then omits record `data` from WebSocket fan-out; and `payloadOmitted: true` with no `data`/`previousData` when the full event exceeded `kelta.nats.max-event-payload-bytes` — consumers re-read or refetch by `recordId`, see `architecture.md` → Oversized events). The envelope `userId` is the user who made the write (`ActingUser`), never the record's stored author |
 
@@ -561,12 +562,11 @@ records a FAILED delivery.
 ## Stripe (portal billing — consumer-alerting slice 1)
 
 > **Billing is the `kelta-billing` module only.** The worker's compiled-in copy was removed on
-> 2026-10-11 (module-platform slice 8). The module ships in two builds with the same module id,
-> collections and behaviour: the **Rust external service** (`kelta-modules/billing`, part 9f —
-> installed by URL, reads the Stripe credential over the module credential endpoint, verifies the
-> webhook itself) and the **legacy Java JAR** (`kelta-modules/billing-jar`, live on prod until the
-> cutover in `kelta-modules/billing/CUTOVER.md`, removed in part 9g). Differences are called out
-> below as *JAR:*.
+> 2026-10-11 (module-platform slice 8). The module is the **Rust external service**
+> (`kelta-modules/billing`, part 9f — installed by URL, reads the Stripe credential over the module
+> credential endpoint, verifies the webhook itself). It replaced an in-process Java JAR build with
+> the same module id and collections; every tenant was cut over on 2026-10-31
+> (`kelta-modules/billing/CUTOVER.md`) and part 9g deleted the JAR build.
 > The module keeps its data in its own collections (`billing_plans`, `billing_customers`,
 > `billing_subscriptions`, `billing_passes`, `billing_entitlement_rules`); the V178 platform
 > tables and their `billing-*` system collections were dropped by V209. Platform code reads entitlements through `ModuleEntitlementService`: the tenant's module
@@ -582,8 +582,7 @@ the platform needs only a handful of calls, so outbound calls use a plain REST c
 
 **Credential.** Type key `stripe`, named `stripe`. The Rust module declares it in
 `permissions.credentials` and reads it per request with its `Kelta-Access-Token`
-(`GET /api/modules/self/credentials/stripe?purpose=…`, audited as the module); *JAR:* resolved
-in-process by name through `CredentialResolver`.
+(`GET /api/modules/self/credentials/stripe?purpose=…`, audited as the module).
 Secrets `secretKey` (outbound auth) and `webhookSecret` (inbound verification); metadata
 `publishableKey` and `allowedReturnOrigins` (bounds where a checkout/portal return URL may
 point — without it a caller could redirect a paying member to an attacker-controlled page).
@@ -613,7 +612,7 @@ unique field, and the module reads the platform's refusal of the second create (
 from validation, or `409 UNIQUE_VIOLATION` from the constraint when two creates race) as "already
 granted" (only where the
 install created that field — see `kelta-modules/billing/CUTOVER.md` for collections adopted from
-the JAR). Out-of-order subscription events are ignored by Stripe's event `created` time, stored in
+the earlier JAR build). Out-of-order subscription events are ignored by Stripe's event `created` time, stored in
 `billing_subscriptions.lastStripeEventAt`, and a row in a terminal status (`canceled`,
 `incomplete_expired`) is never moved out of it, so a retried old `updated` cannot re-activate a
 deleted subscription. A signed event whose `metadata.tenantId` names a different tenant than the
@@ -641,14 +640,14 @@ base plan is the member's subscription plan while its status is `active`, `trial
 `past_due` (grace while the card is retried), otherwise the tenant's DEFAULT plan; every live
 pass then merges on top — numbers SUM, booleans OR, arrays union — so a pass can add a
 capability but never revoke one. Pass expiry is judged when entitlements are read, not by the
-`kelta-billing:expire-passes` action (an hourly manifest schedule the worker scheduler runs;
-*JAR:* `billing:expire-passes`, scheduled by a tenant flow), so a member is never over-entitled
+`kelta-billing:expire-passes` action (an hourly manifest schedule the worker scheduler runs), so
+a member is never over-entitled
 by a sweep that has not run yet.
 
 Platform callers (`WatchController`, `AlertDispatchService`) ask the worker's
 `ModuleEntitlementService`, which binds `TenantContext` (id **and** slug) and calls the tenant's
 module `EntitlementProvider`, uncached (for the Rust module: `POST /kelta/v1/services/entitlements/resolve`,
-manifest TTL 0). The module resolves uncached too by default, as the JAR did — a stale
+manifest TTL 0). The module resolves uncached too by default — a stale
 entitlement is worse than a slow one (`BILLING_ENTITLEMENTS_CACHE_SECONDS` opts into a cache).
 It does cache a tenant's quota rules (`BILLING_RULES_CACHE_SECONDS`, default 60), because every
 create in the tenant asks its hook: they are invalidated by the rules' record events, which reach
@@ -669,8 +668,7 @@ reacts to record changes on the module's collections (e.g. a record-triggered fl
 created by Stripe at checkout and mirrored from the webhook). Each POST carries an
 `Idempotency-Key`. From a flow action the Rust module derives it from the platform's
 `Idempotency-Key` (`kelta-billing:checkout:<executionId>:<state>`), so a retried step replays the
-same session while a new execution gets a new one; from a route it is per attempt (*JAR:* always
-per attempt). A deterministic per-member key would replay the previous session for the
+same session while a new execution gets a new one; from a route it is per attempt. A deterministic per-member key would replay the previous session for the
 processor's 24-hour idempotency window, which would stop a member buying a second one-time pass
 of the same plan on the same day.
 
@@ -687,8 +685,7 @@ that has not configured origins cannot redirect anywhere rather than anywhere at
 **Quota enforcement.** The module's `billing_entitlement_rules` rows say "records in collection
 X are capped by entitlement key Y", and the module's wildcard before-save hook enforces them, so
 capping a new collection is configuration rather than code. An `appliesTo=PORTAL` rule applies
-only when the signed actor's `user_type` is PORTAL (*JAR:* skipped, since a JAR module cannot read
-the caller's user type). The owner counted is the record's `createdBy`, else the signed actor.
+only when the signed actor's `user_type` is PORTAL. The owner counted is the record's `createdBy`, else the signed actor.
 The Rust module counts with `GET /api/<collection>?filter[createdBy][eq]=…&page[size]=1` over its
 token, which is why its manifest asks for `VIEW_ALL_DATA`. A rule's optional `countFilter` narrows
 what counts (e.g. only ACTIVE rows); its field names are validated against the collection

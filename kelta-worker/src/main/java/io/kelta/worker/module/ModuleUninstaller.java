@@ -277,7 +277,7 @@ public class ModuleUninstaller {
     private String hash(Map<String, Object> attributes) {
         Map<String, Object> copy = new TreeMap<>(attributes);
         copy.remove("planHash");
-        return ModuleJarService.sha256(objectMapper.writeValueAsBytes(canonical(copy)));
+        return ModuleHashes.sha256(objectMapper.writeValueAsBytes(canonical(copy)));
     }
 
     private static Object canonical(Object value) {

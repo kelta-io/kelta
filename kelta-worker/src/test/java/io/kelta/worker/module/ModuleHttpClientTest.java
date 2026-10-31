@@ -121,8 +121,8 @@ class ModuleHttpClientTest {
 
     private TenantModuleData module(String path) {
         return new TenantModuleData("install-1", "tenant-1", "acme-billing", "Billing", "1.0.0", null,
-                baseUrl + path, null, null, null, "{}", TenantModuleData.STATUS_INSTALLING, "user-1",
-                null, null, null, List.of(), baseUrl + path, 1, "app-1", "svc-1");
+                baseUrl + path, "{}", TenantModuleData.STATUS_INSTALLING, "user-1",
+                null, null, List.of(), baseUrl + path, 1, "app-1", "svc-1");
     }
 
     @Test

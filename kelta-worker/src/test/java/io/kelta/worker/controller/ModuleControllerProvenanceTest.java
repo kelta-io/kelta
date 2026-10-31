@@ -1,9 +1,7 @@
 package io.kelta.worker.controller;
 
-import io.kelta.worker.module.ModuleConfigEventPublisher;
+import io.kelta.runtime.module.ModuleStore;
 import io.kelta.worker.module.ModuleProvenanceStore;
-import io.kelta.worker.module.ModuleRouteRegistry;
-import io.kelta.worker.module.RuntimeModuleManager;
 import io.kelta.worker.repository.BootstrapRepository;
 import io.kelta.worker.service.CerbosPermissionResolver;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,23 +37,22 @@ class ModuleControllerProvenanceTest {
 
     private static final String TENANT = "tenant-a";
 
-    private RuntimeModuleManager manager;
+    private ModuleStore moduleStore;
     private ModuleProvenanceStore store;
     private MockMvc mvc;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
-        manager = mock(RuntimeModuleManager.class);
+        moduleStore = mock(ModuleStore.class);
         store = mock(ModuleProvenanceStore.class);
         when(store.findByModule(anyString(), anyString())).thenReturn(List.of());
 
-        ObjectProvider<ModuleRouteRegistry> routes = mock(ObjectProvider.class);
         ObjectProvider<ModuleProvenanceStore> provenance = mock(ObjectProvider.class);
         when(provenance.getIfAvailable()).thenReturn(store);
 
         mvc = MockMvcBuilders.standaloneSetup(new ModuleController(
-                manager, mock(ModuleConfigEventPublisher.class), routes, provenance,
+                moduleStore, provenance,
                 mock(CerbosPermissionResolver.class), mock(BootstrapRepository.class),
                 mock(ObjectProvider.class), mock(ObjectProvider.class))).build();
     }
@@ -106,7 +103,8 @@ class ModuleControllerProvenanceTest {
                 .andExpect(jsonPath("$.data", hasSize(0)));
 
         // Answered from provenance alone — a removed module has no tenant_module row.
-        verify(manager, never()).listModules(anyString());
+        verify(moduleStore, never()).findByTenant(anyString());
+        verify(moduleStore, never()).findByTenantAndModuleId(anyString(), anyString());
     }
 
     @Test

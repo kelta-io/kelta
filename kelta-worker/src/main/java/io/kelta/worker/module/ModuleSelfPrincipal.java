@@ -41,7 +41,7 @@ final class ModuleSelfPrincipal {
                                               String tenantId, String connectedAppId, String callerUserId) {
         TenantModuleData install = connectedAppId == null || connectedAppId.isBlank() ? null
                 : moduleStore.findByConnectedAppId(tenantId, connectedAppId).orElse(null);
-        if (install == null || !install.isExternal() || callerUserId == null
+        if (install == null || callerUserId == null
                 || !callerUserId.equals(install.serviceUserId())
                 || !principals.isActivePrincipal(tenantId, connectedAppId, callerUserId)) {
             return Optional.empty();

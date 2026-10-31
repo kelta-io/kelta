@@ -1,11 +1,19 @@
 package io.kelta.runtime.event;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 /**
  * Payload for module lifecycle change events published to NATS.
- * Propagates module install/enable/disable/uninstall events to all worker pods.
+ * Propagates module install/upgrade/enable/disable/uninstall events to all worker pods, each of
+ * which re-reads the install row on receipt.
+ *
+ * <p>Ignores unknown properties: before slice 9g the payload also carried the JAR module's
+ * {@code s3Key} and {@code moduleClass}, and a pod of the previous release may still publish them
+ * during a rolling deploy.
  *
  * @since 1.0.0
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ModuleChangedPayload {
 
     private String id;
@@ -13,8 +21,6 @@ public class ModuleChangedPayload {
     private String moduleId;
     private String name;
     private String version;
-    private String s3Key;
-    private String moduleClass;
     private String manifest;
     private ModuleChangeType changeType;
 
@@ -22,15 +28,12 @@ public class ModuleChangedPayload {
     }
 
     public ModuleChangedPayload(String id, String tenantId, String moduleId, String name,
-                                 String version, String s3Key, String moduleClass,
-                                 String manifest, ModuleChangeType changeType) {
+                                 String version, String manifest, ModuleChangeType changeType) {
         this.id = id;
         this.tenantId = tenantId;
         this.moduleId = moduleId;
         this.name = name;
         this.version = version;
-        this.s3Key = s3Key;
-        this.moduleClass = moduleClass;
         this.manifest = manifest;
         this.changeType = changeType;
     }
@@ -49,12 +52,6 @@ public class ModuleChangedPayload {
 
     public String getVersion() { return version; }
     public void setVersion(String version) { this.version = version; }
-
-    public String getS3Key() { return s3Key; }
-    public void setS3Key(String s3Key) { this.s3Key = s3Key; }
-
-    public String getModuleClass() { return moduleClass; }
-    public void setModuleClass(String moduleClass) { this.moduleClass = moduleClass; }
 
     public String getManifest() { return manifest; }
     public void setManifest(String manifest) { this.manifest = manifest; }

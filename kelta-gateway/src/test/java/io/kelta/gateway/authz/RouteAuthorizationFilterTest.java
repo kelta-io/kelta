@@ -320,15 +320,13 @@ class RouteAuthorizationFilterTest {
         }
 
         @Test
-        @DisplayName("A module principal with only API_ACCESS reaches its credential endpoint; nothing wider opens")
+        @DisplayName("A module principal with only API_ACCESS reaches its credential endpoint")
         void modulePrincipalReachesOnlyTheCredentialEndpoint() {
             // External modules: GET /api/modules/self/credentials/{name} rides the static-modules
             // route, so API_ACCESS is the whole gateway check and the worker decides who may read.
             RouteDefinition modulesRoute = new RouteDefinition("static-modules", "/api/modules/**",
                     "http://worker:80", "modules");
             when(routeRegistry.findByPath(eq("/api/modules/self/credentials/stripe"), any()))
-                    .thenReturn(Optional.of(modulesRoute));
-            when(routeRegistry.findByPath(eq("/api/modules/signing-keys"), any()))
                     .thenReturn(Optional.of(modulesRoute));
             // A tenant collection named "credentials" must not turn the path into a child read.
             lenient().when(routeRegistry.findTenantVisibleByPath(eq("/api/credentials/stripe"), any()))
@@ -341,7 +339,6 @@ class RouteAuthorizationFilterTest {
                     "profile_id", "module-profile", "email", "acme-sync.1a2b3c4d@service.kelta.invalid");
             GatewayPrincipal module = connectedAppPrincipal(claims);
             when(cerbosService.checkSystemPermission(module, "API_ACCESS")).thenReturn(Mono.just(true));
-            when(cerbosService.checkSystemPermission(module, "MANAGE_CREDENTIALS")).thenReturn(Mono.just(false));
 
             MockServerWebExchange read = MockServerWebExchange.from(
                     MockServerHttpRequest.get("/api/modules/self/credentials/stripe").build());
@@ -350,16 +347,6 @@ class RouteAuthorizationFilterTest {
 
             verify(filterChain).filter(any());
             verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
-            verify(cerbosService, never()).checkSystemPermission(module, "MANAGE_CREDENTIALS");
-
-            // The same principal is still held to the stricter rules elsewhere under /api/modules.
-            MockServerWebExchange write = MockServerWebExchange.from(
-                    MockServerHttpRequest.post("/api/modules/signing-keys").build());
-            write.getAttributes().put(PRINCIPAL_ATTR, module);
-            StepVerifier.create(filter.filter(write, filterChain)).expectComplete().verify();
-
-            assertThat(write.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
-            verify(filterChain).filter(any());
         }
 
         private GatewayPrincipal connectedAppPrincipal(Map<String, Object> claims) {

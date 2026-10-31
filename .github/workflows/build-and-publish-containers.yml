@@ -374,11 +374,9 @@ jobs:
             dockerfile: kelta-gateway/Dockerfile
             image: kelta-gateway
             changed: ${{ needs.changes.outputs.gateway }}
-          # JVM, not native-image. Runtime module JAR loading needs a bytecode
-          # interpreter: SandboxedModuleClassLoader defines classes from a JAR at
-          # runtime, and a native image cannot do that, so every installed module
-          # fell back to inert stub handlers while /api/modules still said ACTIVE.
-          # See kelta-worker/Dockerfile.jvm.
+          # JVM, not native-image: going native again is a separate decision (the
+          # JAR module loader that forced the JVM is gone since module-platform 9g).
+          # See kelta-worker/Dockerfile.jvm and the ci.yml worker-image-is-jvm job.
           - service: worker
             dockerfile: kelta-worker/Dockerfile.jvm
             image: kelta-worker

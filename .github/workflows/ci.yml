@@ -80,7 +80,6 @@ jobs:
       maven_build: ${{ steps.filter.outputs.maven_build }}
       java_audit: ${{ steps.filter.outputs.java_audit }}
       e2e: ${{ steps.filter.outputs.e2e }}
-      runtime_modules: ${{ steps.filter.outputs.runtime_modules }}
       rust_modules: ${{ steps.filter.outputs.rust_modules }}
       quickstart: ${{ steps.filter.outputs.quickstart }}
       templates: ${{ steps.filter.outputs.templates }}
@@ -316,84 +315,6 @@ jobs:
         with:
           name: java-test-results-runtime
           path: kelta-platform/runtime/*/target/surefire-reports/
-          if-no-files-found: ignore
-          retention-days: 7
-
-  # ===========================================================================
-  # Build + test runtime-installable modules (kelta-modules/**).
-  #
-  # These are deliberately OUTSIDE the kelta-platform reactor — they ship as
-  # signed JARs installed into a tenant at runtime, not with the platform — so
-  # nothing else in CI compiles them. Without this job a change to KeltaModule,
-  # ActionHandler, ModuleContext or any SPI type they use breaks every shipped
-  # module silently, and the break only surfaces when an operator uploads one.
-  #
-  # Each module is built independently (no aggregator pom, by design), so the
-  # loop installs the platform artifacts first and then runs each module's own
-  # build against them.
-  # ===========================================================================
-  test-runtime-modules:
-    name: Test Runtime Modules (installable)
-    needs: changes
-    runs-on: k8s-runner
-    if: (needs.changes.outputs.runtime_modules == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Set up JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v6
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-
-      - name: Install Maven
-        run: |
-          if ! command -v mvn &> /dev/null; then
-            curl -fsSL https://archive.apache.org/dist/maven/maven-3/${{ env.MAVEN_VERSION }}/binaries/apache-maven-${{ env.MAVEN_VERSION }}-bin.tar.gz | tar xz -C /opt
-            echo "/opt/apache-maven-${{ env.MAVEN_VERSION }}/bin" >> "$GITHUB_PATH"
-          fi
-          mkdir -p ~/.m2
-          cp ci/maven-settings.xml ~/.m2/settings.xml
-
-      - name: Cache Maven dependencies
-        uses: actions/cache@v6
-        with:
-          path: ~/.m2/repository
-          key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            maven-${{ runner.os }}-
-
-      - name: Clean stale Kelta artifacts
-        run: rm -rf ~/.m2/repository/io/kelta
-
-      - name: Install platform artifacts modules compile against
-        run: mvn install -DskipTests -f kelta-platform/pom.xml -pl runtime/runtime-core,runtime/runtime-events,runtime/runtime-jsonapi,runtime/runtime-module-core,runtime/runtime-module-integration,runtime/runtime-module-schema,runtime/runtime-messaging-nats -am -B
-
-      - name: Build and test each installable module
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          found=0
-          for pom in kelta-modules/*/pom.xml; do
-            found=1
-            echo "::group::$(dirname "$pom")"
-            mvn verify -f "$pom" -B
-            echo "::endgroup::"
-          done
-          if [[ "$found" -eq 0 ]]; then
-            echo "No installable modules found under kelta-modules/ — nothing to build."
-          fi
-
-      - name: Upload test results
-        # Artifact upload occasionally hits transient ENOTFOUND on the self-
-        # hosted runner — don't let that mask a green test run.
-        continue-on-error: true
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: java-test-results-runtime-modules
-          path: kelta-modules/*/target/surefire-reports/
           if-no-files-found: ignore
           retention-days: 7
 
@@ -1671,12 +1592,12 @@ jobs:
           if [ -f ci/docker-reclaim.sh ]; then bash ci/docker-reclaim.sh; else echo "ci/docker-reclaim.sh not on this ref, skipping"; fi
 
   # ===========================================================================
-  # The worker image must stay JVM.
+  # The worker image stays JVM.
   #
-  # Runtime module loading needs a bytecode interpreter: SandboxedModuleClassLoader defines classes
-  # from an uploaded JAR at runtime, which a native image cannot do. Switching the worker to a
-  # native build is a one-line change that produces no error anywhere -- every installed module
-  # silently loads as inert handlers. This job exists so that change fails here instead.
+  # Production moved the worker to the JVM because the in-process JAR module loader could not run
+  # on a native image. Module-platform slice 9g removed that loader (every module is an external
+  # HTTP service), but going native again is a separate decision that needs its own validation.
+  # Switching the build is a one-line change; this job makes it a deliberate one.
   # ===========================================================================
   worker-image-is-jvm:
     name: Worker image is JVM
@@ -1694,8 +1615,8 @@ jobs:
           echo "worker dockerfile: ${actual}"
           if [ "${actual}" != "kelta-worker/Dockerfile.jvm" ]; then
             echo "::error::The worker image must build from kelta-worker/Dockerfile.jvm, got '${actual}'."
-            echo "A native worker cannot classload an uploaded module JAR, so every installed"
-            echo "module becomes inert with no error reported anywhere."
+            echo "Production runs the JVM worker. Moving it to a native image is its own decision"
+            echo "and needs its own validation; change this check in that change, not by accident."
             exit 1
           fi
 
@@ -2022,17 +1943,16 @@ jobs:
 
   quality-gate:
     name: Quality Gate
-    needs: [changes, test-java, test-runtime, test-runtime-modules, test-rust-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, templates, mcp-replay, upgrade, worker-image-is-jvm, dependency-audit, dependency-audit-java, lint-workflows, test-ci-scripts, test-dora]
+    needs: [changes, test-java, test-runtime, test-rust-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, templates, mcp-replay, upgrade, worker-image-is-jvm, dependency-audit, dependency-audit-java, lint-workflows, test-ci-scripts, test-dora]
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: k8s-runner
     steps:
       - name: Check job results
         run: |
-          for job in test-java test-runtime test-runtime-modules test-rust-modules test-frontend test-marketing integration-tests e2e quickstart templates mcp-replay upgrade worker-image-is-jvm dependency-audit dependency-audit-java lint-workflows test-ci-scripts test-dora; do
+          for job in test-java test-runtime test-rust-modules test-frontend test-marketing integration-tests e2e quickstart templates mcp-replay upgrade worker-image-is-jvm dependency-audit dependency-audit-java lint-workflows test-ci-scripts test-dora; do
             case "${job}" in
               test-java)         result="${{ needs.test-java.result }}" ;;
               test-runtime)      result="${{ needs.test-runtime.result }}" ;;
-              test-runtime-modules) result="${{ needs.test-runtime-modules.result }}" ;;
               test-rust-modules) result="${{ needs.test-rust-modules.result }}" ;;
               test-frontend)     result="${{ needs.test-frontend.result }}" ;;
               test-marketing)    result="${{ needs.test-marketing.result }}" ;;

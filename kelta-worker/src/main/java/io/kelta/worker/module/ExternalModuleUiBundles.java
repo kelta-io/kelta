@@ -62,7 +62,7 @@ public class ExternalModuleUiBundles {
      */
     public Fetched fetch(String baseUrl, ExternalModuleManifest.Ui ui) {
         byte[] bytes = http.fetchUiBundle(baseUrl, ui.bundlePath());
-        return new Fetched(bytes, ModuleJarService.sha256(bytes));
+        return new Fetched(bytes, ModuleHashes.sha256(bytes));
     }
 
     /** {@code modules/{tenantId}/{moduleId}/{version}/ui-bundle.{sha256}.js}. */
@@ -100,7 +100,7 @@ public class ExternalModuleUiBundles {
                     module.tenantId(), module.uiBundleKey(), e.getMessage());
             return Optional.empty();
         }
-        String sha256 = ModuleJarService.sha256(bytes);
+        String sha256 = ModuleHashes.sha256(bytes);
         if (!sha256.equals(module.uiBundleSha256())) {
             log.error("Pinned UI bundle of module '{}' (tenant {}) at {} has SHA-256 {}, but {} was pinned; "
                     + "not serving it", module.moduleId(), module.tenantId(), module.uiBundleKey(), sha256,

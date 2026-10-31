@@ -1,9 +1,6 @@
 package io.kelta.worker.module;
 
 import io.kelta.runtime.context.TenantContext;
-import io.kelta.runtime.module.ModuleManifest;
-import io.kelta.runtime.module.ModuleManifest.CollectionManifest;
-import io.kelta.runtime.module.ModuleManifest.CollectionManifest.FieldManifest;
 import io.kelta.worker.service.PackageImportService;
 import io.kelta.worker.service.PackageImportService.ImportOptions;
 import io.kelta.worker.service.PackageImportService.ImportReport;
@@ -23,7 +20,6 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -31,6 +27,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.assertj.core.groups.Tuple.tuple;
 import static org.mockito.Mockito.when;
 
 @DisplayName("ModuleMetadataProvisioner")
@@ -91,61 +88,41 @@ class ModuleMetadataProvisionerTest {
         return new ImportReport(0, 0, 0, 0, results);
     }
 
-    private static ModuleManifest manifest(List<CollectionManifest> collections) {
-        return new ModuleManifest("test-module", "Test", "1.0.0", null, null, "x.Module", null,
-                List.of(), List.of(), collections, null, null, List.of(), List.of());
+    /** A collection item, keyed by column name as {@code PackageImportService} maps rows. */
+    private static Map<String, Object> collection(String name) {
+        return item("COLLECTION", Map.of("name", name, "display_name", name, "path", "/api/" + name,
+                "active", true));
     }
 
-    private static CollectionManifest invoices() {
-        return new CollectionManifest("invoices", "Invoices", List.of(
-                new FieldManifest("reference", "Reference", "STRING", true),
-                new FieldManifest("amount", null, "DECIMAL", false)));
+    private static Map<String, Object> field(String collection, String name) {
+        return item("FIELD", Map.of("collection_name", collection, "name", name, "display_name", name,
+                "type", "STRING", "active", true));
     }
 
-    @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> items(Map<String, Object> pkg) {
-        return (List<Map<String, Object>>) pkg.get("items");
+    private static Map<String, Object> item(String type, Map<String, Object> data) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("type", type);
+        item.put("data", data);
+        return item;
     }
 
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> data(Map<String, Object> item) {
-        return (Map<String, Object>) item.get("data");
+    @SafeVarargs
+    private static Map<String, Object> pkg(Map<String, Object>... items) {
+        return Map.of("items", List.of(items));
     }
 
-    @Test
-    @DisplayName("translates a collection and its fields into package items keyed by column name")
-    void translatesManifestToPackage() {
-        provisioner.provision(TENANT, manifest(List.of(invoices())), "user-1");
+    private static Map<String, Object> invoices() {
+        return pkg(collection("invoices"), field("invoices", "reference"), field("invoices", "amount"));
+    }
 
-        List<Map<String, Object>> items = items(packages.get(0));
-        assertThat(items).extracting(i -> i.get("type")).containsExactly("COLLECTION", "FIELD", "FIELD");
-        assertThat(data(items.get(0))).containsExactlyInAnyOrderEntriesOf(Map.of(
-                "name", "invoices", "display_name", "Invoices", "path", "/api/invoices",
-                "active", true, "current_version", 1));
-        assertThat(data(items.get(1))).containsExactlyInAnyOrderEntriesOf(Map.of(
-                "collection_name", "invoices", "name", "reference", "display_name", "Reference",
-                "type", "STRING", "required", true, "field_order", 0, "active", true));
-        // An omitted display name falls back to the field name.
-        assertThat(data(items.get(2)))
-                .containsEntry("display_name", "amount")
-                .containsEntry("required", false)
-                .containsEntry("field_order", 1);
-        assertThat(calls.get(0).executingUserId()).isEqualTo("user-1");
+    private ModuleMetadataProvisioner.ProvisionResult provision(Map<String, Object> pkg) {
+        return provisioner.provisionPackage(TENANT, "test-module", pkg, Set.of(), "user-1");
     }
 
     @Test
-    @DisplayName("defaults the collection display name to the name with a capitalised first letter")
-    void defaultsDisplayName() {
-        provisioner.provision(TENANT,
-                manifest(List.of(new CollectionManifest("invoices", null, List.of()))), "user-1");
-
-        assertThat(data(items(packages.get(0)).get(0))).containsEntry("display_name", "Invoices");
-    }
-
-    @Test
-    @DisplayName("a new collection is created with its fields: CREATED resources with ids and hashes")
+    @DisplayName("a new collection is created with its fields: a SKIP-mode dry run, then the apply pass")
     void newCollectionIsCreated() {
-        var result = provisioner.provision(TENANT, manifest(List.of(invoices())), "user-1");
+        var result = provision(invoices());
 
         assertThat(calls).hasSize(2);
         assertThat(calls.get(0).dryRun()).isTrue();
@@ -154,6 +131,7 @@ class ModuleMetadataProvisionerTest {
         assertThat(calls.get(1).conflictMode()).isEqualTo(PackageImportService.ConflictMode.SKIP);
         assertThat(calls.get(1).itemKeyFilter()).containsExactlyInAnyOrder(
                 "COLLECTION:invoices", "FIELD:invoices.reference", "FIELD:invoices.amount");
+        assertThat(calls.get(1).executingUserId()).isEqualTo("user-1");
 
         assertThat(result.failures()).isEmpty();
         assertThat(result.resources()).extracting(
@@ -162,15 +140,9 @@ class ModuleMetadataProvisionerTest {
                         ModuleMetadataProvisioner.ProvisionedResource::resourceId,
                         ModuleMetadataProvisioner.ProvisionedResource::ownership)
                 .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple("COLLECTION", "invoices", "id-invoices", "CREATED"),
-                        org.assertj.core.groups.Tuple.tuple("FIELD", "invoices.reference",
-                                "id-invoices.reference", "CREATED"),
-                        org.assertj.core.groups.Tuple.tuple("FIELD", "invoices.amount",
-                                "id-invoices.amount", "CREATED"));
-        assertThat(result.resources()).allSatisfy(r -> assertThat(r.contentHash()).matches(HEX_64));
-        // Each hash covers that item's own data.
-        assertThat(result.resources()).extracting(
-                ModuleMetadataProvisioner.ProvisionedResource::contentHash).doesNotHaveDuplicates();
+                        tuple("COLLECTION", "invoices", "id-invoices", "CREATED"),
+                        tuple("FIELD", "invoices.reference", "id-invoices.reference", "CREATED"),
+                        tuple("FIELD", "invoices.amount", "id-invoices.amount", "CREATED"));
     }
 
     @Test
@@ -178,10 +150,9 @@ class ModuleMetadataProvisionerTest {
     void existingCollectionIsAdopted() {
         existing.add("invoices");
 
-        var result = provisioner.provision(TENANT, manifest(List.of(invoices())), "user-1");
+        var result = provision(invoices());
 
         assertThat(calls.get(1).itemKeyFilter()).containsExactly("COLLECTION:invoices");
-        assertThat(calls.get(1).itemKeyFilter()).noneMatch(k -> k.startsWith("FIELD:"));
         assertThat(result.resources()).singleElement().satisfies(r -> {
             assertThat(r.type()).isEqualTo("COLLECTION");
             assertThat(r.naturalKey()).isEqualTo("invoices");
@@ -203,7 +174,7 @@ class ModuleMetadataProvisionerTest {
             return fakeImport(inv.getArgument(1), options);
         }).when(importService).importPackage(anyString(), anyMap(), any());
 
-        var result = provisioner.provision(TENANT, manifest(List.of(invoices())), "user-1");
+        var result = provision(invoices());
 
         // The dry run said "new", so its fields were in the filter — but none is claimed.
         assertThat(calls.get(1).itemKeyFilter()).contains("FIELD:invoices.reference");
@@ -216,11 +187,8 @@ class ModuleMetadataProvisionerTest {
     void mixedCreatedAndAdopted() {
         existing.add("existing");
 
-        var result = provisioner.provision(TENANT, manifest(List.of(
-                new CollectionManifest("brand_new", null,
-                        List.of(new FieldManifest("reference", null, "STRING", false))),
-                new CollectionManifest("existing", null,
-                        List.of(new FieldManifest("reference", null, "STRING", false))))), "user-1");
+        var result = provision(pkg(collection("brand_new"), collection("existing"),
+                field("brand_new", "reference"), field("existing", "reference")));
 
         assertThat(calls.get(1).itemKeyFilter()).containsExactlyInAnyOrder(
                 "COLLECTION:brand_new", "COLLECTION:existing", "FIELD:brand_new.reference");
@@ -228,54 +196,35 @@ class ModuleMetadataProvisionerTest {
                         ModuleMetadataProvisioner.ProvisionedResource::naturalKey,
                         ModuleMetadataProvisioner.ProvisionedResource::ownership)
                 .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple("brand_new", "CREATED"),
-                        org.assertj.core.groups.Tuple.tuple("existing", "ADOPTED"),
-                        org.assertj.core.groups.Tuple.tuple("brand_new.reference", "CREATED"));
+                        tuple("brand_new", "CREATED"),
+                        tuple("existing", "ADOPTED"),
+                        tuple("brand_new.reference", "CREATED"));
     }
 
     @Test
-    @DisplayName("rejects a malformed manifest before importing anything")
-    void rejectsMalformedManifestBeforeImporting() {
-        var bad = manifest(List.of(invoices(), new CollectionManifest("Not Valid", null, List.of())));
+    @DisplayName("the plan classifies without writing: CREATE, SKIP_ADOPTED under an adopted parent, KEEP for its own")
+    void planClassifiesWithoutWriting() {
+        existing.add("existing");
 
-        assertThatThrownBy(() -> provisioner.provision(TENANT, bad, "user-1"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Not Valid");
+        var planned = provisioner.planPackage(TENANT, pkg(collection("brand_new"), collection("existing"),
+                        field("brand_new", "reference"), field("existing", "reference")),
+                Set.of("COLLECTION:brand_new"), "user-1");
 
-        // The valid first entry must not have been imported — a bad manifest cannot
-        // half-provision a tenant.
-        verify(importService, never()).importPackage(anyString(), anyMap(), any());
+        assertThat(calls).singleElement().satisfies(c -> assertThat(c.dryRun()).isTrue());
+        assertThat(planned).extracting(ModuleMetadataProvisioner.PlannedItem::naturalKey,
+                        ModuleMetadataProvisioner.PlannedItem::action)
+                .containsExactlyInAnyOrder(
+                        tuple("brand_new", ModuleMetadataProvisioner.ACTION_CREATE),
+                        tuple("existing", ModuleMetadataProvisioner.ACTION_ADOPT),
+                        tuple("brand_new.reference", ModuleMetadataProvisioner.ACTION_CREATE),
+                        tuple("existing.reference", ModuleMetadataProvisioner.ACTION_SKIP_ADOPTED));
     }
 
     @Test
-    @DisplayName("rejects a field with a blank type before importing anything")
-    void rejectsBlankType() {
-        var bad = manifest(List.of(new CollectionManifest(
-                "invoices", null, List.of(new FieldManifest("reference", null, " ", false)))));
-
-        assertThatThrownBy(() -> provisioner.provision(TENANT, bad, "user-1"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("has no type");
-        verify(importService, never()).importPackage(anyString(), anyMap(), any());
-    }
-
-    @Test
-    @DisplayName("rejects a field name the platform reserves")
-    void rejectsReservedFieldName() {
-        var bad = manifest(List.of(new CollectionManifest(
-                "invoices", null, List.of(new FieldManifest("tenantId", null, "STRING", false)))));
-
-        assertThatThrownBy(() -> provisioner.provision(TENANT, bad, "user-1"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("reserved");
-        verify(importService, never()).importPackage(anyString(), anyMap(), any());
-    }
-
-    @Test
-    @DisplayName("does nothing when the manifest declares no collections")
-    void noCollectionsIsANoOp() {
-        assertThat(provisioner.provision(TENANT, manifest(List.of()), "user-1").resources()).isEmpty();
-        assertThat(provisioner.provision(TENANT, manifest(null), "user-1").failures()).isEmpty();
+    @DisplayName("does nothing when the package has no items")
+    void emptyPackageIsANoOp() {
+        assertThat(provision(Map.of("items", List.of())).resources()).isEmpty();
+        assertThat(provisioner.planPackage(TENANT, Map.of("items", List.of()), Set.of(), "user-1")).isEmpty();
         verify(importService, never()).importPackage(anyString(), anyMap(), any());
     }
 
@@ -284,7 +233,7 @@ class ModuleMetadataProvisionerTest {
     void failedItemIsReported() {
         failing.add("FIELD:invoices.amount");
 
-        var result = provisioner.provision(TENANT, manifest(List.of(invoices())), "user-1");
+        var result = provision(invoices());
 
         assertThat(result.hasFailures()).isTrue();
         assertThat(result.failures()).singleElement().satisfies(f -> {
@@ -301,7 +250,7 @@ class ModuleMetadataProvisionerTest {
     void bindsSlug() {
         assertThat(TenantContext.getSlug()).isNull();
 
-        provisioner.provision(TENANT, manifest(List.of(invoices())), "user-1");
+        provision(invoices());
 
         assertThat(slugsSeen).containsExactly(SLUG, SLUG);
     }

@@ -65,8 +65,8 @@ class ModuleServiceRegistryTest {
         registry.register("t1", Greeter.class, published);
         registry.register("t2", Greeter.class, new FixedGreeter("two"));
 
-        // A different instance of the same port must not evict the registered one -- getServices()
-        // may build fresh objects per call, so identity is what unload can rely on.
+        // A different instance of the same port must not evict the registered one: identity is what
+        // a removal can rely on.
         registry.remove("t1", Map.of(Greeter.class, new FixedGreeter("one")));
         assertThat(registry.find("t1", Greeter.class)).isPresent();
 

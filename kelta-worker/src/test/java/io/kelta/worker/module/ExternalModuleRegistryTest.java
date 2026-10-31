@@ -59,8 +59,8 @@ class ExternalModuleRegistryTest {
                 .map(k -> "{\"key\":\"" + k + "\",\"name\":\"" + k + "\"}").toList());
         TenantModuleData base = ExternalModuleFixtures.row(status, Instant.parse("2026-10-30T00:00:00Z"));
         return new TenantModuleData(base.id(), base.tenantId(), base.moduleId(), base.name(), version, null,
-                base.sourceUrl(), null, null, null, MANIFEST.formatted(version, declared), status, "admin",
-                base.installedAt(), base.updatedAt(), null,
+                base.sourceUrl(), MANIFEST.formatted(version, declared), status, "admin",
+                base.installedAt(), base.updatedAt(),
                 java.util.Arrays.stream(actionKeys).map(ExternalModuleFixtures::action).toList(), base.baseUrl(), 1,
                 "app-1", "svc-1");
     }
@@ -150,15 +150,15 @@ class ExternalModuleRegistryTest {
     }
 
     @Test
-    @DisplayName("a tenant whose entitlements port is already taken (a JAR module) keeps that provider")
+    @DisplayName("a tenant whose entitlements port is already taken (another module) keeps that provider")
     void portConflictKeepsTheExisting() {
-        EntitlementProvider jar = (tenantId, userId) -> MemberEntitlements.EMPTY;
-        services.register(ExternalModuleFixtures.TENANT, EntitlementProvider.class, jar);
+        EntitlementProvider other = (tenantId, userId) -> MemberEntitlements.EMPTY;
+        services.register(ExternalModuleFixtures.TENANT, EntitlementProvider.class, other);
         stored(row(TenantModuleData.STATUS_ACTIVE, "1.0.0", "ping"));
 
         registry.refresh(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE);
 
-        assertThat(services.find(ExternalModuleFixtures.TENANT, EntitlementProvider.class)).containsSame(jar);
+        assertThat(services.find(ExternalModuleFixtures.TENANT, EntitlementProvider.class)).containsSame(other);
         assertThat(actions.getHandler(ExternalModuleFixtures.TENANT, "stub:ping")).isPresent();
     }
 

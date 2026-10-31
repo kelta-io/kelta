@@ -12,7 +12,7 @@ import org.slf4j.LoggerFactory;
 /**
  * Publishes module lifecycle events for cross-pod propagation.
  * <p>
- * When a module is installed, enabled, disabled, or uninstalled on one pod,
+ * When a module is installed, upgraded, enabled, disabled, or uninstalled on one pod,
  * this publisher sends an event so all other pods can update their handler registries.
  *
  * @since 1.0.0
@@ -38,8 +38,7 @@ public class ModuleConfigEventPublisher {
     public void publishEvent(TenantModuleData module, ModuleChangeType changeType) {
         ModuleChangedPayload payload = new ModuleChangedPayload(
             module.id(), module.tenantId(), module.moduleId(), module.name(),
-            module.version(), module.s3Key(), module.moduleClass(),
-            module.manifest(), changeType
+            module.version(), module.manifest(), changeType
         );
 
         PlatformEvent<ModuleChangedPayload> event =

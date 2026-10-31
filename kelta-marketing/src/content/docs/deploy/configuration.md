@@ -67,16 +67,13 @@ no default (the service fails to start, or the feature stays off). Defaults that
 | `TWILIO_ACCOUNT_SID`, `TWILIO_KEY_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | — | Twilio ([Messaging](/docs/platform/messaging/)) |
 | `KELTA_PUSH_VAPID_PUBLIC_KEY` / `PRIVATE_KEY` / `SUBJECT` | — | Browser Web Push; absent ⇒ provider not registered |
 | `kelta.push.provider` (property) | `log` | Mobile push: `log`, `fcm`, `apns` (with `kelta.push.apns.*`) |
-| `KELTA_S3_ENABLED`, `KELTA_S3_ENDPOINT`, `KELTA_S3_PUBLIC_ENDPOINT`, `KELTA_S3_REGION`, `KELTA_S3_BUCKET`, `KELTA_S3_ACCESS_KEY`, `KELTA_S3_SECRET_KEY`, `KELTA_S3_URL_EXPIRY_MINUTES` | `false`, …, `15` | Attachments and module JARs; the public endpoint is what presigned URLs use |
+| `KELTA_S3_ENABLED`, `KELTA_S3_ENDPOINT`, `KELTA_S3_PUBLIC_ENDPOINT`, `KELTA_S3_REGION`, `KELTA_S3_BUCKET`, `KELTA_S3_ACCESS_KEY`, `KELTA_S3_SECRET_KEY`, `KELTA_S3_URL_EXPIRY_MINUTES` | `false`, …, `15` | Attachments and pinned module UI bundles; the public endpoint is what presigned URLs use |
 | `SVIX_SERVER_URL`, `SVIX_PUBLIC_URL`, `SVIX_AUTH_TOKEN` | — | Outbound webhooks |
 | `SUPERSET_URL`, `SUPERSET_PUBLIC_URL`, `SUPERSET_ADMIN_USERNAME`, `SUPERSET_ADMIN_PASSWORD` | — | Embedded BI |
 | `FLOW_RETENTION_ENABLED` / `DRY_RUN` / `MAX_AGE_DAYS` / `BATCH_SIZE` / `MAX_BATCHES` / `POLL_INTERVAL_MS` | `true` / **`true`** / `60` / `1000` / `20` / hourly | Flow-log pruning; dry-run until you set `FLOW_RETENTION_DRY_RUN=false` |
-| `KELTA_MODULES_SIGNING_REQUIRED` | `false` | **Set `true`** in production ([Modules](/docs/platform/modules/)) |
-| `KELTA_MODULES_SIGNING_PUBLIC_KEY`, `KELTA_MODULES_SIGNING_ALGORITHM` | —, `Ed25519` | Legacy platform-wide signing anchor (prefer per-tenant keys) |
-| `KELTA_MODULES_STUB_MODE` | `false` | Development only |
-| `KELTA_MODULE_SIGNING_KEY` | — | PKCS#8 PEM P-256 key(s) the platform signs [external-module](/docs/platform/modules/#external-modules-installed-by-url) requests with; the first signs, all are published at `/api/modules/.well-known/jwks.json`. Blank blocks external installs |
+| `KELTA_MODULE_SIGNING_KEY` | — | PKCS#8 PEM P-256 key(s) the platform signs every [module](/docs/platform/modules/#external-modules-installed-by-url) request with; the first signs, all are published at `/api/modules/.well-known/jwks.json`. Blank blocks every module install |
 | `KELTA_MODULE_ISSUER` | `${EXTERNAL_BASE_URL}/api/modules` | `iss` of those assertions |
-| `KELTA_MODULE_ALLOWED_HOSTS` | — | External-module hosts allowed `http` and private addresses (hostnames or `*.suffix`); module traffic only, never widens `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` |
+| `KELTA_MODULE_ALLOWED_HOSTS` | — | Module hosts allowed `http` and private addresses (hostnames or `*.suffix`); module traffic only, never widens `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` |
 | `LOKI_URL`, `TEMPO_URL`, `MIMIR_URL` | — | Backends the console's monitoring pages query for logs, traces and metrics |
 | `CAMPAIGN_*`, `KELTA_MAILBOX_*`, `KELTA_TELEHEALTH_VISIT_SECRET`, `KELTA_LIVEKIT_*`, `TELEHEALTH_REMINDER*`, `KELTA_WATCH_PROMOTABLE_SOURCES` | — | Optional feature areas (campaigns, support mailboxes, telehealth video, availability watches). Some HMAC secrets fail startup when unset — see `.env.example` |
 

@@ -11,7 +11,6 @@ import io.kelta.worker.controller.GovernorLimitsController;
 import io.kelta.worker.controller.MailboxAdminController;
 import io.kelta.worker.controller.MailboxController;
 import io.kelta.worker.controller.ModuleController;
-import io.kelta.worker.controller.ModuleSigningKeyController;
 import io.kelta.worker.controller.PackageController;
 import io.kelta.worker.service.CerbosAuthorizationService;
 import io.kelta.worker.service.CerbosPermissionResolver;
@@ -226,8 +225,6 @@ class CerbosRecordAuthorizationAdviceTest {
                     Arguments.of(MailboxAdminController.class, "rotateSecret", "POST", "/api/support/mailboxes/mb-1/rotate-secret"),
                     Arguments.of(ModuleController.class, "listModules", "GET", "/api/modules"),
                     Arguments.of(ModuleController.class, "enableModule", "POST", "/api/modules/m-1/enable"),
-                    Arguments.of(ModuleSigningKeyController.class, "listKeys", "GET", "/api/modules/signing-keys"),
-                    Arguments.of(ModuleSigningKeyController.class, "addKey", "POST", "/api/modules/signing-keys"),
                     Arguments.of(ChatController.class, "list", "GET", "/api/chat/conversations"),
                     Arguments.of(ChatController.class, "messages", "GET", "/api/chat/conversations/c-1/messages"),
                     Arguments.of(MailboxController.class, "listThreads", "GET", "/api/support/threads"),

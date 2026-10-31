@@ -22,9 +22,9 @@ import static org.assertj.core.api.Assertions.assertThatCode;
  * over 36 characters therefore failed the install outright with
  * {@code value too long for type character varying(36)}.
  *
- * <p>It stayed latent because the production admin ({@code spotopened-admin@kelta.local}, 28 chars)
- * fits. It surfaced installing a module as a sandbox admin, whose generated email derives from the
- * sandbox slug and runs to 51 characters. Widened to 255 in V187, matching every other actor column
+ * <p>It stayed latent because a short production admin email fits. It surfaced installing a
+ * module as a sandbox admin, whose generated email derives from the sandbox slug and ran to 51
+ * characters. Widened to 255 in V187, matching every other actor column
  * in the module tables.
  *
  * <p>Deliberately a real-database test: a mocked {@code JdbcTemplate} cannot enforce a column
@@ -33,9 +33,9 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 @DisplayName("JdbcModuleStore — installed_by column width")
 class JdbcModuleStoreInstalledByWidthTest {
 
-    /** The identifier that actually broke it: a sandbox admin's generated email. */
+    /** The shape that broke it: a sandbox admin's generated email, over 36 characters. */
     private static final String LONG_ACTOR =
-            "spotopened--billing-stripe-verify-admin@kelta.local";
+            "sample-tenant--module-install-verify-admin@example.test";
 
     private JdbcTemplate jdbcTemplate;
     private JdbcModuleStore store;
@@ -50,9 +50,10 @@ class JdbcModuleStoreInstalledByWidthTest {
         // know. Declaring JSONB as a domain lets the REAL statement run unmodified — the point of
         // this test is the column width, so the SQL under test must not be rewritten for it.
         jdbcTemplate.execute("CREATE DOMAIN IF NOT EXISTS JSONB AS VARCHAR(100000)");
-        // Mirrors the shipped schema after V221 (installed_by widened in V187). If installed_by is
+        // Mirrors the shipped schema after V225 (installed_by widened in V187). If installed_by is
         // ever narrowed back toward a UUID width, this test fails rather than the next long-named
-        // actor discovering it.
+        // actor discovering it. The JAR columns V225 leaves for the contract migration are kept,
+        // nullable as shipped, so the INSERT is shown to succeed without listing them.
         jdbcTemplate.execute("""
                 CREATE TABLE tenant_module (
                     id VARCHAR(36) PRIMARY KEY,
@@ -69,7 +70,11 @@ class JdbcModuleStoreInstalledByWidthTest {
                     status VARCHAR(20) NOT NULL,
                     installed_by VARCHAR(255) NOT NULL,
                     s3_key VARCHAR(2000),
-                    base_url VARCHAR(2000),
+                    jar_signature VARCHAR(10000),
+                    jar_signature_key_fingerprint VARCHAR(64),
+                    last_loaded_at TIMESTAMP,
+                    load_attempts INTEGER DEFAULT 0 NOT NULL,
+                    base_url VARCHAR(2000) NOT NULL,
                     protocol_version INTEGER,
                     connected_app_id VARCHAR(36),
                     service_user_id VARCHAR(36),
@@ -87,18 +92,17 @@ class JdbcModuleStoreInstalledByWidthTest {
                 .isGreaterThan(36);
 
         TenantModuleData data = new TenantModuleData(
-                UUID.randomUUID().toString(), "c734b580-1204-4e00-97a4-3500a4f5c25e",
-                "kelta-billing", "Kelta Billing", "1.0.0", "Billing",
-                "local://upload", "checksum", 1L,
-                "io.kelta.modules.billing.BillingModule", "{}",
-                TenantModuleData.STATUS_INSTALLED, LONG_ACTOR,
-                null, null, "s3/key.jar", List.of());
+                UUID.randomUUID().toString(), UUID.randomUUID().toString(),
+                "sample-module", "Sample Module", "1.0.0", "Sample",
+                "https://module.example.test", "{}",
+                TenantModuleData.STATUS_INSTALLING, LONG_ACTOR, null, null, List.of(),
+                "https://module.example.test", 1, null, null);
 
         assertThatCode(() -> store.createModule(data)).doesNotThrowAnyException();
 
         String stored = jdbcTemplate.queryForObject(
                 "SELECT installed_by FROM tenant_module WHERE module_id = ?",
-                String.class, "kelta-billing");
+                String.class, "sample-module");
         assertThat(stored)
                 .as("the actor must be stored intact, not silently truncated")
                 .isEqualTo(LONG_ACTOR);

@@ -1,22 +1,19 @@
 package io.kelta.worker.controller;
 
-import io.kelta.runtime.context.CallerContext;
-import io.kelta.runtime.workflow.ActionResult;
-import io.kelta.worker.module.RuntimeModuleManager;
+import io.kelta.worker.module.ExternalModuleProxy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import java.util.Map;
-import java.util.Optional;
+import java.nio.charset.StandardCharsets;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -33,46 +30,68 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("ModuleHttpController mapping")
 class ModuleHttpControllerMvcTest {
 
-    private RuntimeModuleManager manager;
+    private ExternalModuleProxy proxy;
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
-        manager = mock(RuntimeModuleManager.class);
-        when(manager.dispatchRoute(any(), any(), any(), any(), any(), any(), any()))
-                .thenReturn(Optional.of(ActionResult.success(Map.of("ok", true))));
+        proxy = mock(ExternalModuleProxy.class);
+        when(proxy.route(anyString(), anyString(), anyString(), anyString(), any(), any(), any(), any(), any()))
+                .thenReturn(new ExternalModuleProxy.RouteOutcome(new ExternalModuleProxy.Forwarded(200,
+                        "{\"ok\":true}".getBytes(StandardCharsets.UTF_8)), null, null));
+        mvc = MockMvcBuilders.standaloneSetup(controller(proxy)).build();
+    }
 
-        @SuppressWarnings("unchecked")
-        ObjectProvider<RuntimeModuleManager> provider = mock(ObjectProvider.class);
-        when(provider.getIfAvailable()).thenReturn(manager);
-
-        mvc = MockMvcBuilders.standaloneSetup(new ModuleHttpController(provider)).build();
+    private static ModuleHttpController controller(ExternalModuleProxy proxy) {
+        ModuleHttpController controller = new ModuleHttpController();
+        controller.setExternalModules(proxy, null, null);
+        return controller;
     }
 
     @Test
-    @DisplayName("GET reaches dispatch")
+    @DisplayName("GET reaches the module")
     void getIsMapped() throws Exception {
-        mvc.perform(get("/api/modules/kelta-billing/x/plans")
+        mvc.perform(get("/api/modules/sample-module/x/plans")
                         .header("X-Tenant-ID", "t1"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"ok\":true}"));
     }
 
     @Test
-    @DisplayName("POST reaches dispatch")
+    @DisplayName("POST reaches the module")
     void postIsMapped() throws Exception {
-        mvc.perform(post("/api/modules/kelta-billing/x/checkout-sessions")
+        mvc.perform(post("/api/modules/sample-module/x/checkout-sessions")
                         .header("X-Tenant-ID", "t1")
                         .contentType("application/json").content("{}"))
                 .andExpect(status().isOk());
     }
 
     @Test
-    @DisplayName("the path handed to the module excludes the platform prefix")
-    void dispatchReceivesModuleRelativePath() throws Exception {
-        mvc.perform(get("/api/modules/kelta-billing/x/plans").header("X-Tenant-ID", "t1"));
+    @DisplayName("a path deeper than the spelled-out patterns still reaches the module")
+    void deepPathIsMapped() throws Exception {
+        mvc.perform(get("/api/modules/sample-module/x/a/b/c/d").header("X-Tenant-ID", "t1"))
+                .andExpect(status().isOk());
 
-        org.mockito.Mockito.verify(manager).dispatchRoute(
-                eq("t1"), eq("kelta-billing"), any(), eq("GET"), eq("/plans"), any(), any());
+        verify(proxy).route(eq("t1"), eq("sample-module"), eq("GET"), eq("a/b/c/d"), any(), any(), any(), any(),
+                any());
+    }
+
+    @Test
+    @DisplayName("the path handed to the module excludes the platform prefix")
+    void moduleReceivesModuleRelativePath() throws Exception {
+        mvc.perform(get("/api/modules/sample-module/x/plans").header("X-Tenant-ID", "t1"));
+
+        verify(proxy).route(eq("t1"), eq("sample-module"), eq("GET"), eq("plans"), any(), any(), any(), any(),
+                any());
+    }
+
+    @Test
+    @DisplayName("with module support switched off every route is 404")
+    void noModuleSupportIs404() throws Exception {
+        MockMvc withoutModules = MockMvcBuilders.standaloneSetup(new ModuleHttpController()).build();
+
+        withoutModules.perform(get("/api/modules/sample-module/x/plans").header("X-Tenant-ID", "t1"))
+                .andExpect(status().isNotFound());
     }
 
     /**
@@ -90,64 +109,13 @@ class ModuleHttpControllerMvcTest {
     @DisplayName("GET beats the generic nested-collection route that shadowed it on prod")
     void getWinsAgainstNestedCollectionRoute() throws Exception {
         MockMvc withCompetitor = MockMvcBuilders
-                .standaloneSetup(new ModuleHttpController(providerOf(manager)), new NestedRouteStub())
+                .standaloneSetup(controller(proxy), new NestedRouteStub())
                 .build();
 
-        withCompetitor.perform(get("/api/modules/kelta-billing/x/plans")
+        withCompetitor.perform(get("/api/modules/sample-module/x/plans")
                         .header("X-Tenant-ID", "t1"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(org.hamcrest.Matchers.not("nested-collection-router")));
-    }
-
-    /**
-     * The gateway puts the caller's email in {@code X-User-Id}; the rest of the platform keys
-     * members by the UUID {@code CallerContextFilter} resolves. Handing a module the header made
-     * billing stamp the email on Stripe, so a paying member's subscription row was invisible to
-     * entitlement resolution.
-     */
-    @Test
-    @DisplayName("the module receives the resolved user UUID, not the X-User-Id email")
-    void dispatchReceivesResolvedUserUuid() throws Exception {
-        CallerContext caller = new CallerContext("u-uuid", CallerContext.UserType.PORTAL,
-                false, false);
-        MockMvc withCaller = MockMvcBuilders
-                .standaloneSetup(new ModuleHttpController(providerOf(manager)))
-                .addFilter((request, response, chain) -> CallerContext.runAs(caller, () -> {
-                    try {
-                        chain.doFilter(request, response);
-                    } catch (Exception e) {
-                        throw new IllegalStateException(e);
-                    }
-                }))
-                .build();
-
-        withCaller.perform(post("/api/modules/kelta-billing/x/checkout-sessions")
-                        .header("X-Tenant-ID", "t1")
-                        .header("X-User-Id", "someone@example.com")
-                        .contentType("application/json").content("{}"))
-                .andExpect(status().isOk());
-
-        org.mockito.Mockito.verify(manager).dispatchRoute(eq("t1"), eq("kelta-billing"),
-                eq("u-uuid"), eq("POST"), eq("/checkout-sessions"), any(), any());
-    }
-
-    @Test
-    @DisplayName("with no resolved caller the module receives a null user, never the raw header")
-    void dispatchReceivesNullUserWithoutCallerContext() throws Exception {
-        mvc.perform(get("/api/modules/kelta-billing/x/plans")
-                        .header("X-Tenant-ID", "t1")
-                        .header("X-User-Id", "someone@example.com"))
-                .andExpect(status().isOk());
-
-        org.mockito.Mockito.verify(manager).dispatchRoute(eq("t1"), eq("kelta-billing"),
-                isNull(), eq("GET"), eq("/plans"), any(), any());
-    }
-
-    private static ObjectProvider<RuntimeModuleManager> providerOf(RuntimeModuleManager m) {
-        @SuppressWarnings("unchecked")
-        ObjectProvider<RuntimeModuleManager> p = mock(ObjectProvider.class);
-        when(p.getIfAvailable()).thenReturn(m);
-        return p;
     }
 
     /** Stands in for {@code DynamicCollectionRouter}'s nested GET mapping, shape for shape. */

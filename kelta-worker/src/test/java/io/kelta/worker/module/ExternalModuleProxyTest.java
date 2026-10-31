@@ -146,7 +146,8 @@ class ExternalModuleProxyTest {
     @DisplayName("the header allowlist matches lower-cased prefixes")
     void headerAllowlist() {
         assertThat(ExternalModuleProxy.forwardableHeaders(Map.of("User-Agent", "Stripe/1.0", "Digest", "SHA=1",
-                "Signature-Input", "sig1", "Accept", "*/*", "Forwarded", "for=1")))
+                "Signature-Input", "sig1", "Accept", "*/*", "Forwarded", "for=1",
+                "Host", "internal.worker.svc", "Authorization", "Bearer platform-internal")))
                 .containsOnlyKeys("user-agent", "digest", "signature-input");
     }
 }

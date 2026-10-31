@@ -37,7 +37,12 @@ spring:
     # tolerate those "missing" entries so validate() passes. A one-time
     # `flyway repair` realigns the V1 checksum on those DBs — see
     # db/migration/README.md. Fresh installs just run V1__baseline.
-    ignore-migration-patterns: "*:missing"
+    # "*:future" is Flyway's own default, which setting this property replaces,
+    # so it is listed again. It lets an older image's migrate Job (an ArgoCD
+    # rollback) validate against a database a newer release already migrated;
+    # without it the PreSync Job fails with APPLIED_VERSIONED_MIGRATION_NOT_RESOLVED
+    # and the rollback halts. Pinned by FlywayMigrationPatternsTest.
+    ignore-migration-patterns: "*:missing,*:future"
   data:
     redis:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
@@ -59,24 +64,7 @@ spring:
 
 kelta:
   modules:
-    # Dev/test only. When true, a module with no JAR loads inert stub handlers that do nothing
-    # instead of quarantining. Declared here rather than left to a bare @Value default so it is
-    # visible and greppable -- a silently-stubbing module is the failure this release exists to
-    # remove.
-    stub-mode: ${KELTA_MODULES_STUB_MODE:false}
-    # A module load that fails for an infrastructure reason (object storage or the database
-    # unreachable) fails closed on that pod and is retried, instead of being persisted QUARANTINED.
-    # Backoff doubles from initial-backoff-ms up to max-backoff-ms and never gives up; after
-    # escalate-after-attempts consecutive failures it is logged at ERROR again. poll-interval-ms is
-    # how often each pod checks for due retries. Runtime-checked, not @Conditional (native images
-    # freeze conditions at build time).
-    load-retry:
-      enabled: ${KELTA_MODULES_LOAD_RETRY_ENABLED:true}
-      poll-interval-ms: ${KELTA_MODULES_LOAD_RETRY_POLL_INTERVAL_MS:15000}
-      initial-backoff-ms: ${KELTA_MODULES_LOAD_RETRY_INITIAL_BACKOFF_MS:30000}
-      max-backoff-ms: ${KELTA_MODULES_LOAD_RETRY_MAX_BACKOFF_MS:600000}
-      escalate-after-attempts: ${KELTA_MODULES_LOAD_RETRY_ESCALATE_AFTER_ATTEMPTS:8}
-    # External modules (specs/module-platform/9-external-modules.md). Every request the platform
+    # Modules (specs/module-platform/9-external-modules.md). Every request the platform
     # sends a module is an ES256 assertion signed with this key: one or more PKCS#8 PEM P-256
     # private keys (openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256). The first
     # signs; all are published at GET /api/modules/.well-known/jwks.json, so rotate by putting the

@@ -104,8 +104,8 @@ class ModuleUninstallerTest {
 
     private TenantModuleData module() {
         return new TenantModuleData("install-1", TENANT, MODULE, "Billing", "1.0.0", null,
-                "https://billing.example.test", null, null, null, "{}", TenantModuleData.STATUS_ACTIVE, "user-1",
-                null, null, null, List.of(), "https://billing.example.test", 1, "app-1", "svc-1");
+                "https://billing.example.test", "{}", TenantModuleData.STATUS_ACTIVE, "user-1",
+                null, null, List.of(), "https://billing.example.test", 1, "app-1", "svc-1");
     }
 
     @SuppressWarnings("unchecked")

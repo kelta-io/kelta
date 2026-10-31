@@ -91,24 +91,16 @@ class ExternalModuleServiceTest {
         public void updateStatus(String id, String status) {
             TenantModuleData r = rows.get(id);
             rows.put(id, new TenantModuleData(r.id(), r.tenantId(), r.moduleId(), r.name(), r.version(),
-                    r.description(), r.sourceUrl(), r.jarChecksum(), r.jarSizeBytes(), r.moduleClass(), r.manifest(),
-                    status, r.installedBy(), r.installedAt(), r.updatedAt(), r.s3Key(), r.actions(), r.baseUrl(),
+                    r.description(), r.sourceUrl(), r.manifest(),
+                    status, r.installedBy(), r.installedAt(), r.updatedAt(), r.actions(), r.baseUrl(),
                     r.protocolVersion(), r.connectedAppId(), r.serviceUserId(), r.uiBundleSha256(), r.uiBundleKey()));
         }
 
         @Override
-        public void recordLoadOutcome(String id, String status, String error) {
-            updateStatusWithError(id, status, error);
-        }
-
-        @Override
-        public void recordLoadError(String id, String error) {
-            errors.put(id, error);
-        }
-
-        @Override
-        public Map<String, Object> findLoadDiagnostics(String id) {
-            return Map.of();
+        public Map<String, Object> findLastError(String id) {
+            Map<String, Object> lastError = new HashMap<>();
+            lastError.put("lastError", errors.get(id));
+            return lastError;
         }
 
         @Override
@@ -125,8 +117,8 @@ class ExternalModuleServiceTest {
         public void updateServicePrincipal(String id, String connectedAppId, String serviceUserId) {
             TenantModuleData r = rows.get(id);
             rows.put(id, new TenantModuleData(r.id(), r.tenantId(), r.moduleId(), r.name(), r.version(),
-                    r.description(), r.sourceUrl(), r.jarChecksum(), r.jarSizeBytes(), r.moduleClass(), r.manifest(),
-                    r.status(), r.installedBy(), r.installedAt(), r.updatedAt(), r.s3Key(), r.actions(), r.baseUrl(),
+                    r.description(), r.sourceUrl(), r.manifest(),
+                    r.status(), r.installedBy(), r.installedAt(), r.updatedAt(), r.actions(), r.baseUrl(),
                     r.protocolVersion(), connectedAppId, serviceUserId, r.uiBundleSha256(), r.uiBundleKey()));
         }
 
@@ -135,8 +127,8 @@ class ExternalModuleServiceTest {
                                            String manifestJson, int protocolVersion) {
             TenantModuleData r = rows.get(id);
             rows.put(id, new TenantModuleData(r.id(), r.tenantId(), r.moduleId(), name, version, description,
-                    r.sourceUrl(), r.jarChecksum(), r.jarSizeBytes(), r.moduleClass(), manifestJson, r.status(),
-                    r.installedBy(), r.installedAt(), r.updatedAt(), r.s3Key(), r.actions(), r.baseUrl(),
+                    r.sourceUrl(), manifestJson, r.status(),
+                    r.installedBy(), r.installedAt(), r.updatedAt(), r.actions(), r.baseUrl(),
                     protocolVersion, r.connectedAppId(), r.serviceUserId(), r.uiBundleSha256(), r.uiBundleKey()));
         }
 
@@ -144,8 +136,8 @@ class ExternalModuleServiceTest {
         public void updateUiBundle(String id, String sha256, String key) {
             TenantModuleData r = rows.get(id);
             rows.put(id, new TenantModuleData(r.id(), r.tenantId(), r.moduleId(), r.name(), r.version(),
-                    r.description(), r.sourceUrl(), r.jarChecksum(), r.jarSizeBytes(), r.moduleClass(), r.manifest(),
-                    r.status(), r.installedBy(), r.installedAt(), r.updatedAt(), r.s3Key(), r.actions(), r.baseUrl(),
+                    r.description(), r.sourceUrl(), r.manifest(),
+                    r.status(), r.installedBy(), r.installedAt(), r.updatedAt(), r.actions(), r.baseUrl(),
                     r.protocolVersion(), r.connectedAppId(), r.serviceUserId(), sha256, key));
         }
 
@@ -158,11 +150,6 @@ class ExternalModuleServiceTest {
         @Override
         public void deleteModule(String id) {
             rows.remove(id);
-        }
-
-        @Override
-        public List<TenantModuleData> findAllActive() {
-            return rows.values().stream().filter(r -> TenantModuleData.STATUS_ACTIVE.equals(r.status())).toList();
         }
     }
 
@@ -234,7 +221,7 @@ class ExternalModuleServiceTest {
 
     private static ExternalModuleUiBundles.Fetched bundle(String source) {
         byte[] bytes = source.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        return new ExternalModuleUiBundles.Fetched(bytes, ModuleJarService.sha256(bytes));
+        return new ExternalModuleUiBundles.Fetched(bytes, ModuleHashes.sha256(bytes));
     }
 
     /** The planner test's manifest at {@code version}, with {@code ui} pinned to {@code sha256} (none when null). */
@@ -271,7 +258,6 @@ class ExternalModuleServiceTest {
         assertThat(active.status()).isEqualTo(TenantModuleData.STATUS_ACTIVE);
         assertThat(active.baseUrl()).isEqualTo(BASE_URL);
         assertThat(active.sourceUrl()).isEqualTo(BASE_URL);
-        assertThat(active.jarChecksum()).isNull();
         assertThat(active.connectedAppId()).isEqualTo("app-1");
         assertThat(active.serviceUserId()).isEqualTo("svc-1");
         assertThat(store.errors).doesNotContainKey(active.id());
@@ -440,19 +426,6 @@ class ExternalModuleServiceTest {
         order.verify(tokens).evict("app-1");
         order.verify(events).publishEvent(active, ModuleChangeType.UNINSTALLED);
         assertThat(store.rows).isEmpty();
-    }
-
-    @Test
-    @DisplayName("a JAR module is refused by the external paths")
-    void jarModuleRefused() {
-        store.createModule(new TenantModuleData("jar-1", TENANT, "legacy", "Legacy", "1.0.0", null,
-                "https://downloads.example.test/legacy.jar", "abc", 10L, "io.example.Legacy", "{}",
-                TenantModuleData.STATUS_ACTIVE, "user-1", null, null, "s3/key", List.of()));
-
-        assertThatThrownBy(() -> service.disable(TENANT, "legacy")).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> service.enable(TENANT, "missing", "user-1"))
-                .isInstanceOf(IllegalArgumentException.class);
-        verify(http, never()).lifecycle(any(), anyString(), any(), anyString());
     }
 
     @Test

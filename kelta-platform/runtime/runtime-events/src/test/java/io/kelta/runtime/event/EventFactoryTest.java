@@ -106,7 +106,7 @@ class EventFactoryTest {
         @Test
         void shouldWorkWithModuleChangedPayload() {
             var payload = new ModuleChangedPayload(
-                    "id-1", "t-1", "m-1", "Mod", "1.0", "s3", "cls", "{}", ModuleChangeType.INSTALLED);
+                    "id-1", "t-1", "m-1", "Mod", "1.0", "{}", ModuleChangeType.INSTALLED);
 
             PlatformEvent<ModuleChangedPayload> event = EventFactory.createEvent(
                     "module.changed", payload);

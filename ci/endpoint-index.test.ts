@@ -83,7 +83,7 @@ describe('the committed index', () => {
     assert.ok(table.systemCollections.has('picklist-values'));
     assert.deepEqual(
       table.filterWriteRules.map((r) => r.routeId).sort(),
-      ['ai', 'modules', 'tenants'],
+      ['ai', 'tenants'],
       'the static-route write rules hard-coded in RouteAuthorizationFilter',
     );
   });

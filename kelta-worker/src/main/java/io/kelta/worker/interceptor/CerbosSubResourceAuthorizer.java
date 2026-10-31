@@ -144,14 +144,6 @@ public class CerbosSubResourceAuthorizer implements SubResourceAuthorizer {
             return recordId.equals(caller.tenantId()) ? Decision.allow() : Decision.notFound();
         }
 
-        if (GatewayStaticRoutes.MODULES.equals(name) && write && recordId != null
-                && recordId.startsWith(GatewayStaticRoutes.MODULE_SIGNING_KEYS_PREFIX)) {
-            return systemPermission(caller, GatewayStaticRoutes.MODULE_SIGNING_KEYS_PERMISSION)
-                    ? Decision.allow()
-                    : Decision.forbidden("Insufficient permissions: "
-                            + GatewayStaticRoutes.MODULE_SIGNING_KEYS_PERMISSION + " required");
-        }
-
         GatewayStaticRoutes.CollectionCheck check = GatewayStaticRoutes.COLLECTION_CHECKS.get(name);
         if (check != null && (check.includeReads() || write)) {
             if (write && check.writeOverridePermission() != null

@@ -467,14 +467,14 @@ describe('external modules', () => {
       lastError: 'circuit breaker opened after 5 consecutive failures',
     }
 
-    it('reads the JSON:API module list and marks an external module with its DEGRADED reason', async () => {
+    it('reads the JSON:API module list and shows a module with its DEGRADED reason', async () => {
       mockAxios.get.mockResolvedValue({
         data: { data: [{ type: 'modules', id: 'row-1', attributes: external }] },
       })
       const user = userEvent.setup()
       render(<ModulesPage />, { wrapper: createTestWrapper() })
 
-      expect(await screen.findByTestId('module-external-acme-billing')).toBeInTheDocument()
+      expect(await screen.findByTestId('module-card-acme-billing')).toBeInTheDocument()
       expect(screen.getByTestId('module-last-error-acme-billing')).toHaveTextContent(
         'Not answering, calls are failing fast: circuit breaker opened'
       )
@@ -484,7 +484,7 @@ describe('external modules', () => {
       expect(await screen.findByTestId('module-uninstall-dialog')).toBeInTheDocument()
     })
 
-    it('opens install by URL by default', async () => {
+    it('opens install by URL from the empty state', async () => {
       mockAxios.get.mockResolvedValue({ data: [] })
       const user = userEvent.setup()
       render(<ModulesPage />, { wrapper: createTestWrapper() })
@@ -492,8 +492,7 @@ describe('external modules', () => {
       await user.click((await screen.findAllByRole('button', { name: /install module/i }))[0])
 
       expect(screen.getByTestId('external-module-install')).toBeInTheDocument()
-      await user.click(screen.getByTestId('install-mode-jar'))
-      expect(screen.getByLabelText('Module Manifest (JSON) *')).toBeInTheDocument()
+      expect(screen.getByLabelText('Module URL *')).toBeInTheDocument()
     })
   })
 })

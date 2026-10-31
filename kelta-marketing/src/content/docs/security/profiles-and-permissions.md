@@ -28,7 +28,7 @@ route, record and field.
 | `MANAGE_DATA` | Bulk operations: mass edit, CSV import, deduplicate, exports |
 | `VIEW_ALL_DATA` / `MODIFY_ALL_DATA` | Read / write every record regardless of object permissions |
 | `MANAGE_CONNECTED_APPS` | Connected apps, webhooks, scripts, modules, OIDC providers |
-| `MANAGE_CREDENTIALS` / `VIEW_CREDENTIALS` | Credential vault, module signing keys |
+| `MANAGE_CREDENTIALS` / `VIEW_CREDENTIALS` | Credential vault |
 | `MANAGE_API_SPECS` / `VIEW_API_SPECS` | Imported API specs |
 | `MANAGE_EMAIL_TEMPLATES` | Email templates |
 | `MANAGE_SANDBOXES` | Environments and promotions |

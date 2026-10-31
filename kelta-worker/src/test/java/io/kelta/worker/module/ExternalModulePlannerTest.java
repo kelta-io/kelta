@@ -233,15 +233,15 @@ class ExternalModulePlannerTest {
 
     private void installed(String version, String manifestJson, String pinnedSha256) {
         TenantModuleData row = new TenantModuleData("row-1", TENANT, "acme-billing", "Billing", version, null,
-                BASE_URL, null, null, null, manifestJson, TenantModuleData.STATUS_ACTIVE, "user-1", null, null,
-                null, List.of(), BASE_URL, 1, "app-1", "svc-1", pinnedSha256,
+                BASE_URL, manifestJson, TenantModuleData.STATUS_ACTIVE, "user-1", null, null, List.of(),
+                BASE_URL, 1, "app-1", "svc-1", pinnedSha256,
                 pinnedSha256 == null ? null : "modules/key/" + pinnedSha256);
         when(moduleStore.findByTenantAndModuleId(TENANT, "acme-billing")).thenReturn(Optional.of(row));
     }
 
     private static ExternalModuleUiBundles.Fetched bundle(String source) {
         byte[] bytes = source.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        return new ExternalModuleUiBundles.Fetched(bytes, ModuleJarService.sha256(bytes));
+        return new ExternalModuleUiBundles.Fetched(bytes, ModuleHashes.sha256(bytes));
     }
 
     private String withUi(String version, String sha256) {

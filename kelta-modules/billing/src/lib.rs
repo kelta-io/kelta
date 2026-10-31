@@ -1,7 +1,7 @@
 //! `kelta-billing`: Stripe-backed portal billing as an external Kelta module (module protocol v1).
 //!
-//! The Rust port of the Java JAR module (`kelta-modules/billing-jar`): the same collections,
-//! actions, entitlement rules, quota hook and Stripe webhook, served over HTTP. Identity comes
+//! Ported from the former in-process Java JAR module (removed in module-platform slice 9g): the
+//! same collections, actions, entitlement rules, quota hook and Stripe webhook, served over HTTP. Identity comes
 //! from the verified platform assertion only; Stripe secrets come from the tenant's `stripe`
 //! credential through the platform, per request, and are never stored or logged.
 

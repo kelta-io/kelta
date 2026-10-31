@@ -78,7 +78,7 @@ class RemoteActionHandlerTest {
         assertThat(call.path()).isEqualTo("/kelta/v1/actions/ping");
         assertThat(call.timeout()).as("the manifest's timeoutMs").isEqualTo(Duration.ofMillis(1500));
         assertThat(call.headers()).containsEntry("Idempotency-Key", "exec-1:Charge");
-        assertThat(call.actor()).as("the run's user acts, as a JAR action's context.userId()").isEqualTo(runUser);
+        assertThat(call.actor()).as("the run's user acts").isEqualTo(runUser);
 
         JsonNode body = mapper.readTree(call.body());
         assertThat(body.get("tenantId").stringValue()).isEqualTo(ExternalModuleFixtures.TENANT);

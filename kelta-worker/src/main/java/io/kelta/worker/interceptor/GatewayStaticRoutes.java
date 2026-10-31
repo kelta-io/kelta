@@ -87,9 +87,4 @@ public final class GatewayStaticRoutes {
     /** {@code static-tenants}: writes need this; reads need it or address the caller's own tenant. */
     static final String TENANTS = "tenants";
     static final String TENANTS_PERMISSION = "MANAGE_TENANTS";
-
-    /** {@code static-modules}: writes under {@code /api/modules/signing-keys} need this. */
-    static final String MODULES = "modules";
-    static final String MODULE_SIGNING_KEYS_PREFIX = "signing-keys";
-    static final String MODULE_SIGNING_KEYS_PERMISSION = "MANAGE_CREDENTIALS";
 }
