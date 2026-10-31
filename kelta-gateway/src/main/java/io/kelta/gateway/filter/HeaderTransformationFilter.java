@@ -25,6 +25,9 @@ import java.util.stream.Collectors;
  * - Adds X-User-Type header (INTERNAL|PORTAL) from the principal's user_type claim. For JWTs the
  *   claim is the token's own; a PAT's principal is gateway-built, and UserIdentityResolutionFilter
  *   adds the PAT owner's platform_user.user_type to it, so a portal member's PAT is PORTAL
+ * - Adds X-Connected-App-Id header with the token's connected_app_id, for a connected-app token
+ *   only (a module service principal's, for one); the worker's module credential endpoint names
+ *   the calling module install by it. Absent for user tokens and PATs
  * - Adds X-Forwarded-Groups header with comma-separated list of principal's groups
  * - Adds X-Forwarded-Roles header (backward compatibility, same value as groups)
  * - Preserves all other request headers
@@ -45,6 +48,7 @@ public class HeaderTransformationFilter implements GlobalFilter, Ordered {
     private static final String X_USER_TYPE_HEADER = "X-User-Type";
     private static final String X_FORWARDED_ROLES_HEADER = "X-Forwarded-Roles";
     private static final String X_FORWARDED_GROUPS_HEADER = "X-Forwarded-Groups";
+    static final String X_CONNECTED_APP_ID_HEADER = "X-Connected-App-Id";
     private static final String X_TENANT_ID_HEADER = "X-Tenant-ID";
     private static final String X_TENANT_SLUG_HEADER = "X-Tenant-Slug";
 
@@ -84,6 +88,7 @@ public class HeaderTransformationFilter implements GlobalFilter, Ordered {
                     headers.remove(X_USER_TYPE_HEADER);
                     headers.remove(X_FORWARDED_GROUPS_HEADER);
                     headers.remove(X_FORWARDED_ROLES_HEADER);
+                    headers.remove(X_CONNECTED_APP_ID_HEADER);
 
                     // Add X-Forwarded-User header
                     headers.set(X_FORWARDED_USER_HEADER, principal.getUsername());
@@ -99,6 +104,13 @@ public class HeaderTransformationFilter implements GlobalFilter, Ordered {
                     Object userType = principal.getClaims().get("user_type");
                     headers.set(X_USER_TYPE_HEADER,
                             userType instanceof String s && !s.isEmpty() ? s : "INTERNAL");
+
+                    // Add X-Connected-App-Id from the token's connected_app_id (PrincipalExtractor),
+                    // so the worker can tell which connected app — which module install, for a
+                    // service principal — is calling. Only a signed JWT carries the claim.
+                    if (principal.isConnectedApp()) {
+                        headers.set(X_CONNECTED_APP_ID_HEADER, principal.getConnectedAppId());
+                    }
 
                     // Add X-Forwarded-Groups header with comma-separated groups
                     String groups = principal.getGroups().stream()

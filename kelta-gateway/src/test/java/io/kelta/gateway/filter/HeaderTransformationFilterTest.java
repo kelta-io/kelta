@@ -2,6 +2,7 @@ package io.kelta.gateway.filter;
 
 import io.kelta.gateway.auth.GatewayPrincipal;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.http.HttpHeaders;
@@ -11,6 +12,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -419,5 +421,41 @@ class HeaderTransformationFilterTest {
         HttpHeaders headers = capturedExchange[0].getRequest().getHeaders();
         assertThat(headers.getFirst("X-Forwarded-Groups")).isEqualTo("ADMIN");
         assertThat(headers.getFirst("X-Forwarded-Roles")).isEqualTo("ADMIN");
+    }
+
+    @Test
+    @DisplayName("a connected-app token forwards its connected_app_id; a user token forwards none, even when forged")
+    void forwardsConnectedAppIdOnlyForConnectedAppTokens() {
+        // A module service principal: run-as connected-app token (external modules 9b).
+        MockServerWebExchange appExchange = MockServerWebExchange.from(MockServerHttpRequest
+                .get("/api/modules/self/credentials/stripe")
+                .header("X-Connected-App-Id", "forged-app")
+                .build());
+        GatewayPrincipal servicePrincipal = new GatewayPrincipal("kmod_client", List.of(),
+                Map.of("email", "svc@service.kelta.invalid", "user_type", "SERVICE"),
+                "profile-1", "Module profile", "tenant-1", "app-1", "api");
+        appExchange.getAttributes().put("gateway.principal", servicePrincipal);
+
+        // A signed-in user: no connected_app_id claim.
+        MockServerWebExchange userExchange = MockServerWebExchange.from(MockServerHttpRequest
+                .get("/api/modules/self/credentials/stripe")
+                .header("X-Connected-App-Id", "app-1")
+                .build());
+        userExchange.getAttributes().put("gateway.principal", new GatewayPrincipal("user@example.com",
+                List.of(), Map.of("email", "user@example.com")));
+
+        final List<ServerWebExchange> captured = new ArrayList<>();
+        when(chain.filter(any(ServerWebExchange.class))).thenAnswer(invocation -> {
+            captured.add(invocation.getArgument(0));
+            return Mono.empty();
+        });
+
+        StepVerifier.create(filter.filter(appExchange, chain)).verifyComplete();
+        StepVerifier.create(filter.filter(userExchange, chain)).verifyComplete();
+
+        assertThat(captured.get(0).getRequest().getHeaders().get("X-Connected-App-Id"))
+                .as("the token's own app id replaces a forged one").containsExactly("app-1");
+        assertThat(captured.get(1).getRequest().getHeaders().getFirst("X-Connected-App-Id"))
+                .as("a user token carries no app id, and a client-sent one is dropped").isNull();
     }
 }

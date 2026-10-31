@@ -727,7 +727,7 @@ response client and the OIDC/OAuth2 user services (set on `oauth2Login` in
 up by type — keep exactly one). The authorization endpoint is a browser redirect, not a server
 fetch, and is not checked.
 
-## External modules — the module protocol (parts 9d, 9e)
+## External modules — the module protocol (parts 9d, 9e, 9e.1)
 
 An external module is an HTTP service the worker calls; the contract is
 `docs/module-protocol/openapi.yaml`, the design `specs/module-platform/9-external-modules.md`
@@ -776,6 +776,11 @@ What a module receives and must handle:
   copy from `GET /api/modules/{id}/ui-bundle.js`. Changing the file on your host changes nothing
   until an upgrade with a new `ui.sha256`, and the upgrade plan shows the admin the change. Object
   storage (`KELTA_S3_*`) is required for a module that ships a bundle.
+- **Secrets come from declared credentials** (part 9e.1). A module reads a tenant credential named
+  in its manifest's `permissions.credentials` with `GET /api/modules/self/credentials/{name}` and
+  its `Kelta-Access-Token`, per request: `{name, type, secrets, metadata}`, `no-store`, audited as
+  the module (`MODULE:<moduleId>[:<purpose>]`). Not while the install is `INSTALLING`, so not
+  during `lifecycle installed` (`architecture.md` → External module credential read).
 
 ## OIDC federation providers (`oidc-providers`)
 

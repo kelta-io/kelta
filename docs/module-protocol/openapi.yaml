@@ -10,8 +10,9 @@ info:
     inbound webhooks, schedules and lifecycle notifications.
 
     **Status: draft.** Design and slice plan:
-    `.claude/docs/specs/module-platform/9-external-modules.md`. Nothing on the platform side is
-    implemented yet; the shapes may change until protocol version 1 ships.
+    `.claude/docs/specs/module-platform/9-external-modules.md`. The platform side is built
+    through part 9e plus the credential read below; the shapes may change until protocol
+    version 1 ships.
 
     ## Authenticating the platform
 
@@ -36,6 +37,11 @@ info:
     service principal. Use it as `Authorization: Bearer <token>` against the tenant's public
     JSON:API (`/api/...`) to read or write data during this request. It carries only the
     permissions the admin approved at install. Do not store it; every call brings a fresh one.
+
+    The same token reads the tenant credentials the manifest declares in
+    `permissions.credentials`: `GET /api/modules/self/credentials/{name}` (tag `platform`, the
+    one platform endpoint in this document). Read a secret when you need it and keep it in
+    memory only for the request; never log it or put it in an answer.
 
     ## Errors
 
@@ -67,6 +73,10 @@ tags:
     description: Third-party webhooks, proxied from `/api/modules/webhooks/{tenantId}/{moduleId}`.
   - name: lifecycle
     description: Install lifecycle notifications and health.
+  - name: platform
+    description: |
+      Endpoints the platform serves and a module calls, with its `Kelta-Access-Token`. Served on
+      the tenant's platform URL, not on the module.
 paths:
   /.well-known/kelta-module.json:
     get:
@@ -310,6 +320,95 @@ paths:
                 $ref: '#/components/schemas/Health'
         default:
           $ref: '#/components/responses/Unavailable'
+  /api/modules/self/credentials/{name}:
+    servers:
+      - url: '{platformUrl}/{tenantSlug}'
+        description: The tenant's platform URL, the same base the access token's JSON:API calls use.
+        variables:
+          platformUrl:
+            default: https://api.example.com
+          tenantSlug:
+            default: acme
+    get:
+      tags: [platform]
+      operationId: readModuleCredential
+      summary: Read a declared tenant credential
+      description: |
+        Returns the tenant credential `name` to the calling install. Allowed only when all of
+        these hold, checked in this order before anything is decrypted:
+
+        1. The bearer token is an install's service-principal token (`Kelta-Access-Token`). A user
+           token, a personal access token or another install's token is refused
+           (`403 NOT_MODULE_PRINCIPAL`).
+        2. The install is `ACTIVE` or `DEGRADED`. While it is still `INSTALLING` (including during
+           the `installed` lifecycle call), `DISABLED` or `FAILED`, the read is refused
+           (`403 MODULE_NOT_ACTIVE`).
+        3. `name` is listed in the installed manifest's `permissions.credentials`, exactly
+           (`403 CREDENTIAL_NOT_DECLARED`). Credentials are read by name only.
+
+        Every read is audited as the module: a `CREDENTIAL_RESOLVE` entry in the tenant's setup
+        audit trail, with the install's service user as the actor and the purpose
+        `MODULE:<moduleId>`, or `MODULE:<moduleId>:<purpose>` when the `purpose` parameter is sent.
+        Every answer carries `Cache-Control: no-store`. Do not cache the secret beyond the request
+        that needed it.
+      security:
+        - serviceToken: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: The credential's name, as declared in `permissions.credentials`.
+          schema:
+            type: string
+        - name: purpose
+          in: query
+          required: false
+          description: |
+            A label for the audit trail, appended to the platform's `MODULE:<moduleId>` prefix (for
+            example `STRIPE_API:checkout`). It cannot replace the prefix.
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_.:-]{1,64}$'
+      responses:
+        '200':
+          description: The credential.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleCredential'
+        '400':
+          description: '`INVALID_PARAMETER`: `purpose` does not match its pattern.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformErrors'
+        '401':
+          description: No token, or an expired or invalid one. Answered by the platform gateway.
+        '403':
+          description: |
+            `NOT_MODULE_PRINCIPAL`, `MODULE_NOT_ACTIVE` or `CREDENTIAL_NOT_DECLARED`; see the
+            operation description.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformErrors'
+        '404':
+          description: '`CREDENTIAL_NOT_FOUND`: declared, but the tenant has no active credential of that name.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformErrors'
+        '503':
+          description: '`CREDENTIALS_UNAVAILABLE`: the platform has no credential store configured.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformErrors'
 components:
   securitySchemes:
     platformAssertion:
@@ -317,6 +416,13 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: ES256 JWT signed by the platform. See "Authenticating the platform" above.
+    serviceToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        The install's service-principal token, received as `Kelta-Access-Token` on every platform
+        call and sent back as `Authorization: Bearer <token>`.
   parameters:
     AccessToken:
       name: Kelta-Access-Token
@@ -336,6 +442,51 @@ components:
     Unavailable:
       description: Any non-2xx status. The platform treats it as the module being unavailable.
   schemas:
+    ModuleCredential:
+      description: A tenant credential, as `GET /api/modules/self/credentials/{name}` returns it.
+      type: object
+      required: [name, type, secrets, metadata]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          description: The credential type, for example `stripe`, `api_key` or `bearer_token`.
+        secrets:
+          type: object
+          additionalProperties: true
+          description: The decrypted secret fields, keyed by field name (for example `secretKey`).
+        metadata:
+          type: object
+          additionalProperties: true
+          description: |
+            The credential's non-secret fields, as the admin entered them. A value can be a string,
+            a list or another JSON value: a reader of a list-like setting such as
+            `allowedReturnOrigins` should accept both a list and a comma-separated string.
+    PlatformErrors:
+      description: The platform's JSON:API error envelope.
+      type: object
+      required: [errors]
+      properties:
+        errors:
+          type: array
+          items:
+            type: object
+            required: [status, code, title]
+            properties:
+              status:
+                type: string
+              code:
+                type: string
+              title:
+                type: string
+              detail:
+                type: string
+              source:
+                type: object
+                properties:
+                  parameter:
+                    type: string
     PlatformAssertionClaims:
       description: Claims of the `Authorization` bearer JWT, for reference. Not sent as a body.
       type: object
@@ -830,6 +981,9 @@ components:
             type: string
         credentials:
           type: array
-          description: Names of tenant credentials the module may read via `GET /api/modules/self/credentials/{name}`.
+          description: |
+            Names of tenant credentials the module may read via
+            `GET /api/modules/self/credentials/{name}`, shown to the admin for consent. Exact names;
+            a credential id is not accepted.
           items:
             type: string

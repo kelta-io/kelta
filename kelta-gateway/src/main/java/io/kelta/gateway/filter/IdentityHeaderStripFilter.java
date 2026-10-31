@@ -18,7 +18,8 @@ import java.util.List;
  * {@code X-User-Profile-Name} / {@code X-Cerbos-Scope} (set by
  * {@code RouteAuthorizationFilter.forwardWithHeaders}, order 0) and
  * {@code X-Forwarded-User} / {@code X-User-Id} / {@code X-Forwarded-Groups} /
- * {@code X-Forwarded-Roles} (set by {@code HeaderTransformationFilter}, order 50) for identity
+ * {@code X-Forwarded-Roles} / {@code X-Connected-App-Id} (set by {@code HeaderTransformationFilter},
+ * order 50) for identity
  * and permission checks, {@code X-Geo-*} (set by {@code GeoEnrichmentFilter}, order -45)
  * for request-origin geolocation, and {@code X-Kelta-Client-Ip} (set by
  * {@code ClientIpForwardingFilter}, order -390) for the client address it records. Authenticated requests get every one of these overwritten downstream,
@@ -45,6 +46,7 @@ public class IdentityHeaderStripFilter implements GlobalFilter, Ordered {
             "X-User-Type",
             "X-Forwarded-Groups",
             "X-Forwarded-Roles",
+            "X-Connected-App-Id",
             "X-Geo-Country",
             "X-Geo-Region",
             "X-Geo-City",

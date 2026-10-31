@@ -96,6 +96,19 @@ class ModuleServicePrincipalServiceTest {
             return credentialRows;
         }
 
+        long activePrincipals = 1;
+        final List<Object[]> principalChecks = new ArrayList<>();
+        String principalSql;
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T> T queryForObject(String sql, Class<T> requiredType, Object... args) {
+            assertThat(TenantContext.get()).isEqualTo(TENANT);
+            principalSql = sql;
+            principalChecks.add(args);
+            return (T) Long.valueOf(activePrincipals);
+        }
+
         List<Object[]> updatesTo(String table) {
             return updates.stream().filter(u -> ((String) u[0]).contains(table)).toList();
         }
@@ -398,6 +411,32 @@ class ModuleServicePrincipalServiceTest {
         @DisplayName("is empty when there is no such active app")
         void emptyWhenAbsent() {
             assertThat(service.clientCredentials(TENANT, "app-1")).isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("isActivePrincipal")
+    class ActivePrincipal {
+
+        @Test
+        @DisplayName("is true only for an active app running as an ACTIVE SERVICE user of the same tenant")
+        void checksAppUserAndTenant() {
+            assertThat(service.isActivePrincipal(TENANT, "app-1", "user-1")).isTrue();
+
+            assertThat(jdbc.principalChecks.getFirst()).containsExactly("app-1", TENANT, "user-1", TENANT);
+            assertThat(jdbc.principalSql).contains("a.active = true", "a.run_as_user_id = ?",
+                    "u.user_type = 'SERVICE'", "u.status = 'ACTIVE'", "u.tenant_id = ?");
+        }
+
+        @Test
+        @DisplayName("is false when no such principal is active, and never queries without all three ids")
+        void falseOtherwise() {
+            jdbc.activePrincipals = 0;
+            assertThat(service.isActivePrincipal(TENANT, "app-1", "user-1")).isFalse();
+
+            assertThat(service.isActivePrincipal(TENANT, null, "user-1")).isFalse();
+            assertThat(service.isActivePrincipal(TENANT, "app-1", null)).isFalse();
+            assertThat(jdbc.principalChecks).hasSize(1);
         }
     }
 }

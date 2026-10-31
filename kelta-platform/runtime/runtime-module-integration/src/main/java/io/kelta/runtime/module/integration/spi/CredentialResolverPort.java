@@ -22,4 +22,17 @@ public interface CredentialResolverPort {
      * @throws RuntimeException when the credential cannot be resolved
      */
     ResolvedCredential resolve(String tenantId, String reference, String purpose);
+
+    /**
+     * As {@link #resolve(String, String, String)}, naming the {@code platform_user} the read is
+     * made for, so the audit row records who read the secret. An external module's credential read
+     * ({@code GET /api/modules/self/credentials/{name}}) passes the module's SERVICE user.
+     *
+     * <p>The default drops {@code actorUserId}: an implementation that audits overrides it.
+     *
+     * @throws RuntimeException when the credential cannot be resolved
+     */
+    default ResolvedCredential resolve(String tenantId, String reference, String purpose, String actorUserId) {
+        return resolve(tenantId, reference, purpose);
+    }
 }

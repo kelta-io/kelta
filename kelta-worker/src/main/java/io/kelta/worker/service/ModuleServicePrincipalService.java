@@ -144,6 +144,11 @@ public class ModuleServicePrincipalService {
             SELECT client_id, client_secret_enc FROM connected_app
             WHERE id = ? AND tenant_id = ? AND active = true AND run_as_user_id IS NOT NULL
             """;
+    private static final String COUNT_ACTIVE_PRINCIPAL = """
+            SELECT count(*) FROM connected_app a JOIN platform_user u ON u.id = a.run_as_user_id
+            WHERE a.id = ? AND a.tenant_id = ? AND a.active = true AND a.run_as_user_id = ?
+              AND u.tenant_id = ? AND u.user_type = 'SERVICE' AND u.status = 'ACTIVE'
+            """;
 
     /** The {@code permissions} block of an external module manifest, minus {@code credentials}. */
     public record Permissions(List<ObjectGrant> objects, List<FieldGrant> fields, List<String> system) {
@@ -385,6 +390,21 @@ public class ModuleServicePrincipalService {
         }
         return Optional.of(new ClientCredentials((String) rows.get(0).get("client_id"),
                 encryption.decrypt((String) rows.get(0).get("client_secret_enc"))));
+    }
+
+    /**
+     * Whether {@code connectedAppId} is an active service-principal app of {@code tenantId} that
+     * runs as {@code userId}, an {@code ACTIVE} {@code SERVICE} user of the same tenant — checked
+     * when a module calls back with its token, since a token outlives a deactivation by up to its
+     * 15-minute lifetime.
+     */
+    public boolean isActivePrincipal(String tenantId, String connectedAppId, String userId) {
+        if (tenantId == null || connectedAppId == null || userId == null) {
+            return false;
+        }
+        Long count = TenantContext.callWithTenant(tenantId, () -> jdbcTemplate.queryForObject(
+                COUNT_ACTIVE_PRINCIPAL, Long.class, connectedAppId, tenantId, userId, tenantId));
+        return count != null && count == 1;
     }
 
     private static Set<String> systemGrants(List<String> requested) {
