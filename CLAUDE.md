@@ -73,7 +73,9 @@ Then run the **Definition of Done** check (in Task Workflow) before declaring do
    **Cross-tenant work: loop `callWithTenant(<uuid>, …)` per tenant** — that is what
    `SandboxProvisioningService` / `MetadataPromotionService` do. There is no
    "run as platform" helper: the RLS bypass is keyed on an **empty** setting
-   (`admin_bypass` is `USING (current_setting('app.current_tenant_id', true) = '')`), which
+   (`admin_bypass` is `USING ((SELECT kelta_pinned_tenant()) IS NULL AND
+   current_setting('app.current_tenant_id', true) = '')` — the pin keeps per-tenant DB logins
+   out; new policies copy the pinned expressions in `conventions.md` → Row-level security), which
    `TenantAwareDataSourceConfig` issues only when **no** tenant is bound — so genuine
    platform paths (Flyway, bootstrap) just leave the context unbound. Binding any sentinel
    value matches no policy and silently returns zero rows; `runAsPlatform`/`callAsPlatform`
