@@ -233,7 +233,7 @@ Location: `kelta-platform/runtime/runtime-events/src/main/java/io/kelta/runtime/
 
 | Component | Details |
 |-----------|---------|
-| OpenTelemetry Java Agent | v2.25.0, bundled in all service Dockerfiles |
+| OpenTelemetry Java Agent | v2.33.1, downloaded in the kelta-ai and kelta-mcp Dockerfiles (`-javaagent`); the gateway and auth images (native) and the worker image (JVM, `Dockerfile.jvm`) carry no agent and export through the Spring Boot OpenTelemetry starter |
 | Spring Boot OpenTelemetry Starter | Auto-instrumentation for traces, metrics |
 | Logstash Logback Encoder | v8.0, JSON structured logging |
 | OTLP export | HTTP to port 4318 (configurable via `MANAGEMENT_OTLP_METRICS_EXPORT_URL`) |
