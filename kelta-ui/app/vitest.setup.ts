@@ -181,7 +181,7 @@ export const server = setupServer(
 )
 
 beforeAll(() => {
-  server.listen({ onUnhandledRequest: 'warn' })
+  server.listen({ onUnhandledFrame: 'warn' })
 
   // Mock sessionStorage for auth
   const mockSessionStorage: Record<string, string> = {
