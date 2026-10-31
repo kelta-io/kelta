@@ -18,7 +18,12 @@ import { ExternalModuleUpgradeDialog } from './ExternalModuleUpgradeDialog'
 import { ExternalModuleUninstallDialog } from './ExternalModuleUninstallDialog'
 import { ExternalModuleHealth } from './ExternalModuleHealth'
 import { ModulesPage } from './ModulesPage'
-import { metadataCounts, objectGrantLabel, type InstallPlan } from './externalModulePlan'
+import {
+  durationLabel,
+  metadataCounts,
+  objectGrantLabel,
+  type InstallPlan,
+} from './externalModulePlan'
 
 const BASE_URL = 'https://billing.example.test'
 const BUNDLE_SHA = 'a'.repeat(64)
@@ -106,6 +111,15 @@ describe('external modules', () => {
         })
       ).toBe('no access')
     })
+
+    it('reads a long-running action duration in its largest whole unit', () => {
+      expect(durationLabel(45)).toBe('45 s')
+      expect(durationLabel(90)).toBe('90 s')
+      expect(durationLabel(5400)).toBe('90 min')
+      expect(durationLabel(7200)).toBe('2 h')
+      expect(durationLabel(86_400)).toBe('1 d')
+      expect(durationLabel(604_800)).toBe('7 d')
+    })
   })
 
   describe('ModulePlanReview', () => {
@@ -131,6 +145,23 @@ describe('external modules', () => {
       expect(screen.getByTestId('module-plan-hash')).toHaveTextContent('p'.repeat(64))
       expect(screen.queryByTestId('module-plan-blockers')).not.toBeInTheDocument()
       expect(screen.queryByTestId('module-plan-permissions-widened')).not.toBeInTheDocument()
+      expect(capabilities).not.toHaveTextContent('runs in the background')
+    })
+
+    it('says how long a step may wait on a long-running action', () => {
+      const plan = installPlan()
+      plan.capabilities!.actions = [
+        { key: 'refund', name: 'Refund', timeoutMs: 1500 },
+        { key: 'ingest', name: 'Ingest', timeoutMs: 10000, maxDurationSeconds: 7200 },
+      ]
+      render(<ModulePlanReview plan={plan} />, { wrapper: createTestWrapper() })
+
+      const capabilities = screen.getByTestId('module-plan-capabilities')
+      expect(capabilities).toHaveTextContent('2 flow actions: refund, ingest')
+      expect(capabilities).toHaveTextContent(
+        'ingest runs in the background: a flow step waits for it up to 2 h'
+      )
+      expect(capabilities).not.toHaveTextContent('refund runs in the background')
     })
 
     it('lists blockers', () => {

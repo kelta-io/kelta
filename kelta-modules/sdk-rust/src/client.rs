@@ -11,7 +11,7 @@ use std::time::Duration;
 use reqwest::{Method, StatusCode};
 use serde_json::{Map, Value, json};
 
-use crate::protocol::ModuleCredential;
+use crate::protocol::{ActionResponse, ModuleCredential, TaskHeartbeat};
 
 /// The longest the client waits for the platform on one call.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -291,6 +291,22 @@ impl PlatformClient {
         serde_json::from_value(body).map_err(|e| ClientError::Decode(format!("not a credential: {e}")))
     }
 
+    /// `POST /api/modules/self/tasks/{token}`: completes a long-running action's task (the
+    /// request's `task.token`) with its result, and the flow step resumes with it. A token works
+    /// once; `404 TASK_NOT_FOUND` when it is unknown, used or expired.
+    pub async fn complete_task(&self, token: &str, result: &ActionResponse) -> Result<(), ClientError> {
+        let body = serde_json::to_value(result).map_err(|e| ClientError::Decode(e.to_string()))?;
+        self.send(Method::POST, &task_path(token, ""), Some(body)).await?;
+        Ok(())
+    }
+
+    /// `POST /api/modules/self/tasks/{token}/heartbeat`: while a task runs, a fresh access token
+    /// (the one a call brings lasts 15 minutes). Build a new client with it.
+    pub async fn heartbeat_task(&self, token: &str) -> Result<TaskHeartbeat, ClientError> {
+        let body = self.send(Method::POST, &task_path(token, "/heartbeat"), None).await?;
+        serde_json::from_value(body).map_err(|e| ClientError::Decode(format!("not a task heartbeat: {e}")))
+    }
+
     async fn send(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value, ClientError> {
         let mut request = self
             .http
@@ -314,6 +330,10 @@ impl PlatformClient {
         }
         serde_json::from_slice(&bytes).map_err(|e| ClientError::Decode(e.to_string()))
     }
+}
+
+fn task_path(token: &str, suffix: &str) -> String {
+    format!("/api/modules/self/tasks/{}{suffix}", encode_segment(token))
 }
 
 /// What module code needs from the platform: tenant records over JSON:API and its declared
@@ -431,6 +451,13 @@ fn encode_segment(segment: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_paths_encode_the_token() {
+        assert_eq!(task_path("kmt_abc-_1", ""), "/api/modules/self/tasks/kmt_abc-_1");
+        assert_eq!(task_path("kmt_abc", "/heartbeat"), "/api/modules/self/tasks/kmt_abc/heartbeat");
+        assert_eq!(task_path("a/b", ""), "/api/modules/self/tasks/a%2Fb");
+    }
 
     #[test]
     fn query_strings_use_bracket_syntax() {

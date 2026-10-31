@@ -1389,9 +1389,41 @@ class FlowEngineTest {
             return List.of();
         }
 
+        /** Due rows (resume_at passed), claimed as the worker's poller would. */
+        List<String> claimDuePendingResumes(Instant now) {
+            List<String> claimed = new ArrayList<>();
+            for (Map<String, Object> row : pendingResumes.values()) {
+                synchronized (row) {
+                    if (!row.containsKey("claimedBy") && row.get("resumeAt") instanceof Instant at
+                            && !at.isAfter(now)) {
+                        row.put("claimedBy", "poller");
+                        claimed.add((String) row.get("executionId"));
+                    }
+                }
+            }
+            return claimed;
+        }
+
         @Override
-        public Optional<String> claimPendingResumeByEvent(String resumeEvent, String claimedBy) {
+        public Optional<String> claimPendingResumeByEvent(String tenantId, String resumeEvent, String claimedBy) {
+            for (Map<String, Object> row : pendingResumes.values()) {
+                synchronized (row) {
+                    if (!row.containsKey("claimedBy") && tenantId.equals(row.get("tenantId"))
+                            && resumeEvent.equals(row.get("resumeEvent"))) {
+                        row.put("claimedBy", claimedBy);
+                        return Optional.of((String) row.get("executionId"));
+                    }
+                }
+            }
             return Optional.empty();
+        }
+
+        @Override
+        public Optional<String> findPendingResumeEvent(String executionId) {
+            return pendingResumes.values().stream()
+                .filter(row -> executionId.equals(row.get("executionId")) && row.get("resumeEvent") != null)
+                .map(row -> (String) row.get("resumeEvent"))
+                .findFirst();
         }
 
         @Override

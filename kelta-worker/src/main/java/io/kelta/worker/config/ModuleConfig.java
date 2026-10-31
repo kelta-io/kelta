@@ -1,5 +1,6 @@
 package io.kelta.worker.config;
 
+import io.kelta.runtime.flow.FlowEngine;
 import io.kelta.runtime.formula.FormulaEvaluator;
 import io.kelta.runtime.module.ModuleSigningKeyStore;
 import io.kelta.runtime.module.ModuleStore;
@@ -22,6 +23,7 @@ import io.kelta.worker.module.ExternalModuleService;
 import io.kelta.worker.module.ExternalModuleUiBundles;
 import io.kelta.worker.module.JdbcModuleSigningKeyStore;
 import io.kelta.worker.module.ModuleAccessTokenService;
+import io.kelta.worker.module.ModuleAsyncTaskStore;
 import io.kelta.worker.module.ModuleAssertionSigner;
 import io.kelta.worker.module.ModuleHttpClient;
 import io.kelta.worker.module.ModuleUninstaller;
@@ -40,6 +42,7 @@ import io.kelta.worker.module.ModuleProvenanceStore;
 import io.kelta.worker.module.ModuleRouteRegistry;
 import io.kelta.worker.module.ModuleScheduleSync;
 import io.kelta.worker.module.ModuleSignatureVerifier;
+import io.kelta.worker.module.ModuleTaskService;
 import io.kelta.worker.module.RuntimeModuleManager;
 import io.kelta.worker.repository.ScheduledJobRepository;
 import io.kelta.worker.service.FieldMaskingService;
@@ -280,10 +283,38 @@ public class ModuleConfig {
                                                          JdbcTemplate jdbcTemplate,
                                                          CollectionRegistry collectionRegistry,
                                                          FieldMaskingService fieldMaskingService,
-                                                         ObjectMapper objectMapper) {
-        return new ExternalModuleRegistry(moduleStore, actionHandlerRegistry, beforeSaveHookRegistry,
-            moduleServiceRegistry, externalModuleInvoker, jdbcTemplate, collectionRegistry, fieldMaskingService,
-            objectMapper);
+                                                         ObjectMapper objectMapper,
+                                                         ModuleAsyncTaskStore moduleAsyncTaskStore) {
+        ExternalModuleRegistry registry = new ExternalModuleRegistry(moduleStore, actionHandlerRegistry,
+            beforeSaveHookRegistry, moduleServiceRegistry, externalModuleInvoker, jdbcTemplate, collectionRegistry,
+            fieldMaskingService, objectMapper);
+        registry.setAsyncTasks(moduleAsyncTaskStore);
+        return registry;
+    }
+
+    /**
+     * The tasks of long-running module actions (part 9h, {@code module_async_task}), and where the
+     * flow engine reads a parked step's outcome ({@code FlowConfig} hands it to the engine). A
+     * task's lifetime is the action's {@code maxDurationSeconds}, capped by
+     * {@code kelta.modules.external.async-action-max-duration-seconds}; a value below 1 fails startup.
+     */
+    @Bean
+    public ModuleAsyncTaskStore moduleAsyncTaskStore(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
+            @Value("${kelta.modules.external.async-action-max-duration-seconds:"
+                + ModuleAsyncTaskStore.DEFAULT_MAX_DURATION_SECONDS + "}") long maxDurationSeconds) {
+        return new ModuleAsyncTaskStore(jdbcTemplate, objectMapper, maxDurationSeconds);
+    }
+
+    /**
+     * {@code POST /api/modules/self/tasks/{token}} and its {@code /heartbeat}: a module's service
+     * principal completes, or keeps alive, the task of a long-running action.
+     */
+    @Bean
+    public ModuleTaskService moduleTaskService(ModuleStore moduleStore, ModuleServicePrincipalService principals,
+                                               ModuleAsyncTaskStore moduleAsyncTaskStore,
+                                               ModuleAccessTokenService tokens, FlowEngine flowEngine,
+                                               ObjectMapper objectMapper) {
+        return new ModuleTaskService(moduleStore, principals, moduleAsyncTaskStore, tokens, flowEngine, objectMapper);
     }
 
     @Bean

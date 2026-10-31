@@ -109,6 +109,25 @@ class ModuleAccessTokenServiceTest {
     }
 
     @Test
+    @DisplayName("a token with a minimum validity: the cached one while it lasts that long, else a fresh one")
+    void minimumValidity() {
+        ModuleAccessTokenService.AccessToken first = tokens.accessToken(module("app-1"), Duration.ofMinutes(10));
+        assertThat(first.token()).isEqualTo("token-1");
+        assertThat(first.expiresAt()).isEqualTo(clock.now.plusSeconds(900));
+        assertThat(first.toString()).doesNotContain("token-1");
+
+        clock.now = clock.now.plus(Duration.ofMinutes(4));
+        assertThat(tokens.accessToken(module("app-1"), Duration.ofMinutes(10)).token())
+                .as("11 minutes left").isEqualTo("token-1");
+
+        clock.now = clock.now.plus(Duration.ofMinutes(2));
+        ModuleAccessTokenService.AccessToken renewed = tokens.accessToken(module("app-1"), Duration.ofMinutes(10));
+        assertThat(renewed.token()).as("9 minutes left is too little").isEqualTo("token-2");
+        assertThat(renewed.expiresAt()).isEqualTo(clock.now.plusSeconds(900));
+        assertThat(tokens.accessToken(module("app-1"))).as("the cache holds the renewed token").isEqualTo("token-2");
+    }
+
+    @Test
     @DisplayName("evict forces a fresh token on the next call")
     void evict() {
         tokens.accessToken(module("app-1"));

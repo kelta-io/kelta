@@ -49,6 +49,13 @@ public class ModuleManifestParser {
     public static final int ACTION_TIMEOUT_MIN_MS = 1;
     public static final int ACTION_TIMEOUT_MAX_MS = 120_000;
     public static final int ACTION_TIMEOUT_DEFAULT_MS = 30_000;
+    /**
+     * {@code actions[].maxDurationSeconds}: how long an action that answers {@code 202} may take to
+     * complete its task (part 9h). Up to seven days in a manifest; the platform may cap it lower
+     * ({@code kelta.modules.external.async-action-max-duration-seconds}).
+     */
+    public static final int ACTION_MAX_DURATION_MIN_SECONDS = 1;
+    public static final int ACTION_MAX_DURATION_MAX_SECONDS = 604_800;
     public static final int HOOK_TIMEOUT_MIN_MS = 100;
     public static final int HOOK_TIMEOUT_MAX_MS = 5_000;
     public static final int HOOK_TIMEOUT_DEFAULT_MS = 2_000;
@@ -466,7 +473,10 @@ public class ModuleManifestParser {
                     ACTION_TIMEOUT_MAX_MS, "actions[" + key + "].timeoutMs"),
                 optionalJsonString(node, "configSchema"),
                 optionalJsonString(node, "inputSchema"),
-                optionalJsonString(node, "outputSchema")));
+                optionalJsonString(node, "outputSchema"),
+                node.get("maxDurationSeconds") == null || node.get("maxDurationSeconds").isNull() ? null
+                    : boundedInt(node, "maxDurationSeconds", 0, ACTION_MAX_DURATION_MIN_SECONDS,
+                        ACTION_MAX_DURATION_MAX_SECONDS, "actions[" + key + "].maxDurationSeconds")));
         }
         return List.copyOf(actions);
     }

@@ -4,6 +4,7 @@ import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.context.TenantPropagatingExecutors;
 import io.kelta.runtime.flow.executor.*;
 import io.kelta.runtime.workflow.ActionHandlerRegistry;
+import io.kelta.runtime.workflow.ActionResult;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +26,16 @@ import java.util.concurrent.*;
  * Execution is asynchronous by default — {@link #startExecution} dispatches to a
  * managed thread pool and returns the execution ID immediately. Use
  * {@link #executeSynchronous} for blocking execution.
+ * <p>
+ * <b>Parking.</b> A long Wait, and a top-level Task whose handler answered
+ * {@link io.kelta.runtime.workflow.ActionResult#awaiting}, park the execution WAITING with a
+ * {@code flow_pending_resume} row. A Wait resumes at its time (the worker's resume poller) and
+ * continues at its {@code Next}. An awaited Task's row carries its resume key and its expiry as
+ * {@code resume_at}: {@link #resumeAwaitedTask} claims it when the outcome is delivered, or the
+ * poller claims it once the expiry passes; either way the Task runs again with what
+ * {@link AwaitedTaskOutcomes#settle} returns — the delivered outcome, or a timeout failure — and
+ * its ResultPath, Retry and Catch apply as for a synchronous result. Both claims are database
+ * claims, so the pod that resumes need not be the one that parked.
  *
  * @since 1.0.0
  */
@@ -62,6 +73,9 @@ public class FlowEngine {
     private final Map<String, StateExecutor> executors;
     private final ExecutorService threadPool;
     private final FlowExecutionListener listener;
+    /** Claims pending resumes in this engine's name ({@code flow_pending_resume.claimed_by}). */
+    private final String instanceId = "flow-engine-" + UUID.randomUUID();
+    private volatile AwaitedTaskOutcomes awaitedOutcomes = AwaitedTaskOutcomes.NONE;
 
     public FlowEngine(FlowStore flowStore,
                       ActionHandlerRegistry handlerRegistry,
@@ -98,6 +112,14 @@ public class FlowEngine {
 
     private void registerExecutor(StateExecutor executor) {
         executors.put(executor.stateType(), executor);
+    }
+
+    /**
+     * Where parked Tasks read their outcome ({@link AwaitedTaskOutcomes}). Unset, every awaited
+     * Task settles as a timeout.
+     */
+    public void setAwaitedTaskOutcomes(AwaitedTaskOutcomes awaitedOutcomes) {
+        this.awaitedOutcomes = awaitedOutcomes != null ? awaitedOutcomes : AwaitedTaskOutcomes.NONE;
     }
 
     // -------------------------------------------------------------------------
@@ -193,8 +215,9 @@ public class FlowEngine {
      * Resumes a waiting execution. The flow definition is re-loaded from the
      * {@link FlowStore}; the persisted Wait state is treated as satisfied and
      * execution continues from its {@code Next} transition (or completes if the
-     * Wait was terminal). The pending-resume row is deleted before the state
-     * loop restarts.
+     * Wait was terminal). A parked Task runs again with the outcome
+     * {@link AwaitedTaskOutcomes#settle} gives for its resume key. The
+     * pending-resume row is deleted before the state loop restarts.
      *
      * @param executionId the execution ID to resume
      */
@@ -257,6 +280,10 @@ public class FlowEngine {
                     return;
                 }
 
+                // A parked Task resumes by the key its pending row carries; read it before the row goes.
+                String resumeKey = waitState instanceof StateDefinition.TaskState
+                    ? flowStore.findPendingResumeEvent(executionId).orElse(null)
+                    : null;
                 flowStore.deletePendingResume(executionId);
                 log.info("Resuming execution {} from state '{}'", executionId, fresh.currentNodeId());
 
@@ -278,7 +305,11 @@ public class FlowEngine {
                     definition, fresh.stateData(), 0,
                     flowStore.findStepLogging(resumeTenantId, flowId));
                 context.setTriggerDepth(triggerDepthOf(fresh.initialInput()));
+                context.setAwaitable(true);
                 context.setCurrentStateId(nextStateId);
+                if (waitState instanceof StateDefinition.TaskState) {
+                    context.setAwaitedOutcome(settleAwaitedTask(resumeTenantId, resumeKey));
+                }
                 flowStore.updateExecutionState(executionId, nextStateId, fresh.stateData(),
                     FlowExecutionData.STATUS_RUNNING, fresh.stepCount());
 
@@ -298,6 +329,66 @@ public class FlowEngine {
                 listener.onExecutionError(flowId, e.getClass().getSimpleName());
             }
         }));
+    }
+
+    /**
+     * Resumes the execution parked on {@code resumeKey}'s awaited Task, after its outcome was
+     * recorded where {@link AwaitedTaskOutcomes} reads it. Claims the execution's pending-resume
+     * row first (tenant-scoped; at most one claimer wins, on any pod), so a delivery racing the
+     * expiry poller, or the step's own park, resumes it exactly once.
+     *
+     * @return true when this call claimed the execution and resumed it; false when nothing is
+     *         parked on the key yet (the park will find the outcome) or another claimer won
+     */
+    public boolean resumeAwaitedTask(String tenantId, String resumeKey) {
+        Optional<String> executionId = flowStore.claimPendingResumeByEvent(tenantId, resumeKey, instanceId);
+        executionId.ifPresent(this::resumeExecution);
+        return executionId.isPresent();
+    }
+
+    /**
+     * The outcome a parked Task resumes with: the delivered one, or a timeout. With no key (the
+     * row was written by an older engine) or an unknown one, a timeout with no retry left.
+     */
+    private AwaitedTaskOutcomes.TaskOutcome settleAwaitedTask(String tenantId, String resumeKey) {
+        Optional<AwaitedTaskOutcomes.TaskOutcome> outcome = resumeKey == null
+            ? Optional.empty()
+            : awaitedOutcomes.settle(tenantId, resumeKey);
+        return outcome.orElseGet(() -> AwaitedTaskOutcomes.TaskOutcome.failed(AwaitedTaskOutcomes.TIMEOUT_CODE,
+            "The awaited task has no outcome to resume with", Integer.MAX_VALUE));
+    }
+
+    /**
+     * Parks a Task on awaited work: a pending-resume row under its resume key, due at its expiry
+     * (so the resume poller fails it then). Then, because the work may already have finished
+     * before the step parked, resumes at once if its outcome is already there. Unlike a Wait, a
+     * park that cannot be recorded fails the execution: nothing would ever resume or expire it.
+     */
+    private void parkAwaitedTask(FlowExecutionContext context, ActionResult.Awaiting awaiting) {
+        try {
+            flowStore.createPendingResume(context.executionId(), context.tenantId(),
+                awaiting.expiresAt(), awaiting.resumeKey());
+        } catch (RuntimeException e) {
+            log.error("Failed to park execution {} on awaited task '{}'", context.executionId(),
+                awaiting.resumeKey(), e);
+            String message = "Could not park the step on its awaited task: " + e.getMessage();
+            flowStore.completeExecution(context.executionId(), FlowExecutionData.STATUS_FAILED,
+                annotateWithFailedCount(context.stateData(), context), message,
+                context.elapsedMs(), context.stepCount());
+            context.markCompleted(FlowExecutionData.STATUS_FAILED, "States.AwaitFailed", message);
+            return;
+        }
+        try {
+            if (awaitedOutcomes.delivered(context.tenantId(), awaiting.resumeKey())) {
+                log.info("Awaited task '{}' finished before execution {} parked; resuming",
+                    awaiting.resumeKey(), context.executionId());
+                resumeAwaitedTask(context.tenantId(), awaiting.resumeKey());
+            }
+        } catch (RuntimeException e) {
+            // The row is due at the expiry, when the poller settles it with whatever arrived.
+            log.warn("Could not check awaited task '{}' of execution {} after parking: {}",
+                awaiting.resumeKey(), context.executionId(), e.getMessage());
+        }
     }
 
     /**
@@ -476,6 +567,7 @@ public class FlowEngine {
             executionId, tenantId, flowId, userId, definition, initialInput, 0,
             flowStore.findStepLogging(tenantId, flowId));
         context.setTriggerDepth(triggerDepthOf(initialInput));
+        context.setAwaitable(true);
 
         log.info("Starting flow execution {} (flow={}, startAt={})",
             executionId, flowId, definition.startAt());
@@ -635,7 +727,11 @@ public class FlowEngine {
                 context.markWaiting();
                 flowStore.updateExecutionState(context.executionId(), context.currentStateId(),
                     result.updatedData(), FlowExecutionData.STATUS_WAITING, context.stepCount());
-                schedulePendingResume(context, currentState, result.updatedData());
+                if (result.awaiting() != null) {
+                    parkAwaitedTask(context, result.awaiting());
+                } else {
+                    schedulePendingResume(context, currentState, result.updatedData());
+                }
                 return result.updatedData();
             }
 

@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
  * this order, and any failure is a refusal:
  *
  * <ol>
- *   <li><b>The caller is a module's service principal.</b> The token's {@code connected_app_id}
+ *   <li><b>The caller is a module's service principal</b> ({@link ModuleSelfPrincipal}). The token's {@code connected_app_id}
  *       (forwarded by the gateway as {@code X-Connected-App-Id}) names exactly one
  *       {@code tenant_module} row of the tenant, that row is external ({@code base_url}), the
  *       caller's resolved user is that row's {@code service_user_id}, and the app and user are
@@ -133,12 +133,10 @@ public class ModuleCredentialService {
      */
     public ModuleCredential read(String tenantId, String connectedAppId, String callerUserId, String name,
                                  String purposeLabel) {
-        TenantModuleData install = isBlank(connectedAppId) ? null
-                : moduleStore.findByConnectedAppId(tenantId, connectedAppId).orElse(null);
-        if (install == null || !install.isExternal() || callerUserId == null
-                || !callerUserId.equals(install.serviceUserId())
-                || !principals.isActivePrincipal(tenantId, connectedAppId, callerUserId)) {
-            throw refuse(Refusal.NOT_MODULE_PRINCIPAL, tenantId, install, name,
+        TenantModuleData install = ModuleSelfPrincipal.resolve(moduleStore, principals, tenantId, connectedAppId,
+                callerUserId).orElse(null);
+        if (install == null) {
+            throw refuse(Refusal.NOT_MODULE_PRINCIPAL, tenantId, null, name,
                     "Only an external module's service principal can read module credentials");
         }
         if (!ExternalModuleInvoker.callable(install)) {
@@ -188,9 +186,5 @@ public class ModuleCredentialService {
         log.warn("Refused module credential read of '{}' in tenant {} ({}, module {})", name, tenantId, refusal,
                 install == null ? "none" : install.moduleId());
         return new RefusedException(refusal, message);
-    }
-
-    private static boolean isBlank(String value) {
-        return value == null || value.isBlank();
     }
 }

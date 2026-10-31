@@ -642,6 +642,36 @@ pinning do not guarantee:
 - **Names only.** The resolver looks a UUID up as a credential id first, so UUID-shaped names are
   refused even when declared. A credential named like a UUID cannot be granted to a module.
 
+### External modules — long-running actions (part 9h, accepted)
+
+`architecture.md` → External module task completion; `integrations.md` → Wait states (Awaited
+Tasks). What the task-token design does not guarantee:
+
+- **The task token travels in the URL path.** `POST /api/modules/self/tasks/{token}` puts it where
+  access logs and span attributes (`http.url.path`) record paths. It is stored only as a hash, is
+  single use, expires, and is useless without the same install's principal token, so a token read
+  from a log can at most complete (or heartbeat) a still-pending task by someone already holding
+  that install's credentials. Moving it to a body field would close this; the path shape was kept
+  to match the contract.
+- **A claimed resume whose pod dies is never resumed.** A completion (or the expiry poller) claims
+  the `flow_pending_resume` row before it resumes the execution. If the claiming pod dies between
+  the claim and the resume, the row stays claimed and the execution stays `WAITING` — true of
+  every pending resume today (Wait states included); there is no claim lease. The module's
+  outcome is recorded (`COMPLETED`), so a manual resume would pick it up.
+- **Only top-level Task steps can wait.** `Parallel`/`Map` branch states and invoked sub-flows run
+  in memory and are not persisted, so they cannot park; a long-running action there gets no task
+  and its `202` fails the step (`ModuleUnavailableException`).
+- **Expiry is the poller's interval late.** A task past `expiresAt` fails on the next resume poll
+  (`kelta.flow.resume.poll-interval-ms`, 10 s default), and a completion racing it wins only if it
+  commits first: both move the task out of `PENDING` with one conditional update, so exactly one
+  takes effect.
+- **The flow's `TaskState.timeoutSeconds` does not cap the wait.** As for synchronous calls, the
+  field is parsed but not enforced; the wait is bounded by the manifest's `maxDurationSeconds` and
+  the platform cap (`KELTA_MODULES_EXTERNAL_ASYNC_ACTION_MAX_DURATION_SECONDS`, one day default).
+- **A heartbeat hands out a fresh principal token for as long as the task lives.** That is its
+  purpose: the 15-minute token cannot outlive an hours-long task. A disabled install, a deactivated
+  principal or an expired task gets none.
+
 ### External modules — in-cluster modules and the Rust billing module (part 9f, accepted)
 
 `kelta-modules/billing` is the first external module the platform runs itself, as a pod in the

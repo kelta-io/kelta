@@ -48,6 +48,9 @@ impl Recorder {
 impl ModuleHandlers for Recorder {
     async fn action(&self, call: Call, key: String, _request: ActionRequest) -> Result<ActionResponse, HandlerError> {
         self.record(&format!("action:{key}"), &call);
+        if key == "ingest" {
+            return Ok(ActionResponse::accepted());
+        }
         let mut output = Map::new();
         output.insert("key".into(), json!(key));
         Ok(ActionResponse::success(output))
@@ -241,6 +244,22 @@ async fn runs_actions_with_the_idempotency_key() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(answer, json!({ "success": true, "output": { "key": "ping" } }));
     assert_eq!(h.recorder.seen().idempotency_key.as_deref(), Some("job:1"));
+}
+
+#[tokio::test]
+async fn answers_202_when_a_long_running_action_takes_on_its_task() {
+    let h = harness();
+    let body = json!({ "tenantId": TENANT_ID, "input": {},
+                       "task": { "token": "kmt_test", "expiresAt": "2026-11-01T12:00:00Z" } })
+    .to_string()
+    .into_bytes();
+    let request = h.signed("POST", "/kelta/v1/actions/ingest", &body).body(Body::from(body)).unwrap();
+    assert_eq!(h.send(request).await.0, StatusCode::ACCEPTED);
+
+    // Without a task the platform would read a 202 as a failure: the router refuses it instead.
+    let body = json!({ "tenantId": TENANT_ID, "input": {} }).to_string().into_bytes();
+    let request = h.signed("POST", "/kelta/v1/actions/ingest", &body).body(Body::from(body)).unwrap();
+    assert_eq!(h.send(request).await.0, StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 #[tokio::test]

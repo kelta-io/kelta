@@ -100,6 +100,10 @@ kelta:
       # one delay per retry, comma-separated (5s, 2m, 1h). After the last retry the event is
       # written to module_event_dead_letter and acknowledged. The protocol documents the default.
       event-backoff: ${KELTA_MODULES_EXTERNAL_EVENT_BACKOFF:5s,30s,2m,10m,1h}
+      # Long-running module actions (part 9h): the longest a task may stay open, in seconds,
+      # whatever the action's manifest maxDurationSeconds says (that is at most 7 days). The flow
+      # step parked on it fails with ModuleTimeoutException when it passes. Default one day.
+      async-action-max-duration-seconds: ${KELTA_MODULES_EXTERNAL_ASYNC_ACTION_MAX_DURATION_SECONDS:86400}
   # The running Kelta release (e.g. 0.1.0), compared against a module's minPlatformVersion at
   # install and upgrade. Blank = unknown: the check is skipped with a WARN, never failed.
   platform:

@@ -317,21 +317,40 @@ public class JdbcFlowStore implements FlowStore {
             claimedBy, limit);
     }
 
+    /**
+     * Tenant-scoped: an event name is the tenant's own (a Wait's {@code EventName}, an awaited
+     * Task's resume key), and {@code flow_pending_resume} has no RLS policy, so the filter is here.
+     * The claim is atomic across pods; the time poller can win the same row once it is due.
+     */
     @Override
-    public Optional<String> claimPendingResumeByEvent(String resumeEvent, String claimedBy) {
+    public Optional<String> claimPendingResumeByEvent(String tenantId, String resumeEvent, String claimedBy) {
         List<String> results = jdbcTemplate.queryForList("""
             UPDATE flow_pending_resume
             SET claimed_by = ?
             WHERE id = (
                 SELECT id FROM flow_pending_resume
-                WHERE claimed_by IS NULL AND resume_event = ?
+                WHERE claimed_by IS NULL AND tenant_id = ? AND resume_event = ?
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
             )
             RETURNING execution_id
             """,
             String.class,
-            claimedBy, resumeEvent);
+            claimedBy, tenantId, resumeEvent);
+
+        return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
+    }
+
+    @Override
+    public Optional<String> findPendingResumeEvent(String executionId) {
+        List<String> results = jdbcTemplate.queryForList("""
+            SELECT resume_event FROM flow_pending_resume
+            WHERE execution_id = ? AND resume_event IS NOT NULL
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            String.class,
+            executionId);
 
         return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
     }

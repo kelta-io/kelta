@@ -105,10 +105,26 @@ public record ExternalModuleManifest(
     /**
      * {@code actions[]}. Schemas are kept as JSON text, as the JAR manifest keeps them.
      *
-     * @param timeoutMs 1–120000, default 30000
+     * @param timeoutMs          1–120000, default 30000: how long the call itself may take
+     * @param maxDurationSeconds 1–604800, or null: when set, the action may answer {@code 202} to a
+     *                           call that carries a {@code task} and complete it within this long
+     *                           (part 9h); when null, the action is synchronous only
      */
     public record Action(String key, String name, String description, String category, String icon,
-                         int timeoutMs, String configSchema, String inputSchema, String outputSchema) {}
+                         int timeoutMs, String configSchema, String inputSchema, String outputSchema,
+                         Integer maxDurationSeconds) {
+
+        /** A synchronous action. */
+        public Action(String key, String name, String description, String category, String icon,
+                      int timeoutMs, String configSchema, String inputSchema, String outputSchema) {
+            this(key, name, description, category, icon, timeoutMs, configSchema, inputSchema, outputSchema, null);
+        }
+
+        /** True when the action may answer {@code 202} and complete later. */
+        public boolean asynchronous() {
+            return maxDurationSeconds != null;
+        }
+    }
 
     /**
      * {@code hooks[]}.

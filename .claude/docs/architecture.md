@@ -767,6 +767,24 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `SelfScopedController` with a body that has no `data` member, so the record advices leave it alone,
   and `SensitiveBodyRedactor` never captures a `credentials` path as span data. Spec:
   `9-external-modules.md` §3.3.
+- **External module task completion** (part 9h). `POST /api/modules/self/tasks/{token}` and
+  `POST /api/modules/self/tasks/{token}/heartbeat` (`ModuleTaskController`, literal four- and
+  five-segment mappings, unconditional; no gateway change — they ride `static-modules`, which checks
+  only `API_ACCESS`). **Authorization is the worker's**, the credential read's rule shared as
+  `ModuleSelfPrincipal`: the gateway-stamped `X-Connected-App-Id` names an external install of the
+  tenant, the caller is its `service_user_id`, app and user are active (`403 NOT_MODULE_PRINCIPAL`);
+  the install is `ACTIVE`/`DEGRADED` (`403 MODULE_NOT_ACTIVE`). A completion's body must be a valid
+  `ActionResponse` within a synchronous answer's limits (`400 INVALID_TASK_RESULT`, before the token
+  is touched); then one conditional update moves the task `PENDING → COMPLETED` only for this
+  tenant, this install, unexpired (`ModuleAsyncTaskStore.complete`), else `404 TASK_NOT_FOUND` —
+  the same answer for an unknown, foreign, used or expired token. A heartbeat answers a fresh
+  principal token (`503 TOKEN_UNAVAILABLE` when kelta-auth refuses). Every answer is `no-store`; no
+  answer or log line carries the token. **Resume path:** the completion calls
+  `FlowEngine.resumeAwaitedTask`, which claims the parked step's `flow_pending_resume` row by its
+  resume key (`claimPendingResumeByEvent`, tenant-scoped, `SKIP LOCKED`) and re-runs the Task with
+  the outcome `ModuleAsyncTaskStore.settle` reads — all in Postgres, so any pod may take the
+  callback. Expiry is the existing resume poller: the row's `resume_at` is the task's expiry.
+  Spec: `9-external-modules.md` §3.6.2.
 - **Owner-scoped collections** (member-data-ownership slice 2, V206). A collection may declare
   `ownerField` (`createdBy` or a LOOKUP→`users`), `ownerScope` (`NONE|PORTAL|ALL`) and
   `ownerScopeReads` (default true) — `collection.owner_field/owner_scope/owner_scope_reads`, on

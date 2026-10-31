@@ -84,6 +84,14 @@ import static org.assertj.core.api.Assertions.assertThat;
  * and purpose), and is refused an undeclared one; an admin token is refused even with a forged
  * {@code X-Connected-App-Id}; a second install's principal reads only its own declaration; a
  * disabled install reads nothing.
+ *
+ * <p>{@link #completesALongRunningAction()} covers part 9h: an action declaring
+ * {@code maxDurationSeconds} is sent a task, answers {@code 202}, and the flow step parks WAITING
+ * until the module's principal completes the task through the gateway
+ * ({@code POST /api/modules/self/tasks/{token}}); the step resumes with the module's output. The
+ * token is refused to a user token, to another install's principal and once used; a heartbeat
+ * renews the principal's access token; a task nobody completes fails its step at expiry, through
+ * the worker's resume poller.
  */
 @DisplayName("External module install scenario")
 class ExternalModuleInstallScenarioTest extends ScenarioBase {
@@ -488,6 +496,121 @@ class ExternalModuleInstallScenarioTest extends ScenarioBase {
         }
     }
 
+    @Test
+    @DisplayName("a long-running action parks its step until the module completes the task; refusals; heartbeat; expiry")
+    void completesALongRunningAction() throws Exception {
+        String suffix = Long.toHexString(System.nanoTime());
+        String tasks = "/" + SLUG + "/api/modules/self/tasks/";
+
+        // Another install's principal: it must not complete this module's tasks.
+        String other = "harness-async-b-" + suffix;
+        String otherToken = installWithCredentials(other, "harness_async_b_" + suffix);
+
+        // ingest may take ten minutes; expire gives up after two seconds.
+        String moduleId = "harness-async-" + suffix;
+        ObjectNode manifest = manifest(moduleId, "harness_async_" + suffix);
+        ArrayNode actions = manifest.putArray("actions");
+        actions.addObject().put("key", "ingest").put("name", "Ingest").put("maxDurationSeconds", 600);
+        actions.addObject().put("key", "expire").put("name", "Expire").put("maxDurationSeconds", 2);
+        serveManifest(manifest);
+        stubJson("POST", "/kelta/v1/actions/ingest", 5, null, 202, "");
+        stubJson("POST", "/kelta/v1/actions/expire", 5, null, 202, "");
+        JsonNode plan = admin("POST", "/" + SLUG + "/api/modules/plan", "{\"baseUrl\":\"" + BASE_URL + "\"}",
+                HttpStatus.OK).get("data").get("attributes");
+        List<Integer> durations = new ArrayList<>();
+        plan.get("capabilities").get("actions").forEach(a -> durations.add(a.get("maxDurationSeconds").asInt()));
+        assertThat(durations).as("the admin sees how long a step may wait").containsExactly(2, 600);
+        admin("POST", "/" + SLUG + "/api/modules/install", "{\"baseUrl\":\"" + BASE_URL + "\",\"planHash\":\""
+                + plan.get("planHash").stringValue() + "\"}", HttpStatus.OK);
+        String moduleToken = header(lifecycleRequests().getLast(), "Kelta-Access-Token");
+
+        // The step calls the action with a task and parks WAITING on its 202.
+        String executionId = executeFlow(createFlow(moduleId + ":ingest", suffix));
+        assertThat(awaitStatus(executionId, "WAITING").get("status").stringValue()).isEqualTo("WAITING");
+        JsonNode call = requests("POST", "/kelta/v1/actions/ingest").stream()
+                .filter(r -> header(r, "Idempotency-Key").equals(executionId + ":Ping"))
+                .findFirst().orElseThrow(() -> new AssertionError("no action call for " + executionId));
+        JsonNode task = body(call).get("task");
+        String token = task.get("token").stringValue();
+        assertThat(token).matches("^kmt_[A-Za-z0-9_-]{43}$");
+        assertThat(Instant.parse(task.get("expiresAt").stringValue())).isAfter(Instant.now().plusSeconds(500));
+        assertThat(queryString("SELECT token_hash FROM module_async_task WHERE execution_id = ? "
+                + "AND status = 'PENDING'", executionId)).as("stored as its SHA-256 only")
+                .isEqualTo(sha256Hex(token.getBytes(StandardCharsets.UTF_8)));
+
+        String result = "{\"success\":true,\"output\":{\"rows\":42}}";
+        // A user token, even naming the module's app; another install's principal; an unknown token.
+        assertRefused(postWith(adminToken, tasks + token, result, Map.of()), HttpStatus.FORBIDDEN,
+                "NOT_MODULE_PRINCIPAL");
+        String appId = queryString("SELECT connected_app_id FROM tenant_module WHERE tenant_id = ? AND module_id = ?",
+                tenantId, moduleId);
+        assertRefused(postWith(adminToken, tasks + token, result, Map.of("X-Connected-App-Id", appId)),
+                HttpStatus.FORBIDDEN, "NOT_MODULE_PRINCIPAL");
+        assertRefused(postWith(otherToken, tasks + token, result, Map.of()), HttpStatus.NOT_FOUND, "TASK_NOT_FOUND");
+        assertRefused(postWith(moduleToken, tasks + "kmt_" + "x".repeat(43), result, Map.of()), HttpStatus.NOT_FOUND,
+                "TASK_NOT_FOUND");
+        // A body that is no ActionResponse is refused before the token is spent.
+        assertRefused(postWith(moduleToken, tasks + token, "{\"output\":{}}", Map.of()), HttpStatus.BAD_REQUEST,
+                "INVALID_TASK_RESULT");
+
+        // A heartbeat renews the principal's token; the module completes the task with it.
+        ResponseEntity<String> beat = postWith(moduleToken, tasks + token + "/heartbeat", "", Map.of());
+        assertThat(beat.getStatusCode()).as("heartbeat: %s", beat.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(beat.getHeaders().getCacheControl()).contains("no-store");
+        JsonNode renewed = mapper.readTree(beat.getBody());
+        assertThat(Instant.parse(renewed.get("taskExpiresAt").stringValue()))
+                .isEqualTo(Instant.parse(task.get("expiresAt").stringValue()));
+        String renewedToken = renewed.get("accessToken").stringValue();
+        ResponseEntity<String> completed = postWith(renewedToken, tasks + token, result, Map.of());
+        assertThat(completed.getStatusCode()).as("complete: %s", completed.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+
+        JsonNode resumed = awaitExecution(executionId);
+        assertThat(resumed.get("status").stringValue()).as("execution: %s", resumed).isEqualTo("COMPLETED");
+        assertThat(resumed.get("stateData").get("ping").get("rows").asInt()).isEqualTo(42);
+        assertRefused(postWith(moduleToken, tasks + token, result, Map.of()), HttpStatus.NOT_FOUND, "TASK_NOT_FOUND");
+
+        // Nobody completes expire's task: the resume poller fails the step at its expiry.
+        String expiringId = executeFlow(createFlow(moduleId + ":expire", suffix + "x"));
+        JsonNode expired = awaitExecution(expiringId);
+        assertThat(expired.get("status").stringValue()).as("execution: %s", expired).isEqualTo("FAILED");
+        assertThat(queryString("SELECT status FROM module_async_task WHERE execution_id = ?", expiringId))
+                .isEqualTo("EXPIRED");
+        String lateToken = body(requests("POST", "/kelta/v1/actions/expire").getLast()).get("task").get("token")
+                .stringValue();
+        assertRefused(postWith(moduleToken, tasks + lateToken, result, Map.of()), HttpStatus.NOT_FOUND,
+                "TASK_NOT_FOUND");
+
+        for (String id : List.of(moduleId, other)) {
+            JsonNode uninstallPlan = admin("GET", "/" + SLUG + "/api/modules/" + id
+                    + "/uninstall-plan?purgeData=true", null, HttpStatus.OK).get("data").get("attributes");
+            admin("DELETE", "/" + SLUG + "/api/modules/" + id + "?purgeData=true&planHash="
+                    + uninstallPlan.get("planHash").stringValue(), null, HttpStatus.OK);
+        }
+    }
+
+    private ResponseEntity<String> postWith(String token, String uri, String body, Map<String, String> headers) {
+        RestClient.RequestBodySpec spec = gatewayClientWithToken(token).post().uri(uri)
+                .contentType(MediaType.APPLICATION_JSON);
+        headers.forEach(spec::header);
+        return spec.body(body).retrieve().onStatus(s -> true, (req, resp) -> {}).toEntity(String.class);
+    }
+
+    /** Polls an execution until it reaches {@code status} (or finishes) and returns its attributes. */
+    private JsonNode awaitStatus(String executionId, String status) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 30_000;
+        JsonNode attributes = null;
+        while (System.currentTimeMillis() < deadline) {
+            attributes = mapper.readTree(get(adminToken, "/" + SLUG + "/api/flows/executions/" + executionId)
+                    .getBody()).get("data").get("attributes");
+            String current = attributes.get("status").stringValue();
+            if (status.equals(current) || "COMPLETED".equals(current) || "FAILED".equals(current)) {
+                return attributes;
+            }
+            Thread.sleep(500);
+        }
+        throw new AssertionError("execution " + executionId + " never reached " + status + ": " + attributes);
+    }
+
     /** Installs a module declaring {@code credentials}; returns the principal's token from {@code lifecycle}. */
     private String installWithCredentials(String moduleId, String owned, String... credentials) throws Exception {
         ObjectNode manifest = manifest(moduleId, owned);
@@ -499,7 +622,9 @@ class ExternalModuleInstallScenarioTest extends ScenarioBase {
         JsonNode plan = admin("POST", "/" + SLUG + "/api/modules/plan", "{\"baseUrl\":\"" + BASE_URL + "\"}",
                 HttpStatus.OK).get("data").get("attributes");
         assertThat(plan.get("blockers")).as("blockers: %s", plan.get("blockers")).isEmpty();
-        assertThat(plan.get("grants").get("credentials").get(0).stringValue()).isEqualTo(credentials[0]);
+        if (credentials.length > 0) {
+            assertThat(plan.get("grants").get("credentials").get(0).stringValue()).isEqualTo(credentials[0]);
+        }
         JsonNode installed = admin("POST", "/" + SLUG + "/api/modules/install",
                 "{\"baseUrl\":\"" + BASE_URL + "\",\"planHash\":\"" + plan.get("planHash").stringValue() + "\"}",
                 HttpStatus.OK).get("data").get("attributes");

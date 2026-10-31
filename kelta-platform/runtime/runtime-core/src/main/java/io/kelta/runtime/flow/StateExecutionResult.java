@@ -1,5 +1,7 @@
 package io.kelta.runtime.flow;
 
+import io.kelta.runtime.workflow.ActionResult;
+
 import java.util.Map;
 
 /**
@@ -11,6 +13,8 @@ import java.util.Map;
  * @param errorCode      error code if failed
  * @param errorMessage   error message if failed
  * @param terminal       true if this is a terminal state (Succeed/Fail)
+ * @param awaiting       for a Task parked on work that completes later: what to resume it by, and
+ *                       when it expires; null otherwise
  * @since 1.0.0
  */
 public record StateExecutionResult(
@@ -19,8 +23,14 @@ public record StateExecutionResult(
     String status,
     String errorCode,
     String errorMessage,
-    boolean terminal
+    boolean terminal,
+    ActionResult.Awaiting awaiting
 ) {
+
+    public StateExecutionResult(String nextStateId, Map<String, Object> updatedData, String status,
+                                String errorCode, String errorMessage, boolean terminal) {
+        this(nextStateId, updatedData, status, errorCode, errorMessage, terminal, null);
+    }
 
     /**
      * Creates a successful result that transitions to the next state.
@@ -55,5 +65,14 @@ public record StateExecutionResult(
      */
     public static StateExecutionResult waiting(Map<String, Object> data) {
         return new StateExecutionResult(null, data, "WAITING", null, null, false);
+    }
+
+    /**
+     * Creates a waiting result for a Task whose handler accepted work that completes later
+     * ({@link ActionResult#awaiting}). The engine parks the execution on this state and resumes it
+     * with the delivered outcome.
+     */
+    public static StateExecutionResult awaiting(Map<String, Object> data, ActionResult.Awaiting awaiting) {
+        return new StateExecutionResult(null, data, "WAITING", null, null, false, awaiting);
     }
 }

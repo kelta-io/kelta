@@ -204,7 +204,9 @@ public interface FlowStore {
     // -------------------------------------------------------------------------
 
     /**
-     * Creates a pending resume entry for a Wait state.
+     * Creates a pending resume entry for a Wait state, or for a Task parked on awaited work.
+     * An awaited Task sets both: {@code resumeEvent} is its resume key and {@code resumeAt} its
+     * expiry, so a delivery claims it by key and the time poller claims it once it expires.
      *
      * @param executionId the execution ID
      * @param tenantId    the tenant ID
@@ -226,13 +228,23 @@ public interface FlowStore {
     List<String> claimPendingResumes(String claimedBy, int limit);
 
     /**
-     * Claims a pending resume by event name.
+     * Claims an unclaimed pending resume of {@code tenantId} by event name. Tenant-scoped, because
+     * event names are not unique across tenants; and at most one caller on any pod wins a row.
      *
+     * @param tenantId    the tenant the event belongs to
      * @param resumeEvent the event name
      * @param claimedBy   identifier of the claiming pod
      * @return the execution ID if found and claimed, empty otherwise
      */
-    Optional<String> claimPendingResumeByEvent(String resumeEvent, String claimedBy);
+    Optional<String> claimPendingResumeByEvent(String tenantId, String resumeEvent, String claimedBy);
+
+    /**
+     * The event name (an awaited Task's resume key) of an execution's pending resume, claimed or
+     * not; empty when it has none or it is time-only.
+     *
+     * @param executionId the execution ID
+     */
+    Optional<String> findPendingResumeEvent(String executionId);
 
     /**
      * Deletes a pending resume entry after the execution has resumed.

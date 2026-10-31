@@ -2,6 +2,7 @@ import React from 'react'
 import { AlertTriangle, ShieldAlert, XCircle } from 'lucide-react'
 import { AdminDataTable, type AdminColumn } from '../../components/AdminDataTable/AdminDataTable'
 import {
+  durationLabel,
   metadataCounts,
   objectGrantLabel,
   type FieldGrant,
@@ -203,6 +204,14 @@ export function ModulePlanReview({ plan }: ModulePlanReviewProps): React.ReactEl
               {capabilities.actions.length > 0 &&
                 `: ${capabilities.actions.map((a) => a.key).join(', ')}`}
             </li>
+            {capabilities.actions
+              .filter((action) => action.maxDurationSeconds != null)
+              .map((action) => (
+                <li key={`long-running:${action.key}`}>
+                  <code>{action.key}</code> runs in the background: a flow step waits for it up to{' '}
+                  {durationLabel(action.maxDurationSeconds as number)}
+                </li>
+              ))}
             {capabilities.hooks.map((hook) => (
               <li key={`hook:${hook.collection}:${hook.order}`}>
                 Runs before saves on <code>{hook.collection}</code> ({hook.events.join(', ')}; on

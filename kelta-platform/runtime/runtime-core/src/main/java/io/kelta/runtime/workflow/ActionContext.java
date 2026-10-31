@@ -17,6 +17,12 @@ import java.util.Map;
  * flow. An external module's action request carries both, and its {@code Idempotency-Key} is
  * {@code <executionId>:<stepName>} so every retry of one step shares it.
  *
+ * <p>{@code awaitable} is true only for a top-level flow Task, whose execution the engine can
+ * park and resume later. Only then may a handler answer {@link ActionResult#awaiting} — work that
+ * finishes outside the call (an external module's long-running action) and is delivered to the
+ * engine afterwards. Schedules, before-save paths and Task states inside a Parallel, Map or
+ * InvokeFlow branch see {@code false} and must answer synchronously.
+ *
  * @since 1.0.0
  */
 public record ActionContext(
@@ -35,7 +41,8 @@ public record ActionContext(
     int triggerDepth,
     Map<String, Object> stateData,
     String stepName,
-    int attempt
+    int attempt,
+    boolean awaitable
 ) {
 
     /**
@@ -62,6 +69,7 @@ public record ActionContext(
         private Map<String, Object> stateData;
         private String stepName;
         private int attempt;
+        private boolean awaitable;
 
         public Builder tenantId(String tenantId) { this.tenantId = tenantId; return this; }
         public Builder collectionId(String collectionId) { this.collectionId = collectionId; return this; }
@@ -79,13 +87,14 @@ public record ActionContext(
         public Builder stateData(Map<String, Object> stateData) { this.stateData = stateData; return this; }
         public Builder stepName(String stepName) { this.stepName = stepName; return this; }
         public Builder attempt(int attempt) { this.attempt = attempt; return this; }
+        public Builder awaitable(boolean awaitable) { this.awaitable = awaitable; return this; }
 
         public ActionContext build() {
             return new ActionContext(
                 tenantId, collectionId, collectionName, recordId,
                 data, previousData, changedFields, userId,
                 actionConfigJson, workflowRuleId, executionLogId, resolvedData,
-                triggerDepth, stateData, stepName, attempt
+                triggerDepth, stateData, stepName, attempt, awaitable
             );
         }
     }

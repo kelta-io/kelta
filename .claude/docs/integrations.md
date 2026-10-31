@@ -361,9 +361,24 @@ scope, so `resumeExecution` resolves the slug itself (`FlowStore.findTenantSlug`
 binds `runWithTenant(id, slug, …)` — an ID-only scope makes `PhysicalTableStorageAdapter`
 fall back to `public`, where tenant collections don't exist (#1577). A missing tenant
 fails the execution with `Cannot resume: tenant … no longer exists`. Event-based waits resume through
-`claimPendingResumeByEvent` when an event source calls it. Waits inside Parallel/Map
+`claimPendingResumeByEvent(tenantId, event, claimedBy)` when an event source calls it — tenant-scoped,
+because `flow_pending_resume` has no RLS. Waits inside Parallel/Map
 branch sub-definitions are **not** resumable (their state ids aren't in the top-level
 definition) — the resume fails the execution with a clear error instead of hanging.
+
+**Awaited Tasks** (external modules part 9h) reuse the same machinery. A handler may return
+`ActionResult.awaiting(resumeKey, expiresAt)` when its `ActionContext.awaitable()` is true (a
+top-level Task; false in Parallel/Map branches and invoked sub-flows, where an awaiting answer
+fails `States.AwaitNotSupported`). The engine parks WAITING **on the Task** with a pending row
+carrying both `resume_event = resumeKey` and `resume_at = expiresAt`. Whoever finishes the work
+records the outcome and calls `FlowEngine.resumeAwaitedTask(tenantId, resumeKey)`, which claims the
+row by event; at `expiresAt` the poller claims it instead. Either way `resumeExecution` re-runs the
+Task with the outcome the `AwaitedTaskOutcomes` bean settles for the key (the worker's is
+`ModuleAsyncTaskStore`): success applies `ResultPath`/`OutputPath`; a failure (the module's
+`ActionFailed`, or `ModuleTimeoutException` at expiry) takes the Task's `Retry` — a new handler
+call, the attempt count continuing — and then its `Catch`. A key no source knows resumes as
+`States.Timeout` with no retry. The park writes its row, then checks `delivered()`; the completer
+records, then claims: an outcome that arrives before the park still resumes exactly once.
 
 ### Manual / MCP / HTTP invocation — the double-wrap rule
 
@@ -823,6 +838,16 @@ What a module receives and must handle:
   its `Kelta-Access-Token`, per request: `{name, type, secrets, metadata}`, `no-store`, audited as
   the module (`MODULE:<moduleId>[:<purpose>]`). Not while the install is `INSTALLING`, so not
   during `lifecycle installed` (`architecture.md` → External module credential read).
+- **Long-running actions answer `202`** (part 9h). An action declaring `maxDurationSeconds`
+  (1–604800, capped by `KELTA_MODULES_EXTERNAL_ASYNC_ACTION_MAX_DURATION_SECONDS`, default one
+  day) gets `task: {token, expiresAt}` in its request when the step can wait. Answer `202` and the
+  flow step parks `WAITING`; send the `ActionResponse` to `POST /api/modules/self/tasks/{token}`
+  with the principal token (`202`) and the step resumes with it. A `200` finishes the step at
+  once. Renew the 15-minute access token while working with
+  `POST /api/modules/self/tasks/{token}/heartbeat`. A task not completed by `expiresAt` fails the
+  step with `ModuleTimeoutException`. Only top-level Task steps wait: in a `Parallel`/`Map` branch,
+  an invoked sub-flow or a manifest schedule there is no `task`, and a `202` is
+  `ModuleUnavailableException` (`architecture.md` → External module task completion).
 
 ## OIDC federation providers (`oidc-providers`)
 
