@@ -52,7 +52,7 @@ jobs:
       - name: Checkout ArgoCD manifests (image-bump + rollback log)
         uses: actions/checkout@v7
         with:
-          repository: cklinker/homelab-argo
+          repository: RZWare/homelab-argo
           token: ${{ secrets.ARGOCD_REPO_TOKEN }}
           path: homelab-argo
           fetch-depth: 0

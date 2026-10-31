@@ -14,7 +14,7 @@ jobs:
       - name: Checkout homelab-argo
         uses: actions/checkout@v7
         with:
-          repository: cklinker/homelab-argo
+          repository: RZWare/homelab-argo
           token: ${{ secrets.ARGOCD_REPO_TOKEN }}
 
       - name: Set up Docker Buildx

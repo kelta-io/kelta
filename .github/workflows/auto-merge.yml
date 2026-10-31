@@ -2,7 +2,7 @@
 #
 # Two paths, one rule: a fleet PR merges only after rzware-reviewer[bot] approves it.
 #
-#   fleet   — PRs opened by rzware-developer[bot]. The worker Job (cklinker/rzware-ceo,
+#   fleet   — PRs opened by rzware-developer[bot]. The worker Job (RZWare/rzware-ceo,
 #             agents/worker/run.sh) opens the PR, has rzware-reviewer[bot] review it, fixes
 #             and pushes when changes are requested, and reviews again. Auto-merge is enabled
 #             here ONLY when the reviewer's review is `approved`, and disabled again if a later
