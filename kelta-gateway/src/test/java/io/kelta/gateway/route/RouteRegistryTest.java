@@ -433,7 +433,7 @@ class RouteRegistryTest {
         // signed-JAR upload, file serving, image transforms and the alert latency summary all
         // hang off these.
         for (String path : List.of("/api/modules/**", "/api/files/**", "/api/images/**",
-                "/api/alerts/**")) {
+                "/api/alerts/**", "/api/ai/**")) {
             registry.addRoute(createRoute("static-" + path, path));
             registry.addRoute(createRoute("collection-uuid-pretending-to-own-" + path, path));
 
@@ -442,6 +442,16 @@ class RouteRegistryTest {
             assertEquals("static-" + path, owner.get().getId(),
                     path + " was taken over by a dynamic collection route");
         }
+    }
+
+    @Test
+    void aTenantCollectionNamedAiDoesNotReplaceTheAiRouteForItsTenant() {
+        // Forwarding picks the platform-wide route for every caller, so a tenant route here
+        // would change only the authorization the tenant's own requests get.
+        registry.addRoute(new RouteDefinition("static-ai", "/api/ai/**", "http://ai:8080", "ai"));
+        registry.addRoute(tenantRoute("tenant-ai-collection", "/api/ai/**", "ai", "tenant-1"));
+
+        assertEquals("static-ai", registry.findByPath("/api/ai/config", "tenant-1").orElseThrow().getId());
     }
 
 private RouteDefinition createRoute(String id, String path) {

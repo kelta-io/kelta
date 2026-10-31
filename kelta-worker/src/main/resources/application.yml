@@ -171,6 +171,13 @@ kelta:
     cerbos:
       host: ${CERBOS_HOST:cerbos.emf.svc.cluster.local}
       grpc-port: ${CERBOS_GRPC_PORT:3593}
+      # Basic-auth credentials for the Cerbos Admin API, which the worker uses to push the
+      # base and per-tenant policies (CerbosPolicySyncService). The password has no built-in
+      # default: set KELTA_WORKER_CERBOS_ADMIN_PASSWORD to the Cerbos server's admin password
+      # before deploying. Blank = the worker starts, logs one ERROR and pushes no policies
+      # (authorization checks over gRPC keep working against what Cerbos already holds).
+      admin-username: ${KELTA_WORKER_CERBOS_ADMIN_USERNAME:cerbos}
+      admin-password: ${KELTA_WORKER_CERBOS_ADMIN_PASSWORD:}
       seed:
         # Re-push every tenant's policies on startup even if this image already seeded
         # (e.g. after restoring the Cerbos store from backup). Declared here, not env-only.
