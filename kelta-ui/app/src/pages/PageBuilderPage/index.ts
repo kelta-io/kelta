@@ -1,14 +1,7 @@
 /**
  * PageBuilderPage Module
  *
- * Exports the PageBuilderPage component and related types.
+ * Exports the PageBuilderPage component.
  */
 
 export { PageBuilderPage } from './PageBuilderPage'
-export type {
-  PageBuilderPageProps,
-  UIPage,
-  PageLayout,
-  PageComponent,
-  ComponentPosition,
-} from './PageBuilderPage'

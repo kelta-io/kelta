@@ -1,13 +1,7 @@
 /**
  * MigrationsPage Module
  *
- * Exports the MigrationsPage component and related types.
+ * Exports the MigrationsPage component.
  */
 
 export { MigrationsPage } from './MigrationsPage'
-export type {
-  MigrationsPageProps,
-  MigrationRun,
-  MigrationStepResult,
-  MigrationStatus,
-} from './MigrationsPage'

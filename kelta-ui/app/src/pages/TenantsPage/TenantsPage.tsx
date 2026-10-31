@@ -33,7 +33,7 @@ import { BootstrapTokenDialog } from './BootstrapTokenDialog'
 /**
  * Tenant interface matching the API response
  */
-export interface Tenant {
+interface Tenant {
   id: string
   slug: string
   name: string

@@ -64,7 +64,7 @@ export interface UIMenu {
 /**
  * UI Menu Item interface
  */
-export interface UIMenuItem {
+interface UIMenuItem {
   id: string
   label: string
   path?: string

@@ -1,8 +1,7 @@
 /**
  * CollectionDetailPage Module
  *
- * Exports the CollectionDetailPage component and related types.
+ * Exports the CollectionDetailPage component.
  */
 
 export { CollectionDetailPage } from './CollectionDetailPage'
-export type { CollectionDetailPageProps } from './CollectionDetailPage'

@@ -1,8 +1,7 @@
 /**
  * OIDCProvidersPage Module
  *
- * Exports the OIDCProvidersPage component and related types.
+ * Exports the OIDCProvidersPage component.
  */
 
 export { OIDCProvidersPage } from './OIDCProvidersPage'
-export type { OIDCProvidersPageProps, OIDCProvider } from './OIDCProvidersPage'

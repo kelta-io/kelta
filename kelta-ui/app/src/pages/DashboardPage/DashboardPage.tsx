@@ -35,7 +35,7 @@ export interface HealthStatus {
 /**
  * Metric data point for time-series data
  */
-export interface MetricDataPoint {
+interface MetricDataPoint {
   timestamp: string
   value: number
 }
@@ -43,7 +43,7 @@ export interface MetricDataPoint {
 /**
  * System metrics data
  */
-export interface SystemMetrics {
+interface SystemMetrics {
   requestRate: MetricDataPoint[]
   errorRate: MetricDataPoint[]
   latencyP50: MetricDataPoint[]

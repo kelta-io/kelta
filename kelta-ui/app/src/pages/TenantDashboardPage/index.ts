@@ -1,8 +1,7 @@
 /**
  * TenantDashboardPage Module
  *
- * Exports the TenantDashboardPage component and related types.
+ * Exports the TenantDashboardPage component.
  */
 
 export { TenantDashboardPage } from './TenantDashboardPage'
-export type { TenantDashboardPageProps } from './TenantDashboardPage'

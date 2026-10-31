@@ -1,8 +1,7 @@
 /**
  * CollectionsPage Module
  *
- * Exports the CollectionsPage component and related types.
+ * Exports the CollectionsPage component.
  */
 
 export { CollectionsPage } from './CollectionsPage'
-export type { CollectionsPageProps, Collection } from './CollectionsPage'
