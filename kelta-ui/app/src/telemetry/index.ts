@@ -1,5 +1,4 @@
-import { WebTracerProvider } from '@opentelemetry/sdk-trace-web'
-import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base'
+import { BatchSpanProcessor, TracerProvider } from '@opentelemetry/sdk-trace'
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 import { ZoneContextManager } from '@opentelemetry/context-zone'
 import { FetchInstrumentation } from '@opentelemetry/instrumentation-fetch'
@@ -8,7 +7,7 @@ import { resourceFromAttributes } from '@opentelemetry/resources'
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions'
 import { W3CTraceContextPropagator } from '@opentelemetry/core'
 import { registerInstrumentations } from '@opentelemetry/instrumentation'
-import { SpanStatusCode, trace, type Tracer } from '@opentelemetry/api'
+import { SpanStatusCode, context, propagation, trace, type Tracer } from '@opentelemetry/api'
 
 // Resource attribute keys that are not in the stable semantic-conventions export
 // but are well-known OpenTelemetry resource conventions.
@@ -75,19 +74,25 @@ export function initTelemetry(): void {
     url: otlpEndpoint,
   })
 
-  const provider = new WebTracerProvider({
+  const provider = new TracerProvider({
     resource,
-    spanProcessors: [new BatchSpanProcessor(exporter)],
+    spanProcessors: [new BatchSpanProcessor({ exporter })],
   })
+
+  // OpenTelemetry JS 3 merged sdk-trace-web into @opentelemetry/sdk-trace and
+  // dropped WebTracerProvider.register(), so the context manager, propagator and
+  // provider are installed on the global API here, as register() used to do.
+  const contextManager = new ZoneContextManager()
+  contextManager.enable()
+  context.setGlobalContextManager(contextManager)
 
   // Use W3C TraceContext only (traceparent/tracestate headers).
   // B3 propagation was removed because the b3 header isn't needed for
   // browser→gateway communication and causes CORS preflight failures.
   // Backend services use b3multi between themselves via the OTEL Java agent.
-  provider.register({
-    contextManager: new ZoneContextManager(),
-    propagator: new W3CTraceContextPropagator(),
-  })
+  propagation.setGlobalPropagator(new W3CTraceContextPropagator())
+
+  trace.setGlobalTracerProvider(provider)
 
   // Propagate trace context headers to both the UI origin and the gateway origin
   const corsUrls: RegExp[] = [
