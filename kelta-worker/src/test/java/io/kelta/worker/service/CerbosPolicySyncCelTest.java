@@ -19,10 +19,10 @@ class CerbosPolicySyncCelTest {
 
     @Test
     @DisplayName("visual $CURRENT_USER compiles to P.attr.userId")
-    void currentUserCompilesToUserIdAttr() {
-        assertThat(CerbosPolicySyncService.convertVisualToCel("createdBy", "equals", "$CURRENT_USER"))
+    void currentUserCompilesToUserIdAttr() throws Exception {
+        assertThat(CustomRuleCel.visualToCel("createdBy", "equals", "$CURRENT_USER"))
                 .isEqualTo("R.attr.createdBy == P.attr.userId");
-        assertThat(CerbosPolicySyncService.convertVisualToCel("status", "equals", "open"))
+        assertThat(CustomRuleCel.visualToCel("status", "equals", "open"))
                 .isEqualTo("R.attr.status == \"open\"");
     }
 

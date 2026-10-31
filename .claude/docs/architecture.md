@@ -417,6 +417,22 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
     pinned against a real PDP by `CerbosGeneratedPolicyIT` (harness) via the golden files in
     `kelta-worker/src/test/resources/cerbos/golden/` — change the generator, regenerate the
     goldens (the unit test prints the JSON on drift), and the IT re-checks the allow/deny matrix.
+  - **Custom rules** (`profile_custom_rules`, admin API `CustomRuleController`) compile to one
+    record-policy rule each on the profile's derived role, with the condition
+    `R.attr.collectionId == "<name>" && (<cel>)` — the parentheses keep a top-level `||` or
+    ternary inside the collection. Stored `allow`/`deny` (or `EFFECT_ALLOW`/`EFFECT_DENY`, any
+    case) map to the Cerbos effect; any other stored value compiles as a deny. **A matching deny
+    wins over every allow**: all of a tenant's record rules (CRUD matrix, VIEW_ALL/MODIFY_ALL,
+    custom rules) live in the one tenant-scoped policy, where Cerbos resolves allow + deny on an
+    action to deny; the unscoped ancestor has no rules. Conditions go through `CustomRuleCel`
+    both at save and at sync: visual values become escaped CEL string literals, `in` takes a list
+    or comma-separated text, numeric comparisons take a number, field names must be identifiers,
+    and raw CEL must parse (cel-java, already on the classpath through protovalidate) on its own
+    and inside parentheses. The API answers `400 VALIDATION_FAILED` with a `source.pointer` into
+    the body for anything else. At sync, a stored rule whose condition no longer compiles is left
+    out if it allows and applied to its whole collection if it denies; a rule for a profile the
+    tenant does not have is left out (its derived role would make Cerbos reject the policy). If the
+    rules cannot be loaded, the sync pushes nothing and Cerbos keeps the previous policies.
 - **Endpoints nested under a collection's own path** (`/api/{collection}/<literal>/...`) need no
   gateway static route: `RouteRegistry.findByPath` resolves the caller's collection route and the
   gateway runs that collection's Cerbos object check for the HTTP verb (POST→`create`,
