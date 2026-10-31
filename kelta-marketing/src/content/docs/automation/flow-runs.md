@@ -25,6 +25,14 @@ failure. Runs are durable: a worker restart does not lose a `RUNNING` or `WAITIN
 The console shows the same under Setup → Automation → Flows → *Runs*, with the state machine highlighted per
 step; Setup → Platform → Monitoring links each run to its trace.
 
+**Who can read runs.** Staff holding `MANAGE_WORKFLOWS` or `VIEW_SETUP` read every run in full: its state,
+input, error and steps, the runs of a flow, its versions and its schedule. Anyone else — every portal member
+— reads only the status (`flowId`, `status`, `startedAt`, `completedAt`) of a run they started, such as the
+one a page action launched for them, which is enough to wait for it to finish. Another user's run answers
+404, steps answer 404, and the per-flow lists answer 403. `record-executions` lists only the caller's own
+runs on that record. Return what a member should see through records the flow writes, not through the run's
+state.
+
 ## Step logging
 
 Each flow has a `stepLogging` level. The run row above is written at every level; the level decides which step

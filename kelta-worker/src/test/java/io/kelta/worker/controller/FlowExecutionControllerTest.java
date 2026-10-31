@@ -57,7 +57,7 @@ class FlowExecutionControllerTest {
         flowActorResolver = mock(FlowActorResolver.class);
         bootstrapRepository = mock(BootstrapRepository.class);
         controller = new FlowExecutionController(flowEngine, mock(FlowStore.class), initialStateBuilder,
-                flowRepository, flowActorResolver, new CerbosPermissionResolver(), bootstrapRepository);
+                flowRepository, flowActorResolver, new AdminPermissionGuard(new CerbosPermissionResolver(), bootstrapRepository));
 
         request = new MockHttpServletRequest("POST", "/api/flows/" + FLOW_ID + "/execute");
         request.addHeader("X-User-Profile-Id", PROFILE_ID);
@@ -240,7 +240,7 @@ class FlowExecutionControllerTest {
     @DisplayName("a member's context comes from the request headers, not from body keys beside input")
     void memberContextComesFromHeaders() {
         controller = new FlowExecutionController(flowEngine, mock(FlowStore.class), new InitialStateBuilder(),
-                flowRepository, flowActorResolver, new CerbosPermissionResolver(), bootstrapRepository);
+                flowRepository, flowActorResolver, new AdminPermissionGuard(new CerbosPermissionResolver(), bootstrapRepository));
         givenFlow(true, "AUTOLAUNCHED", "{\"memberLaunchable\":true}");
 
         Map<String, Object> body = Map.of(
