@@ -40,7 +40,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hook-form": "^7.0.0",
-    "react-router-dom": "^7.18.4"
+    "react-router-dom": "^7.18.5"
   },
   "peerDependenciesMeta": {
     "maplibre-gl": {
@@ -59,7 +59,7 @@
   "devDependencies": {
     "@livekit/components-react": "^2.9.24",
     "@livekit/components-styles": "^1.2.0",
-    "@tanstack/react-query": "^5.104.5",
+    "@tanstack/react-query": "^5.105.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "livekit-client": "^2.23.0",
@@ -69,7 +69,7 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-hook-form": "^7.91.0",
-    "react-router-dom": "^7.18.4"
+    "react-router-dom": "^7.18.5"
   },
   "keywords": [
     "kelta",
