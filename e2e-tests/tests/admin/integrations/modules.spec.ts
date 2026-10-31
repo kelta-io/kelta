@@ -9,7 +9,8 @@ test.describe("Modules", () => {
     await expect(page).toHaveURL(/\/modules/);
     const found = await waitForAnyVisible([
       page.getByTestId("modules-page"),
-      page.getByRole("heading", { name: /modules/i }),
+      // Exact: /modules/i also matches the empty state's "No modules installed" heading.
+      page.getByRole("heading", { name: "Modules", exact: true }),
       page.getByTestId("error-message"),
     ]);
     expect(found).toBe(true);
@@ -31,7 +32,9 @@ test.describe("Modules", () => {
     await page.waitForLoadState("load");
 
     const found = await waitForAnyVisible([
-      page.getByRole("button", { name: /install module/i }),
+      // The header button: an empty tenant also shows an "Install Module" button in its empty
+      // state, and a role locator matching both is a strict-mode error.
+      page.getByTestId("install-button"),
       page.getByTestId("error-message"),
       page.getByTestId("modules-page"),
     ]);
@@ -144,10 +147,7 @@ test.describe("Modules", () => {
 
     await page.goto("/default/modules");
     await page.waitForLoadState("load");
-    await page
-      .getByRole("button", { name: /install module/i })
-      .first()
-      .click();
+    await page.getByTestId("install-button").click();
 
     await page.locator("#module-base-url").fill(baseUrl);
     await page.getByTestId("module-review-plan").click();

@@ -323,7 +323,11 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
             Install and manage runtime modules that extend flow capabilities
           </p>
         </div>
-        <Button onClick={() => setIsInstallOpen(true)} className="gap-2">
+        <Button
+          onClick={() => setIsInstallOpen(true)}
+          className="gap-2"
+          data-testid="install-button"
+        >
           <Plus size={16} />
           Install Module
         </Button>
