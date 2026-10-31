@@ -9,27 +9,21 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// Capture the resource passed to WebTracerProvider so we can assert on it.
+// Capture the resource passed to TracerProvider so we can assert on it.
 const capturedResources: Array<Record<string, unknown>> = []
 
-vi.mock('@opentelemetry/sdk-trace-web', () => {
+vi.mock('@opentelemetry/sdk-trace', () => {
   return {
-    WebTracerProvider: class {
+    TracerProvider: class {
       constructor(opts: { resource?: { attributes?: Record<string, unknown> } }) {
         if (opts?.resource?.attributes) {
           capturedResources.push(opts.resource.attributes)
         }
       }
-      register() {
-        /* no-op */
-      }
     },
+    BatchSpanProcessor: class {},
   }
 })
-
-vi.mock('@opentelemetry/sdk-trace-base', () => ({
-  BatchSpanProcessor: class {},
-}))
 
 vi.mock('@opentelemetry/exporter-trace-otlp-http', () => ({
   OTLPTraceExporter: class {
@@ -40,8 +34,15 @@ vi.mock('@opentelemetry/exporter-trace-otlp-http', () => ({
   },
 }))
 
+const enableContextManagerMock = vi.fn()
+
 vi.mock('@opentelemetry/context-zone', () => ({
-  ZoneContextManager: class {},
+  ZoneContextManager: class {
+    enable() {
+      enableContextManagerMock()
+      return this
+    }
+  },
 }))
 
 vi.mock('@opentelemetry/instrumentation-fetch', () => ({
@@ -57,7 +58,9 @@ vi.mock('@opentelemetry/instrumentation', () => ({
 }))
 
 vi.mock('@opentelemetry/core', () => ({
-  W3CTraceContextPropagator: class {},
+  W3CTraceContextPropagator: class {
+    readonly kind = 'w3c-trace-context'
+  },
 }))
 
 vi.mock('@opentelemetry/resources', () => ({
@@ -68,6 +71,9 @@ const startSpanMock = vi.fn()
 const recordExceptionMock = vi.fn()
 const setStatusMock = vi.fn()
 const endMock = vi.fn()
+const setGlobalContextManagerMock = vi.fn()
+const setGlobalPropagatorMock = vi.fn()
+const setGlobalTracerProviderMock = vi.fn()
 
 vi.mock('@opentelemetry/api', () => {
   const span = {
@@ -78,10 +84,13 @@ vi.mock('@opentelemetry/api', () => {
   startSpanMock.mockReturnValue(span)
   return {
     SpanStatusCode: { ERROR: 2, OK: 1, UNSET: 0 },
+    context: { setGlobalContextManager: setGlobalContextManagerMock },
+    propagation: { setGlobalPropagator: setGlobalPropagatorMock },
     trace: {
       getTracer: () => ({
         startSpan: startSpanMock,
       }),
+      setGlobalTracerProvider: setGlobalTracerProviderMock,
     },
   }
 })
@@ -93,6 +102,10 @@ describe('telemetry', () => {
     recordExceptionMock.mockClear()
     setStatusMock.mockClear()
     endMock.mockClear()
+    enableContextManagerMock.mockClear()
+    setGlobalContextManagerMock.mockClear()
+    setGlobalPropagatorMock.mockClear()
+    setGlobalTracerProviderMock.mockClear()
   })
 
   afterEach(() => {
@@ -109,6 +122,18 @@ describe('telemetry', () => {
     expect(attrs['service.namespace']).toBe('emf')
     expect(attrs['deployment.environment']).toBe('production')
     expect(attrs['session.id']).toBeTruthy()
+  })
+
+  it('registers the zone context manager, W3C propagator and provider globally', async () => {
+    const { initTelemetry } = await import('./index')
+    initTelemetry()
+
+    expect(enableContextManagerMock).toHaveBeenCalledTimes(1)
+    expect(setGlobalContextManagerMock).toHaveBeenCalledTimes(1)
+    expect(setGlobalPropagatorMock).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'w3c-trace-context' })
+    )
+    expect(setGlobalTracerProviderMock).toHaveBeenCalledTimes(1)
   })
 
   it('exposes a tracer after initialization', async () => {
