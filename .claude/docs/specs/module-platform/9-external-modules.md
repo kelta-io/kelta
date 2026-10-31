@@ -712,3 +712,7 @@ beans.
    platform: clean and incremental build time, image size, RSS, p50/p99 of
    `entitlements.resolve`, CI failures and agent iterations per PR, bugs after deploy, each
    compared with the Java module. Record the numbers in the 9f PR.
+6. **Licence — resolved (2026-10-31).** The protocol contract (`docs/module-protocol/openapi.yaml`)
+   and the module SDKs (`kelta-modules/sdk-rust`, `@kelta/sdk`, `@kelta/plugin-sdk`) are **MIT**, so
+   a module under any licence, closed source included, can implement the protocol. The platform and
+   first-party modules (`kelta-modules/billing`) stay **AGPL-3.0-only**.
