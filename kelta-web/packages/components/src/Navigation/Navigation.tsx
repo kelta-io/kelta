@@ -4,6 +4,54 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import type { NavigationProps, MenuItem } from './types';
 
 /**
+ * Filter menu items to those the user can access (recursive). A parent whose
+ * children were all filtered out is dropped unless it is itself actionable.
+ */
+function filterMenuItems(
+  menuItems: MenuItem[],
+  hasAccess: (item: MenuItem) => boolean
+): MenuItem[] {
+  return menuItems
+    .filter(hasAccess)
+    .map((item) => ({
+      ...item,
+      children: item.children ? filterMenuItems(item.children, hasAccess) : undefined,
+    }))
+    .filter((item) => {
+      // Remove items that have children but all children were filtered out
+      if (item.children && item.children.length === 0) {
+        return item.path !== undefined || item.onClick !== undefined;
+      }
+      return true;
+    });
+}
+
+/** Whether any descendant of the item is active (recursive). */
+function menuItemHasActiveChild(item: MenuItem, isActive: (path?: string) => boolean): boolean {
+  if (!item.children) return false;
+  return item.children.some(
+    (child) => isActive(child.path) || menuItemHasActiveChild(child, isActive)
+  );
+}
+
+/** Flat list of the items currently visible given the expanded set (recursive). */
+function flattenVisibleItems(
+  menuItems: MenuItem[],
+  expandedItems: Set<string>,
+  parentExpanded = true
+): MenuItem[] {
+  if (!parentExpanded) return [];
+
+  return menuItems.flatMap((item) => {
+    const result = [item];
+    if (item.children && expandedItems.has(item.id)) {
+      result.push(...flattenVisibleItems(item.children, expandedItems, true));
+    }
+    return result;
+  });
+}
+
+/**
  * Navigation component for menu rendering with React Router integration.
  *
  * Features:
@@ -60,21 +108,7 @@ export function Navigation({
 
   // Filter items based on user roles (recursive)
   const filterItems = useCallback(
-    (menuItems: MenuItem[]): MenuItem[] => {
-      return menuItems
-        .filter(hasAccess)
-        .map((item) => ({
-          ...item,
-          children: item.children ? filterItems(item.children) : undefined,
-        }))
-        .filter((item) => {
-          // Remove items that have children but all children were filtered out
-          if (item.children && item.children.length === 0) {
-            return item.path !== undefined || item.onClick !== undefined;
-          }
-          return true;
-        });
-    },
+    (menuItems: MenuItem[]): MenuItem[] => filterMenuItems(menuItems, hasAccess),
     [hasAccess]
   );
 
@@ -92,10 +126,7 @@ export function Navigation({
 
   // Check if any child is active (for parent highlighting)
   const hasActiveChild = useCallback(
-    (item: MenuItem): boolean => {
-      if (!item.children) return false;
-      return item.children.some((child) => isActive(child.path) || hasActiveChild(child));
-    },
+    (item: MenuItem): boolean => menuItemHasActiveChild(item, isActive),
     [isActive]
   );
 
@@ -136,17 +167,8 @@ export function Navigation({
 
   // Get flat list of visible items for keyboard navigation
   const getVisibleItems = useCallback(
-    (menuItems: MenuItem[], parentExpanded = true): MenuItem[] => {
-      if (!parentExpanded) return [];
-
-      return menuItems.flatMap((item) => {
-        const result = [item];
-        if (item.children && expandedItems.has(item.id)) {
-          result.push(...getVisibleItems(item.children, true));
-        }
-        return result;
-      });
-    },
+    (menuItems: MenuItem[], parentExpanded = true): MenuItem[] =>
+      flattenVisibleItems(menuItems, expandedItems, parentExpanded),
     [expandedItems]
   );
 

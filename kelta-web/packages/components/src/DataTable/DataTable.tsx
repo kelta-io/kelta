@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, KeyboardEvent } from 'react';
+import { useState, useCallback, useRef, KeyboardEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { SortCriteria, FilterExpression } from '@kelta/sdk';
 import { useKeltaClient } from '../context/KeltaContext';
@@ -55,15 +55,18 @@ export function DataTable<T = unknown>({
   const [focusedRowIndex, setFocusedRowIndex] = useState<number>(-1);
   const tableRef = useRef<HTMLTableElement>(null);
 
-  // Use external filters if provided, otherwise use internal state
-  const filters = externalFilters ?? internalFilters;
-
-  // Sync internal filters with external filters when they change
-  useEffect(() => {
+  // Sync internal filters with external filters when they change. Adjusting state
+  // during render (instead of in an effect) avoids a second, cascading render.
+  const [prevExternalFilters, setPrevExternalFilters] = useState(externalFilters);
+  if (externalFilters !== prevExternalFilters) {
+    setPrevExternalFilters(externalFilters);
     if (externalFilters !== undefined) {
       setInternalFilters(externalFilters);
     }
-  }, [externalFilters]);
+  }
+
+  // Use external filters if provided, otherwise use internal state
+  const filters = externalFilters ?? internalFilters;
 
   // Fetch data using TanStack Query
   const { data, isLoading, error, refetch } = useQuery({
