@@ -1474,6 +1474,30 @@ class RouteAuthorizationFilterTest {
             verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
         }
 
+        /**
+         * Flow execution, version and schedule reads are forwarded on {@code API_ACCESS}: a portal
+         * member's page action polls its own run here. The worker controllers authorize each one
+         * (the caller's own execution, or {@code MANAGE_WORKFLOWS}/{@code VIEW_SETUP}) — see
+         * {@code FlowReadRouteMappingTest} in kelta-worker. Checking reads here would refuse that
+         * member's poll, and could not tell an execution they started from someone else's.
+         */
+        @ParameterizedTest(name = "GET {0}")
+        @ValueSource(strings = {
+                "/api/flows/executions/e-1",
+                "/api/flows/executions/e-1/steps",
+                "/api/flows/record-executions",
+                "/api/flows/f-1/flow-executions",
+                "/api/flows/f-1/versions",
+                "/api/flows/f-1/versions/1",
+                "/api/flows/f-1/schedule",
+                "/api/flows/f-1/runs"
+        })
+        @DisplayName("flow execution and setup reads reach the worker, which authorizes them")
+        void flowReadsLeftToTheWorker(String path) {
+            assertForwarded(run(HttpMethod.GET, path));
+            verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
+        }
+
         @ParameterizedTest(name = "{0} {1}")
         @CsvSource({
                 "POST, /api/flows/f-1/publish, flows",

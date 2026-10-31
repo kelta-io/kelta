@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -16,11 +17,14 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @DisplayName("FlowScheduleStatusController")
 @WithTenant("t1")
 class FlowScheduleStatusControllerTest {
+
+    private static final MockHttpServletRequest REQUEST = AdminPermissionGuardFixture.request();
 
     private ScheduledJobRepository repository;
     private FlowScheduleStatusController controller;
@@ -28,7 +32,39 @@ class FlowScheduleStatusControllerTest {
     @BeforeEach
     void setUp() {
         repository = mock(ScheduledJobRepository.class);
-        controller = new FlowScheduleStatusController(repository);
+        controller = new FlowScheduleStatusController(repository,
+                AdminPermissionGuardFixture.granting("MANAGE_WORKFLOWS"));
+    }
+
+    @Nested
+    @DisplayName("authorization")
+    class Authorization {
+
+        @Test
+        @DisplayName("a caller holding only API_ACCESS is refused both reads, before any lookup")
+        void apiAccessOnlyIsForbidden() {
+            FlowScheduleStatusController portal = new FlowScheduleStatusController(repository,
+                    AdminPermissionGuardFixture.apiAccessOnly());
+
+            AdminPermissionGuardFixture.assertForbidden(() -> portal.getFlowSchedule("flow-1", REQUEST),
+                    "MANAGE_WORKFLOWS or VIEW_SETUP");
+            AdminPermissionGuardFixture.assertForbidden(() -> portal.getFlowRuns("flow-1", 20, REQUEST),
+                    "MANAGE_WORKFLOWS or VIEW_SETUP");
+            verifyNoInteractions(repository);
+        }
+
+        @Test
+        @DisplayName("VIEW_SETUP alone admits both reads")
+        void viewSetupAdmits() {
+            FlowScheduleStatusController viewer = new FlowScheduleStatusController(repository,
+                    AdminPermissionGuardFixture.granting("VIEW_SETUP"));
+            when(repository.findFlowType("flow-1", "t1")).thenReturn(Optional.of("AUTOLAUNCHED"));
+            when(repository.findScheduleByFlowId("flow-1", "t1")).thenReturn(Optional.empty());
+            when(repository.findRecentRunsForFlow("flow-1", "t1", 20)).thenReturn(List.of());
+
+            assertThat(viewer.getFlowSchedule("flow-1", REQUEST).getStatusCode().value()).isEqualTo(200);
+            assertThat(viewer.getFlowRuns("flow-1", 20, REQUEST).getStatusCode().value()).isEqualTo(200);
+        }
     }
 
     @Nested
@@ -55,7 +91,7 @@ class FlowScheduleStatusControllerTest {
             when(repository.findFlowType("flow-1", "t1")).thenReturn(Optional.of("SCHEDULED"));
             when(repository.findScheduleByFlowId("flow-1", "t1")).thenReturn(Optional.of(row));
 
-            var response = controller.getFlowSchedule("flow-1");
+            var response = controller.getFlowSchedule("flow-1", REQUEST);
             assertThat(response.getStatusCode().value()).isEqualTo(200);
 
             Map<String, Object> body = response.getBody();
@@ -86,7 +122,7 @@ class FlowScheduleStatusControllerTest {
             when(repository.findFlowType("flow-1", "t1")).thenReturn(Optional.of("SCHEDULED"));
             when(repository.findScheduleByFlowId("flow-1", "t1")).thenReturn(Optional.of(row));
 
-            var response = controller.getFlowSchedule("flow-1");
+            var response = controller.getFlowSchedule("flow-1", REQUEST);
             assertThat(response.getStatusCode().value()).isEqualTo(200);
             assertThat(response.getBody()).containsEntry("scheduleStatus", "PAUSED");
             assertThat(response.getBody()).containsEntry("active", false);
@@ -98,7 +134,7 @@ class FlowScheduleStatusControllerTest {
             when(repository.findFlowType("flow-1", "t1")).thenReturn(Optional.of("SCHEDULED"));
             when(repository.findScheduleByFlowId("flow-1", "t1")).thenReturn(Optional.empty());
 
-            var response = controller.getFlowSchedule("flow-1");
+            var response = controller.getFlowSchedule("flow-1", REQUEST);
             assertThat(response.getStatusCode().value()).isEqualTo(200);
 
             Map<String, Object> body = response.getBody();
@@ -124,7 +160,7 @@ class FlowScheduleStatusControllerTest {
             when(repository.findFlowType("flow-1", "t1")).thenReturn(Optional.of("SCHEDULED"));
             when(repository.findScheduleByFlowId("flow-1", "t1")).thenReturn(Optional.of(row));
 
-            var response = controller.getFlowSchedule("flow-1");
+            var response = controller.getFlowSchedule("flow-1", REQUEST);
             assertThat(response.getStatusCode().value()).isEqualTo(200);
 
             Map<String, Object> body = response.getBody();
@@ -138,7 +174,7 @@ class FlowScheduleStatusControllerTest {
             when(repository.findFlowType("flow-1", "t1")).thenReturn(Optional.of("AUTOLAUNCHED"));
             when(repository.findScheduleByFlowId("flow-1", "t1")).thenReturn(Optional.empty());
 
-            var response = controller.getFlowSchedule("flow-1");
+            var response = controller.getFlowSchedule("flow-1", REQUEST);
             assertThat(response.getStatusCode().value()).isEqualTo(200);
 
             Map<String, Object> body = response.getBody();
@@ -152,7 +188,7 @@ class FlowScheduleStatusControllerTest {
         void returns404WhenFlowMissing() {
             when(repository.findFlowType("flow-other", "t1")).thenReturn(Optional.empty());
 
-            var response = controller.getFlowSchedule("flow-other");
+            var response = controller.getFlowSchedule("flow-other", REQUEST);
             assertThat(response.getStatusCode().value()).isEqualTo(404);
         }
 
@@ -160,7 +196,7 @@ class FlowScheduleStatusControllerTest {
         @DisplayName("Returns 400 when no tenant context")
         @WithTenant(none = true)
         void returns400WithoutTenant() {
-            var response = controller.getFlowSchedule("flow-1");
+            var response = controller.getFlowSchedule("flow-1", REQUEST);
             assertThat(response.getStatusCode().value()).isEqualTo(400);
         }
     }
@@ -196,7 +232,7 @@ class FlowScheduleStatusControllerTest {
             when(repository.findFlowType("flow-1", "t1")).thenReturn(Optional.of("SCHEDULED"));
             when(repository.findRecentRunsForFlow("flow-1", "t1", 20)).thenReturn(List.of(r1, r2));
 
-            var response = controller.getFlowRuns("flow-1", 20);
+            var response = controller.getFlowRuns("flow-1", 20, REQUEST);
             assertThat(response.getStatusCode().value()).isEqualTo(200);
 
             Map<String, Object> body = response.getBody();
@@ -222,7 +258,7 @@ class FlowScheduleStatusControllerTest {
             when(repository.findFlowType("flow-1", "t1")).thenReturn(Optional.of("SCHEDULED"));
             when(repository.findRecentRunsForFlow("flow-1", "t1", 20)).thenReturn(List.of());
 
-            var response = controller.getFlowRuns("flow-1", 20);
+            var response = controller.getFlowRuns("flow-1", 20, REQUEST);
             assertThat(response.getStatusCode().value()).isEqualTo(200);
             assertThat(response.getBody()).containsEntry("count", 0);
 
@@ -235,7 +271,7 @@ class FlowScheduleStatusControllerTest {
         @DisplayName("Returns 404 when flow does not exist for tenant")
         void returns404WhenFlowMissing() {
             when(repository.findFlowType("flow-other", "t1")).thenReturn(Optional.empty());
-            var response = controller.getFlowRuns("flow-other", 20);
+            var response = controller.getFlowRuns("flow-other", 20, REQUEST);
             assertThat(response.getStatusCode().value()).isEqualTo(404);
         }
 
@@ -243,7 +279,7 @@ class FlowScheduleStatusControllerTest {
         @DisplayName("Returns 400 when no tenant context")
         @WithTenant(none = true)
         void returns400WithoutTenant() {
-            var response = controller.getFlowRuns("flow-1", 20);
+            var response = controller.getFlowRuns("flow-1", 20, REQUEST);
             assertThat(response.getStatusCode().value()).isEqualTo(400);
         }
     }

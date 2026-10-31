@@ -1,8 +1,7 @@
 package io.kelta.worker.controller;
 
 import io.kelta.jsonapi.JsonApiResponseBuilder;
-import io.kelta.worker.repository.BootstrapRepository;
-import io.kelta.worker.service.CerbosPermissionResolver;
+import io.kelta.runtime.context.CallerContext;
 import io.kelta.worker.service.FlowActorResolver;
 import io.kelta.runtime.flow.*;
 import io.kelta.worker.repository.FlowRepository;
@@ -22,6 +21,14 @@ import java.util.*;
  * <p>
  * Provides endpoints to execute flows, cancel executions, view execution
  * details, and retrieve step-level logs. Returns JSON:API format.
+ * <p>
+ * The gateway checks only the writes under {@code /api/flows/**}; every read here leaves it with
+ * just {@code API_ACCESS} (a portal member's page action polls its own run), and the worker's
+ * record advice does not filter these bodies. So each read authorizes itself: a caller holding
+ * {@code MANAGE_WORKFLOWS} or {@code VIEW_SETUP} reads every execution and version; anyone else
+ * reads only an execution they started ({@code started_by}), and a different one is a 404 as if
+ * it did not exist. The per-flow execution list and the versions need one of the two
+ * permissions.
  *
  * @since 1.0.0
  */
@@ -39,6 +46,9 @@ public class FlowExecutionController {
      */
     static final String MANAGE_WORKFLOWS = "MANAGE_WORKFLOWS";
 
+    /** Read-only access to setup; with {@link #MANAGE_WORKFLOWS}, reads every execution and version. */
+    static final String VIEW_SETUP = "VIEW_SETUP";
+
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final FlowEngine flowEngine;
@@ -46,23 +56,20 @@ public class FlowExecutionController {
     private final FlowStore flowStore;
     private final InitialStateBuilder initialStateBuilder;
     private final FlowRepository flowRepository;
-    private final CerbosPermissionResolver permissionResolver;
-    private final BootstrapRepository bootstrapRepository;
+    private final AdminPermissionGuard permissionGuard;
 
     public FlowExecutionController(FlowEngine flowEngine,
                                     FlowStore flowStore,
                                     InitialStateBuilder initialStateBuilder,
                                     FlowRepository flowRepository,
                                     FlowActorResolver flowActorResolver,
-                                    CerbosPermissionResolver permissionResolver,
-                                    BootstrapRepository bootstrapRepository) {
+                                    AdminPermissionGuard permissionGuard) {
         this.flowEngine = flowEngine;
         this.flowActorResolver = flowActorResolver;
         this.flowStore = flowStore;
         this.initialStateBuilder = initialStateBuilder;
         this.flowRepository = flowRepository;
-        this.permissionResolver = permissionResolver;
-        this.bootstrapRepository = bootstrapRepository;
+        this.permissionGuard = permissionGuard;
     }
 
     /**
@@ -99,7 +106,7 @@ public class FlowExecutionController {
         }
 
         boolean isTest = body != null && Boolean.TRUE.equals(body.get("test"));
-        boolean manager = holdsManageWorkflows(request);
+        boolean manager = permissionGuard.holdsAny(request, MANAGE_WORKFLOWS);
         if (!Boolean.TRUE.equals(flow.get("active")) && !(isTest && manager)) {
             log.warn("Execute rejected for inactive flow: flowId={}", flowId);
             return ResponseEntity.status(HttpStatus.CONFLICT).body(
@@ -203,15 +210,17 @@ public class FlowExecutionController {
     }
 
     /**
-     * Gets execution details including state data.
+     * Gets execution details including state data — for a caller without {@link #MANAGE_WORKFLOWS}
+     * or {@link #VIEW_SETUP}, only an execution they started.
      */
     @GetMapping("/executions/{executionId}")
     public ResponseEntity<Map<String, Object>> getExecution(
-            @PathVariable String executionId) {
+            @PathVariable String executionId,
+            HttpServletRequest request) {
 
         log.debug("Get execution request: executionId={}", executionId);
 
-        Optional<FlowExecutionData> execution = flowStore.loadExecution(executionId);
+        Optional<FlowExecutionData> execution = loadReadableExecution(executionId, request);
         if (execution.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
@@ -222,15 +231,17 @@ public class FlowExecutionController {
     }
 
     /**
-     * Gets step-level execution logs for an execution.
+     * Gets step-level execution logs for an execution — for a caller without
+     * {@link #MANAGE_WORKFLOWS} or {@link #VIEW_SETUP}, only an execution they started.
      */
     @GetMapping("/executions/{executionId}/steps")
     public ResponseEntity<Map<String, Object>> getExecutionSteps(
-            @PathVariable String executionId) {
+            @PathVariable String executionId,
+            HttpServletRequest request) {
 
         log.debug("Get execution steps request: executionId={}", executionId);
 
-        Optional<FlowExecutionData> execution = flowStore.loadExecution(executionId);
+        Optional<FlowExecutionData> execution = loadReadableExecution(executionId, request);
         if (execution.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
@@ -333,15 +344,24 @@ public class FlowExecutionController {
 
     /**
      * Lists executions triggered by a specific record — consumed by the
-     * record activity timeline. Newest first.
+     * record activity timeline. Newest first. A caller without {@link #MANAGE_WORKFLOWS} or
+     * {@link #VIEW_SETUP} sees only the executions they started.
      */
     @GetMapping("/record-executions")
     public ResponseEntity<Map<String, Object>> listExecutionsByRecord(
             @RequestParam String recordId,
-            @RequestParam(defaultValue = "20") int limit) {
+            @RequestParam(defaultValue = "20") int limit,
+            HttpServletRequest request) {
 
         int effectiveLimit = Math.min(Math.max(limit, 1), 100);
-        List<Map<String, Object>> rows = flowRepository.findExecutionsByTriggerRecord(recordId, effectiveLimit);
+        List<Map<String, Object>> rows;
+        if (readsAllExecutions(request)) {
+            rows = flowRepository.findExecutionsByTriggerRecord(recordId, effectiveLimit);
+        } else {
+            Optional<String> callerId = CallerContext.current().map(CallerContext::userId);
+            rows = callerId.isEmpty() ? List.of()
+                    : flowRepository.findExecutionsByTriggerRecordStartedBy(recordId, callerId.get(), effectiveLimit);
+        }
 
         List<Map<String, Object>> records = new ArrayList<>();
         for (Map<String, Object> row : rows) {
@@ -361,14 +381,16 @@ public class FlowExecutionController {
     }
 
     /**
-     * Lists executions for a specific flow.
+     * Lists executions for a specific flow. Needs {@link #MANAGE_WORKFLOWS} or {@link #VIEW_SETUP}.
      */
     @GetMapping("/{flowId}/flow-executions")
     public ResponseEntity<Map<String, Object>> listExecutions(
             @PathVariable String flowId,
             @RequestParam(defaultValue = "50") int limit,
-            @RequestParam(defaultValue = "0") int offset) {
+            @RequestParam(defaultValue = "0") int offset,
+            HttpServletRequest request) {
 
+        permissionGuard.requireAny(request, MANAGE_WORKFLOWS, VIEW_SETUP);
         log.debug("List executions request: flowId={}, limit={}, offset={}", flowId, limit, offset);
 
         List<FlowExecutionData> executions = flowStore.findExecutionsByFlow(flowId, limit, offset);
@@ -438,10 +460,12 @@ public class FlowExecutionController {
     }
 
     /**
-     * Lists all published versions for a flow.
+     * Lists all published versions for a flow. Needs {@link #MANAGE_WORKFLOWS} or {@link #VIEW_SETUP}.
      */
     @GetMapping("/{flowId}/versions")
-    public ResponseEntity<Map<String, Object>> listVersions(@PathVariable String flowId) {
+    public ResponseEntity<Map<String, Object>> listVersions(@PathVariable String flowId,
+                                                            HttpServletRequest request) {
+        permissionGuard.requireAny(request, MANAGE_WORKFLOWS, VIEW_SETUP);
         log.debug("List flow versions request: flowId={}", flowId);
 
         List<Map<String, Object>> versions = flowRepository.findFlowVersions(flowId);
@@ -450,13 +474,15 @@ public class FlowExecutionController {
     }
 
     /**
-     * Gets a specific version's definition.
+     * Gets a specific version's definition. Needs {@link #MANAGE_WORKFLOWS} or {@link #VIEW_SETUP}.
      */
     @GetMapping("/{flowId}/versions/{versionNumber}")
     public ResponseEntity<Map<String, Object>> getVersion(
             @PathVariable String flowId,
-            @PathVariable int versionNumber) {
+            @PathVariable int versionNumber,
+            HttpServletRequest request) {
 
+        permissionGuard.requireAny(request, MANAGE_WORKFLOWS, VIEW_SETUP);
         log.debug("Get flow version request: flowId={}, version={}", flowId, versionNumber);
 
         Optional<Map<String, Object>> versionOpt = flowRepository.findFlowVersion(flowId, versionNumber);
@@ -474,14 +500,27 @@ public class FlowExecutionController {
     // Helpers
     // -------------------------------------------------------------------------
 
-    private boolean holdsManageWorkflows(HttpServletRequest request) {
-        String profileId = permissionResolver.getProfileId(request);
-        if (profileId == null || profileId.isBlank()) {
-            return false;
+    private boolean readsAllExecutions(HttpServletRequest request) {
+        return permissionGuard.holdsAny(request, MANAGE_WORKFLOWS, VIEW_SETUP);
+    }
+
+    /**
+     * The execution, when the caller may read it: every one for {@link #readsAllExecutions}, else
+     * only one whose {@code started_by} is the caller. Empty otherwise, so another user's
+     * execution answers the same 404 as a missing one.
+     */
+    private Optional<FlowExecutionData> loadReadableExecution(String executionId, HttpServletRequest request) {
+        Optional<FlowExecutionData> execution = flowStore.loadExecution(executionId);
+        if (execution.isEmpty() || readsAllExecutions(request)) {
+            return execution;
         }
-        return bootstrapRepository.findProfileSystemPermissions(profileId).stream()
-                .anyMatch(p -> MANAGE_WORKFLOWS.equals(p.get("permission_name"))
-                        && Boolean.TRUE.equals(p.get("granted")));
+        Optional<String> callerId = CallerContext.current().map(CallerContext::userId);
+        String startedBy = execution.get().startedBy();
+        if (callerId.isPresent() && startedBy != null && startedBy.equalsIgnoreCase(callerId.get())) {
+            return execution;
+        }
+        log.debug("Execution read refused: executionId={} is not the caller's", executionId);
+        return Optional.empty();
     }
 
     /** A {@code SCREEN} flow, or one whose {@code trigger_config} sets {@code memberLaunchable: true}. */

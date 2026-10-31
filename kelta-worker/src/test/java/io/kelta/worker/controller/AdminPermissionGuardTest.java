@@ -9,6 +9,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import java.util.List;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -54,6 +55,36 @@ class AdminPermissionGuardTest {
 
         AdminPermissionGuardFixture.assertForbidden(() -> guard.require(requestFrom("p-1"), "MANAGE_TENANTS"),
                 "MANAGE_TENANTS");
+    }
+
+    @Test
+    @DisplayName("requireAny passes on any one of the permissions and names them all when refusing")
+    void requireAny() {
+        when(bootstrapRepository.findProfileSystemPermissions("p-1")).thenReturn(List.of(
+                Map.of("permission_name", "VIEW_SETUP", "granted", true)));
+        when(bootstrapRepository.findProfileSystemPermissions("p-2")).thenReturn(List.of(
+                Map.of("permission_name", "API_ACCESS", "granted", true),
+                Map.of("permission_name", "MANAGE_WORKFLOWS", "granted", false)));
+
+        assertThatCode(() -> guard.requireAny(requestFrom("p-1"), "MANAGE_WORKFLOWS", "VIEW_SETUP"))
+                .doesNotThrowAnyException();
+        AdminPermissionGuardFixture.assertForbidden(
+                () -> guard.requireAny(requestFrom("p-2"), "MANAGE_WORKFLOWS", "VIEW_SETUP"),
+                "MANAGE_WORKFLOWS or VIEW_SETUP");
+        AdminPermissionGuardFixture.assertForbiddenNoIdentity(
+                () -> guard.requireAny(new MockHttpServletRequest(), "MANAGE_WORKFLOWS", "VIEW_SETUP"));
+    }
+
+    @Test
+    @DisplayName("holdsAny is true only for a granted row, and false without a profile")
+    void holdsAny() {
+        when(bootstrapRepository.findProfileSystemPermissions("p-1")).thenReturn(List.of(
+                Map.of("permission_name", "MANAGE_WORKFLOWS", "granted", false),
+                Map.of("permission_name", "VIEW_SETUP", "granted", true)));
+
+        assertThat(guard.holdsAny(requestFrom("p-1"), "MANAGE_WORKFLOWS")).isFalse();
+        assertThat(guard.holdsAny(requestFrom("p-1"), "MANAGE_WORKFLOWS", "VIEW_SETUP")).isTrue();
+        assertThat(guard.holdsAny(new MockHttpServletRequest(), "VIEW_SETUP")).isFalse();
     }
 
     @Test

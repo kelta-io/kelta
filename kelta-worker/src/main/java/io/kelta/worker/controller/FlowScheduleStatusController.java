@@ -2,6 +2,7 @@ package io.kelta.worker.controller;
 
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.ScheduledJobRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +33,9 @@ import java.util.Optional;
  * {@code scheduleStatus} ({@code ACTIVE}/{@code PAUSED}/{@code UNSYNCED}/{@code
  * NONE}); {@link #getFlowRuns} returns recent {@code job_execution_log} rows.
  *
+ * <p>Both need {@code MANAGE_WORKFLOWS} or {@code VIEW_SETUP}: the gateway checks only writes under
+ * {@code /api/flows/**}, so a read here otherwise needs no more than {@code API_ACCESS}.
+ *
  * @since 1.0.0
  */
 @RestController
@@ -41,13 +45,18 @@ public class FlowScheduleStatusController {
     private static final Logger log = LoggerFactory.getLogger(FlowScheduleStatusController.class);
 
     private final ScheduledJobRepository repository;
+    private final AdminPermissionGuard permissionGuard;
 
-    public FlowScheduleStatusController(ScheduledJobRepository repository) {
+    public FlowScheduleStatusController(ScheduledJobRepository repository, AdminPermissionGuard permissionGuard) {
         this.repository = repository;
+        this.permissionGuard = permissionGuard;
     }
 
     @GetMapping("/{flowId}/schedule")
-    public ResponseEntity<Map<String, Object>> getFlowSchedule(@PathVariable String flowId) {
+    public ResponseEntity<Map<String, Object>> getFlowSchedule(@PathVariable String flowId,
+                                                               HttpServletRequest request) {
+        permissionGuard.requireAny(request, FlowExecutionController.MANAGE_WORKFLOWS,
+                FlowExecutionController.VIEW_SETUP);
         String tenantId = TenantContext.get();
         if (tenantId == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));
@@ -99,7 +108,10 @@ public class FlowScheduleStatusController {
     @GetMapping("/{flowId}/runs")
     public ResponseEntity<Map<String, Object>> getFlowRuns(
             @PathVariable String flowId,
-            @RequestParam(defaultValue = "20") int limit) {
+            @RequestParam(defaultValue = "20") int limit,
+            HttpServletRequest request) {
+        permissionGuard.requireAny(request, FlowExecutionController.MANAGE_WORKFLOWS,
+                FlowExecutionController.VIEW_SETUP);
         String tenantId = TenantContext.get();
         if (tenantId == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "No tenant context"));

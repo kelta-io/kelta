@@ -463,7 +463,9 @@ it adds the **outer** wrap. So the flow reads `$.input.<key>` exactly as above; 
 wraps twice. The execute response is async (`200` with `attributes.status:"RUNNING"`); the execution
 id is `data.id` (read via `unwrapResource(json).id`). With `awaitResult:true` the runtime polls
 `GET /api/flows/executions/{id}` every 1.5 s (up to 60 s) until a terminal status
-(`COMPLETED`/`FAILED`/`CANCELLED`) — `FAILED`/`CANCELLED` reject and stop the action chain. This is
+(`COMPLETED`/`FAILED`/`CANCELLED`) — `FAILED`/`CANCELLED` reject and stop the action chain. The poll
+works for the member who clicked because the run's `started_by` is them; any other caller needs
+`MANAGE_WORKFLOWS`/`VIEW_SETUP` (`architecture.md` → Flow execution read authorization). This is
 the only new flow framing 2e introduces (no new endpoint or subject). No backend change.
 
 ### Scheduled (cron) invocation — `triggerConfig.inputData`

@@ -101,6 +101,21 @@ public class FlowRepository {
                 """, recordId, limit);
     }
 
+    /** {@link #findExecutionsByTriggerRecord}, limited to the executions {@code startedBy} started. */
+    public List<Map<String, Object>> findExecutionsByTriggerRecordStartedBy(String recordId, String startedBy,
+                                                                            int limit) {
+        return jdbcTemplate.queryForList("""
+                SELECT e.id, e.flow_id, f.name AS flow_name, e.status,
+                       e.started_at, e.completed_at, e.duration_ms, e.error_message
+                FROM flow_execution e
+                LEFT JOIN flow f ON f.id = e.flow_id
+                WHERE e.trigger_record_id = ?
+                  AND lower(e.started_by) = lower(?)
+                ORDER BY e.started_at DESC
+                LIMIT ?
+                """, recordId, startedBy, limit);
+    }
+
     public int getMaxVersionNumber(String flowId) {
         Integer version = jdbcTemplate.queryForObject(SELECT_MAX_VERSION_NUMBER, Integer.class, flowId);
         return version != null ? version : 0;
