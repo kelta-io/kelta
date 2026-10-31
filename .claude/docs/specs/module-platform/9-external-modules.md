@@ -6,7 +6,9 @@
 > Modules page behind a consent screen, run flow actions, hooks, the entitlements port, routes,
 > webhooks and schedules, receive record events, and ship a pinned admin UI bundle; 9e.1
 > (credential read) built 2026-10-31 — a module reads the tenant credentials its manifest declares
-> (§3.3); the settings form (§3.8) and a dead-letter list are not built yet. Planning spec for replacing the
+> (§3.3); 9f (Rust `kelta-module` SDK + `kelta-billing` service, CI, image, harness scenario)
+> built 2026-10-31, prod cutover pending (`kelta-modules/billing/CUTOVER.md`); the settings form
+> (§3.8) and a dead-letter list are not built yet. Planning spec for replacing the
 > in-process JAR module path with modules that run as **separate HTTP services, in any language**.
 > The machine-readable protocol contract is
 > [`docs/module-protocol/openapi.yaml`](../../../../docs/module-protocol/openapi.yaml); this
@@ -88,7 +90,7 @@ by hash at install so a running module cannot swap it later (§3.9).
 | 9d | Invocation layer: remote actions, before-save hooks, service ports, route + webhook proxies, schedules, timeouts, circuit breaker, `DEGRADED`, metrics — **built** (`ExternalModuleRegistry`, `ExternalModuleInvoker`, `ModuleCircuitBreaker`, `RemoteActionHandler`, `RemoteBeforeSaveHook`, `RemoteEntitlementProvider`, `ExternalModuleProxy`, `ModuleScheduleSync`; no migration — V221 already allows `MODULE_ACTION`) | **yes, no auto-merge** | 9c |
 | 9e | Event delivery (NATS → HTTP) + UI bundle pinning + Modules page install-by-URL and consent screen — **built** (V222 `module_event_dead_letter`, `ModuleEventDeliveryListener`, `EventSubscription.Redelivery`, `ExternalModuleUiBundles`; Modules page: install from URL with the plan review, upgrade re-consent, uninstall plan, health). Deferred: the settings form (§3.8), a dead-letter list or replay | **yes, no auto-merge** | 9d |
 | 9e.1 | Module credential read: `GET /api/modules/self/credentials/{name}` for the calling install's declared credentials, audited as the module (§3.3) — **built** (`ModuleCredentialController`, `ModuleCredentialService`; gateway forwards the token's `connected_app_id` as `X-Connected-App-Id`; no migration) | **yes, no auto-merge** | 9e |
-| 9f | Rust billing module + `kelta-module` Rust SDK; cut the prod tenant over | — | 9e.1 |
+| 9f | Rust billing module + `kelta-module` Rust SDK; cut the prod tenant over — **built** (`kelta-modules/sdk-rust`, `kelta-modules/billing`; the JAR moved to `kelta-modules/billing-jar` for rollback; CI `test-rust-modules`, image `harbor.rzware.com/kelta-modules/kelta-billing`, `BillingModuleScenarioTest`). Prod cutover not done: runbook `kelta-modules/billing/CUTOVER.md` | **yes, no auto-merge** (assertion verification + credential handling) | 9e.1 |
 | 9g | Delete the JAR path | — | 9f soaked one release |
 | 9h | (later) Async actions with task tokens | — | 9d |
 

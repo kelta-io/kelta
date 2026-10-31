@@ -210,42 +210,69 @@ JAR path further down is legacy; part 9g removes it
 The contract is `docs/module-protocol/openapi.yaml`; what each call carries and when it comes is
 `integrations.md` → External modules — the module protocol.
 
-1. **Serve a v2 manifest** at `{baseUrl}/.well-known/kelta-module.json` (spec §3.1). It declares
-   `id`, `version`, `protocolVersion: 1`, the `permissions` the module needs, a `metadata`
-   package (collections, fields, picklists it provisions), and what it implements: `actions`,
-   `hooks`, `events`, `services`, `routes`, `schedules`, `webhook` and `ui`. Everything it does
-   must be declared here. The plan shows it to the admin, and nothing undeclared is ever called.
-2. **Verify every request** before acting on it. Check the ES256 assertion in `Authorization`
-   against `GET /api/modules/.well-known/jwks.json` (cache it at most 5 min). `aud` must be your
-   module id, `htm`/`htu`/`body_sha256` must match the request, and `exp` must not have passed.
-3. **Call Kelta back with `Kelta-Access-Token`.** It is a short-lived token for the install's
-   `SERVICE` user, whose profile holds exactly the manifest's `permissions` plus the collections
-   the module owns. Never ask for or store an admin's token. A tenant secret (a provider API key)
-   is a credential the manifest names in `permissions.credentials`: read it per request with
-   `GET /api/modules/self/credentials/{name}` and that token, never store it, never log it
-   (`architecture.md` → External module credential read).
-4. **Implement the declared endpoints**: `lifecycle` and `health` always, then one per capability.
-   Deduplicate actions and schedules on `Idempotency-Key` and events on `eventId`, since all three
-   can arrive twice. Answer events with any 2xx; anything else is retried, then dead-lettered.
-5. **A UI is a pinned bundle.** Serve it at `ui.bundlePath` and put its SHA-256 (lowercase hex) in
-   `ui.sha256`. Kelta stores the approved copy at install and serves only that. To change it,
-   ship a new `version` with the new hash; the upgrade plan shows the change.
-6. **Host it** on public `https`. An in-cluster `http` host must be listed in
-   `KELTA_MODULE_ALLOWED_HOSTS`. Redirects are never followed.
-7. **Install it**: Modules page → Install Module → From URL → Review → Approve and install. Or
+**Reference implementation: [`kelta-modules/billing/`](../../kelta-modules/billing/)** (Rust,
+AGPL-3.0-only) on the **[`kelta-module` SDK crate](../../kelta-modules/sdk-rust/)** (MIT). Both are
+members of the `kelta-modules/Cargo.toml` workspace; `kelta-modules/Dockerfile` builds the image.
+A module in another language implements the same protocol by hand — the SDK is the checklist.
+
+1. **Declare everything in the manifest.** With the SDK, `kelta_module::Manifest` builds the v2
+   manifest (spec §3.1) and validates it: `permissions` (object grants, `system`, `credentials`), a
+   `metadata` package of the collections and fields it provisions, then `actions`, `hooks`,
+   `events`, `services.entitlements`, `routes`, `schedules`, `webhook` and `ui`. Nothing undeclared
+   is ever called, and the plan shows all of it to the admin. `ModuleService` serves it at
+   `{baseUrl}/.well-known/kelta-module.json` (the one unauthenticated endpoint — use it for probes).
+2. **Verify every request.** `AssertionVerifier` checks the ES256 assertion in `Authorization`
+   against `{iss}/.well-known/jwks.json` (cached; refetched on an unknown `kid`), `iss`, `aud` (=
+   module id), `exp`/`iat`, `htm`/`htu` against the request, `body_sha256` against the raw body,
+   and rejects a replayed `jti`. `ModuleService` runs it before any handler, so a handler only ever
+   sees a verified `Call`. **Identity comes from the signed claims only** (`Call::tenant_id`,
+   `install_id`, `actor`): the headers a webhook forwards — including a caller-made `X-User-Id` —
+   are attacker-controlled (`UntrustedHeaders`), and the SDK has no API that reads identity from
+   a header. Without the SDK, implement every one of those checks.
+3. **Call Kelta back with `Kelta-Access-Token`** (`Call::platform()` → `PlatformClient`: list, get,
+   create, update, credential). It is a short-lived token for the install's `SERVICE` user, whose
+   profile holds exactly the manifest's `permissions` plus the collections the module owns. A
+   tenant secret (a provider API key) is a credential named in `permissions.credentials`: read it
+   per request (`PlatformClient::credential`, i.e. `GET /api/modules/self/credentials/{name}`),
+   never store it, never log it (`architecture.md` → External module credential read).
+4. **Implement `ModuleHandlers`**: one method per declared capability (action, hook, event,
+   entitlements, route, webhook, lifecycle, health); the defaults answer 404 or allow. Deduplicate
+   actions and schedules on `Call::idempotency_key()` and events on `eventId`, since all three can
+   arrive twice. Answer events with any 2xx; anything else is retried, then dead-lettered. A flow
+   action may arrive with **no `act`** (no caller context, e.g. a scheduled or async flow): never
+   take the acting member from the input instead.
+5. **A UI is a pinned bundle.** `Manifest::ui_bundle(path, bytes)` puts its SHA-256 in the manifest
+   and `ModuleService::asset` serves it. Kelta stores the approved copy at install and serves only
+   that; a changed bundle ships as a new `version`, and the upgrade plan shows the change.
+6. **Test it.** Unit tests run against `kelta_module::testing` (dev-dependency feature `testing`):
+   `PlatformKey` signs assertions, `MemoryPlatform` stands in for the platform, `Call::for_testing`
+   builds a call. Then a `kelta-test-harness` scenario against the real image —
+   `BillingModuleScenarioTest` (install by URL → action → hook → event → entitlements → signed
+   webhook → uninstall). `ExternalModuleInstallScenarioTest` covers the platform side with a
+   WireMock module.
+7. **CI and image.** A crate in the `kelta-modules` workspace is checked by `test-rust-modules`
+   (`cargo fmt --check`, `clippy -D warnings`, `cargo test`, in the Dockerfile's `check` stage) on
+   the `rust_modules` path filter; Build and Deploy's `build-and-push-modules` pushes
+   `harbor.rzware.com/kelta-modules/<image>:main-<sha>` and bumps homelab-argo's `kelta-billing/`
+   overlay (`ci-cd.md` → Rust external modules). A second module needs its own Dockerfile target,
+   image and overlay.
+8. **Host it.** Public `https`, or in-cluster `http` on a host listed in
+   `KELTA_MODULE_ALLOWED_HOSTS` (never widen `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` for a module).
+   Redirects are never followed. In-cluster, give it its own namespace with a NetworkPolicy that
+   denies it the worker pods: the worker trusts identity headers from the gateway
+   (`concerns.md` → External modules).
+9. **Install it**: Modules page → Install Module → From URL → Review → Approve and install. Or
    call `POST /api/modules/plan`, then `POST /api/modules/install` with the plan's `planHash`.
-   Upgrade from the module's card (**Upgrade**). An upgrade that asks for more access
-   says so, and installs only on re-consent.
-8. **Test it** the way `kelta-test-harness` → `ExternalModuleInstallScenarioTest` does, with a
-   WireMock module: install, actions, hooks, routes, webhooks, schedules, events, the UI bundle,
-   credential reads, upgrade and uninstall.
+   Upgrade from the module's card (**Upgrade**). An upgrade that asks for more access says so,
+   and installs only on re-consent.
 
 ### Legacy: JAR module (removed in part 9g)
 
 A JAR module is one signed JAR + `kelta-module.json`, uploaded through
 `POST /api/modules/install-jar`.
 
-**Reference implementation: [`kelta-modules/billing/`](../../kelta-modules/billing/)** — collections,
+**Reference implementation: [`kelta-modules/billing-jar/`](../../kelta-modules/billing-jar/)** — the
+Java billing module the Rust one replaces, kept for rollback until part 9g: collections,
 two action handlers, a webhook handler, and a UI bundle in one JAR. Copy its `pom.xml` shape: no
 parent pom, outside the reactor, platform deps `provided` (they load from the platform
 classloader; bundling them puts a second copy of the runtime model in the JAR and every cast to a

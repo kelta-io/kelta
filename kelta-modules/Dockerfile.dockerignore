@@ -1,0 +1,8 @@
+# BuildKit reads <Dockerfile>.dockerignore next to the Dockerfile. The build
+# context is the REPO ROOT, so allowlist only the Rust workspace.
+*
+!kelta-modules/
+kelta-modules/target
+kelta-modules/**/target
+# The Java JAR module (kept for rollback until part 9g) is not part of the Rust workspace.
+kelta-modules/billing-jar

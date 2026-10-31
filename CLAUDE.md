@@ -113,10 +113,13 @@ kelta-ui/app    Admin/builder + end-user UI (React 19 + Vite)
 kelta-marketing Astro marketing site (kelta.io) — built as `emf-marketing`; its k8s
                 manifests live in `kelta-marketing/k8s/` and the deploy job generates them
                 into homelab-argo (`ci-cd.md` → Marketing site)
-kelta-modules/  Runtime-installable modules — built, signed and versioned SEPARATELY from the
-                platform (no parent pom, NOT in the kelta-platform reactor) and uploaded into a
-                tenant via `POST /api/modules/install-jar`. `billing/` is the reference impl.
-                See `.claude/docs/playbooks.md` → "Ship a runtime-installable module"
+kelta-modules/  External modules — separate HTTP services a tenant installs BY URL (module
+                protocol, `docs/module-protocol/openapi.yaml`), built and deployed apart from the
+                platform. Rust Cargo workspace: `sdk-rust/` = the `kelta-module` SDK crate (MIT),
+                `billing/` = the `kelta-billing` service (reference impl, own image + namespace).
+                `billing-jar/` = the legacy Java JAR module (`POST /api/modules/install-jar`), kept
+                for rollback until part 9g. See `.claude/docs/playbooks.md` → "Ship a
+                runtime-installable module"
 kelta-cli-downloads  nginx image serving self-update CLI binaries + manifest (downloads.kelta.io)
 kelta-test-harness  Cross-service integration tests (Testcontainers full mini-stack)
 e2e-tests       Playwright end-to-end tests

@@ -224,7 +224,14 @@ allow-listed packages. Populate collections **before** installing a module that 
 
 ## Building one
 
-Create a Maven project outside the platform build with `runtime-core` and `runtime-module-integration` as
-`provided` dependencies, implement `KeltaModule`, package the JAR, sign it, and install. The
-[`kelta-modules/billing`](https://github.com/kelta-io/kelta/tree/main/kelta-modules/billing) module in the
-repository is the reference implementation, including its `README.md` on the trade-offs of the module boundary.
+**An external module** is any HTTPS service that implements the protocol. In Rust, the
+[`kelta-module`](https://github.com/kelta-io/kelta/tree/main/kelta-modules/sdk-rust) SDK crate verifies the
+platform's assertion, serves the protocol endpoints and calls the platform API. The
+[`kelta-modules/billing`](https://github.com/kelta-io/kelta/tree/main/kelta-modules/billing) service is built
+on it and is the reference implementation.
+
+**A JAR module** is a Maven project outside the platform build with `runtime-core` and
+`runtime-module-integration` as `provided` dependencies: implement `KeltaModule`, package the JAR, sign it,
+and install. The legacy
+[`kelta-modules/billing-jar`](https://github.com/kelta-io/kelta/tree/main/kelta-modules/billing-jar) build of
+billing is the example, including its `README.md` on the trade-offs of the module boundary.

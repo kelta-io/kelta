@@ -1,0 +1,38 @@
+[package]
+name = "kelta-module"
+version = "0.1.0"
+description = "SDK for external Kelta modules: verify the platform's signed calls, serve the module protocol, call the platform API"
+license = "MIT"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[features]
+# Exposes `kelta_module::testing` (signed test assertions, an in-memory platform) and
+# `Call::for_testing`. Never enable it outside dev-dependencies.
+testing = ["dep:p256", "dep:rand_core"]
+
+[dependencies]
+axum.workspace = true
+base64.workspace = true
+bytes.workspace = true
+jsonwebtoken.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
+p256 = { workspace = true, optional = true }
+rand_core = { workspace = true, optional = true }
+
+[dev-dependencies]
+# The crate's own tests use its `testing` helpers.
+kelta-module = { path = ".", features = ["testing"] }
+tower.workspace = true
+http-body-util.workspace = true
