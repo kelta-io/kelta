@@ -735,7 +735,6 @@ homelab cluster (`ci-cd.md` → Rust external modules). What that does not guara
   input, which any flow author controls. Routes always carry `act`, with no `source`. Every module
   action that acts for "the calling member" must require `Actor::is_initiator()` the same way (a
   route checks `!is_fallback()`): the platform cannot tell it which actions are member-only.
-  *JAR:* read `ActionContext.userId()`, with no source.
 - **A record-triggered run inherits a flow's fallback actor as its initiator.** A flow step's
   write publishes its record event as the run's actor (`ActingUser`), and `FlowActorResolver`
   takes any UUID on the event as the initiator. So a run no one started — a schedule, a webhook, a
