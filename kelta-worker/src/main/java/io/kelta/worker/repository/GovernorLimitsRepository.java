@@ -28,8 +28,10 @@ public class GovernorLimitsRepository {
             SELECT edition, limits FROM tenant WHERE id = ?
             """;
 
+    /** SERVICE users (module service principals) are machines, not seats. */
     private static final String COUNT_ACTIVE_USERS = """
-            SELECT COUNT(*) FROM platform_user WHERE tenant_id = ? AND status = 'ACTIVE'
+            SELECT COUNT(*) FROM platform_user
+            WHERE tenant_id = ? AND status = 'ACTIVE' AND user_type <> 'SERVICE'
             """;
 
     private static final String COUNT_ACTIVE_COLLECTIONS = """

@@ -29,11 +29,36 @@ import java.util.Map;
  * {@code client_credentials} token of an internal service client registered by
  * {@link InternalClientRegistrar}, which calls the worker's {@code /internal/**} directly and
  * never reaches a gateway tenant route.
+ *
+ * <p>A {@code client_credentials} token for a connected app bound to a {@code SERVICE} user
+ * ({@code connected_app.run_as_user_id}, a module service principal) also carries that user's
+ * identity — {@code run_as_user_id}, {@code user_type}, {@code profile_id}, {@code profile_name},
+ * {@code email} / {@code preferred_username} — so the gateway authorizes it as that user. The
+ * binding is refused unless the user is an active {@code SERVICE} user of the app's own tenant
+ * with a profile: an app pointed at anything else gets no token rather than a weaker one.
  */
 @Component
 public class KeltaTokenCustomizer implements OAuth2TokenCustomizer<JwtEncodingContext> {
 
     private static final Logger log = LoggerFactory.getLogger(KeltaTokenCustomizer.class);
+
+    /** {@code platform_user.user_type} of a module service principal. */
+    static final String SERVICE_USER_TYPE = "SERVICE";
+
+    static final String SELECT_CLIENT_CREDENTIALS_APP =
+            "SELECT id, tenant_id, scopes, run_as_user_id FROM connected_app WHERE client_id = ? AND active = true";
+
+    /**
+     * The run-as user of a connected app: only an active SERVICE user of the app's own tenant
+     * qualifies. Runs with no tenant bound (the token endpoint is session-less), so the tenant
+     * predicate is explicit.
+     */
+    static final String SELECT_RUN_AS_USER = """
+            SELECT u.id, u.email, u.profile_id, p.name AS profile_name
+            FROM platform_user u
+            LEFT JOIN profile p ON p.id = u.profile_id AND p.tenant_id = u.tenant_id
+            WHERE u.id = ? AND u.tenant_id = ? AND u.user_type = 'SERVICE' AND u.status = 'ACTIVE'
+            """;
 
     private final JdbcTemplate jdbcTemplate;
     private final ConnectedAppTokenRecorder tokenRecorder;
@@ -81,11 +106,8 @@ public class KeltaTokenCustomizer implements OAuth2TokenCustomizer<JwtEncodingCo
     private void customizeClientCredentialsToken(JwtEncodingContext context) {
         String clientId = context.getRegisteredClient().getClientId();
 
-        // Look up connected app by client_id to get tenant_id and scopes
-        List<Map<String, Object>> results = jdbcTemplate.queryForList(
-                "SELECT id, tenant_id, scopes FROM connected_app WHERE client_id = ? AND active = true",
-                clientId
-        );
+        // Look up connected app by client_id to get tenant_id, scopes and the run-as user
+        List<Map<String, Object>> results = jdbcTemplate.queryForList(SELECT_CLIENT_CREDENTIALS_APP, clientId);
 
         if (results.isEmpty()) {
             if (isInternalPlatformClient(context.getRegisteredClient())) {
@@ -103,6 +125,10 @@ public class KeltaTokenCustomizer implements OAuth2TokenCustomizer<JwtEncodingCo
         }
         Object scopes = app.get("scopes");
         String scopesJson = scopes != null ? scopes.toString() : null;
+        Object runAsUserId = app.get("run_as_user_id");
+        Map<String, Object> runAs = runAsUserId != null && !runAsUserId.toString().isBlank()
+                ? resolveRunAsUser(appId, runAsUserId.toString(), tenantId)
+                : null;
 
         // Pin a stable jti so the recorded token row and a later revoke can reference the same id.
         String jti = java.util.UUID.randomUUID().toString();
@@ -114,6 +140,16 @@ public class KeltaTokenCustomizer implements OAuth2TokenCustomizer<JwtEncodingCo
             if (scopesJson != null) {
                 claims.put("app_scopes", scopesJson);
             }
+            if (runAs != null) {
+                claims.put("run_as_user_id", runAs.get("id"));
+                claims.put("user_type", SERVICE_USER_TYPE);
+                claims.put("profile_id", runAs.get("profile_id"));
+                if (runAs.get("profile_name") != null) {
+                    claims.put("profile_name", runAs.get("profile_name"));
+                }
+                claims.put("email", runAs.get("email"));
+                claims.put("preferred_username", runAs.get("email"));
+            }
         });
         context.getClaims().id(jti);
         log.debug("Enriched client_credentials token for app {} (client_id={})", appId, clientId);
@@ -123,6 +159,31 @@ public class KeltaTokenCustomizer implements OAuth2TokenCustomizer<JwtEncodingCo
         var tokenSettings = context.getRegisteredClient().getTokenSettings();
         java.time.Duration accessTtl = tokenSettings != null ? tokenSettings.getAccessTokenTimeToLive() : null;
         tokenRecorder.recordIssuedToken(appId, tenantId, scopesJson, jti, accessTtl);
+    }
+
+    /**
+     * The identity a run-as connected app's token carries, or a refusal: the bound user must be an
+     * active {@code SERVICE} user of the app's tenant with a profile. Any other binding — an
+     * interactive user, another tenant's user, a deactivated principal — would let whoever can
+     * point {@code run_as_user_id} at a row mint that row's identity, so no token is issued.
+     */
+    private Map<String, Object> resolveRunAsUser(String appId, String userId, String tenantId) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(SELECT_RUN_AS_USER, userId, tenantId);
+        if (rows.isEmpty()) {
+            throw runAsRefused("Connected app " + appId + " runs as " + userId
+                    + ", which is not an active SERVICE user of tenant " + tenantId);
+        }
+        Map<String, Object> user = rows.get(0);
+        if (user.get("profile_id") == null || isBlank(user.get("profile_id").toString())) {
+            throw runAsRefused("Run-as user " + userId + " of connected app " + appId + " has no profile");
+        }
+        return user;
+    }
+
+    private static OAuth2AuthenticationException runAsRefused(String reason) {
+        log.warn("Refusing to issue a run-as access token: {}", reason);
+        return new OAuth2AuthenticationException(new OAuth2Error(OAuth2ErrorCodes.ACCESS_DENIED,
+                "Access token cannot be issued for this client", null));
     }
 
     private void customizeIdToken(JwtEncodingContext context, KeltaUserDetails userDetails) {

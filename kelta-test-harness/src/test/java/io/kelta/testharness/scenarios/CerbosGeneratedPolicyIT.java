@@ -51,6 +51,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       {@code R.attr.createdBy == P.attr.userId}</li>
  *   <li>{@code viewer-profile} — VIEW_ALL_DATA only</li>
  *   <li>{@code nobody-profile} — no grants</li>
+ *   <li>{@code module-profile} — a module service principal's generated profile: API_ACCESS and
+ *       read on col-b only</li>
  * </ul>
  *
  * <p>Runs a standalone Cerbos (sqlite in-memory store + admin API) pinned to the production
@@ -159,6 +161,17 @@ class CerbosGeneratedPolicyIT {
         assertThat(check("collection", "unknown-profile", TENANT, "col-a")).isEqualTo("....");
         assertThat(check("collection", "", TENANT, "col-a")).isEqualTo("....");
         assertThat(check("collection", "editor-profile", "other-tenant", "col-a")).isEqualTo("....");
+    }
+
+    @Test
+    @DisplayName("a module service principal's profile reads exactly its granted collection and nothing else")
+    void moduleServicePrincipalReadsOnlyItsGrant() {
+        assertThat(check("collection", "module-profile", TENANT, "col-b")).isEqualTo(".A..");
+        assertThat(check("collection", "module-profile", TENANT, "col-a")).isEqualTo("....");
+        assertThat(check("collection", "module-profile", TENANT, "col-c")).isEqualTo("....");
+        assertThat(check("record", "module-profile", TENANT, "bookings")).isEqualTo(".A..");
+        assertThat(check("record", "module-profile", TENANT, "contacts")).isEqualTo("....");
+        assertThat(check("collection", "module-profile", "other-tenant", "col-b")).isEqualTo("....");
     }
 
     // ----- record policy (name-keyed, what the worker record advice checks) -----

@@ -64,6 +64,7 @@ public class KeltaUserDetailsService implements UserDetailsService {
                 WHERE (pu.email = ? OR pu.username = ?)
                   AND pu.tenant_id = ?
                   AND pu.status = 'ACTIVE'
+                  AND pu.user_type <> 'SERVICE'
                 """,
                 userDetailsRowMapper(),
                 emailOrUsername, emailOrUsername, tenantId

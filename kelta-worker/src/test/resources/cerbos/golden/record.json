@@ -19,6 +19,12 @@
             "read" : [ "accounts", "bookings" ],
             "edit" : [ "accounts" ],
             "delete" : [ ]
+          },
+          "module-profile" : {
+            "create" : [ ],
+            "read" : [ "bookings" ],
+            "edit" : [ ],
+            "delete" : [ ]
           }
         },
         "viewAll" : [ "admin-profile", "viewer-profile" ],

@@ -108,7 +108,7 @@ class TenantBootstrapTokenControllerTest {
                 .thenReturn(List.of(MANAGED_SLUG));
         when(jdbcTemplate.queryForList(contains("username = ?"), eq(MANAGED_TENANT), eq("acme-admin")))
                 .thenReturn(List.of(Map.of("id", SEEDED_ADMIN, "status", "ACTIVE")));
-        when(jdbcTemplate.queryForList(contains("SELECT email FROM platform_user"), eq(SEEDED_ADMIN), eq(MANAGED_TENANT)))
+        when(jdbcTemplate.queryForList(contains("SELECT email, user_type FROM platform_user"), eq(SEEDED_ADMIN), eq(MANAGED_TENANT)))
                 .thenReturn(List.of(Map.of("email", "acme-admin@kelta.local")));
         when(jdbcTemplate.queryForList(contains("COUNT"), eq(SEEDED_ADMIN), eq(MANAGED_TENANT)))
                 .thenReturn(List.of(Map.of("cnt", 0L)));
@@ -320,7 +320,7 @@ class TenantBootstrapTokenControllerTest {
         String member = "cccccccc-cccc-cccc-cccc-cccccccccccc";
         when(jdbcTemplate.queryForList(contains("AND id = ?"), eq(MANAGED_TENANT), eq(member)))
                 .thenReturn(List.of(Map.of("id", member, "status", "ACTIVE")));
-        when(jdbcTemplate.queryForList(contains("SELECT email FROM platform_user"), eq(member), eq(MANAGED_TENANT)))
+        when(jdbcTemplate.queryForList(contains("SELECT email, user_type FROM platform_user"), eq(member), eq(MANAGED_TENANT)))
                 .thenReturn(List.of(Map.of("email", "member@acme.example")));
         when(jdbcTemplate.queryForList(contains("COUNT"), eq(member), eq(MANAGED_TENANT)))
                 .thenReturn(List.of(Map.of("cnt", 0L)));

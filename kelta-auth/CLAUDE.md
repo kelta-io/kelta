@@ -41,7 +41,12 @@ io.kelta.auth/
    that same tenant + email/username — refusals that load no user (unknown, inactive, no
    tenant) are not counted. A lockout that has expired restarts the count at the next miss
    (likewise `TotpService` for `mfa_failed_attempts`).
-4. `KeltaTokenCustomizer` adds custom claims (tenantId, profileId, groups)
+4. `KeltaTokenCustomizer` adds custom claims (tenantId, profileId, groups). A `client_credentials`
+   token gets `connected_app_id`/`auth_method=api_key`/`app_scopes`; when the app has
+   `run_as_user_id` (a module service principal) it also carries that `SERVICE` user's identity
+   and profile, or is refused (`access_denied`) unless the user is ACTIVE, SERVICE, of the app's
+   tenant and has a profile (root `architecture.md` → Run-as connected-app tokens). SERVICE users
+   never pass `KeltaUserDetailsService`, password reset or email verification.
 5. Token issued and returned to client
 6. Silent refresh: the SPA (`kelta-platform`, public client, PKCE) refreshes with
    `grant_type=refresh_token` + `client_id` only. Spring AS has no built-in

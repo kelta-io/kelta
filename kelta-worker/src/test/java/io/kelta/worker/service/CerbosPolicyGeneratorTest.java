@@ -608,7 +608,13 @@ class CerbosPolicyGeneratorTest {
                     Map.of("VIEW_ALL_DATA", true), Map.of(), Map.of());
             // nobody: no grants at all
             ProfileData nobody = new ProfileData("nobody-profile", "Nobody", Map.of(), Map.of(), Map.of());
-            return List.of(admin, editor, viewer, nobody);
+            // module: a module service principal's generated profile (ModuleServicePrincipalService) —
+            // API_ACCESS plus read on col-b only
+            ProfileData module = new ProfileData("module-profile", "Module: Acme Sync (1a2b3c4d)",
+                    Map.of("API_ACCESS", true),
+                    Map.of("col-b", Map.of("canCreate", false, "canRead", true, "canEdit", false, "canDelete", false)),
+                    Map.of());
+            return List.of(admin, editor, viewer, nobody, module);
         }
 
         private void assertGolden(String file, Map<String, Object> policy) throws Exception {

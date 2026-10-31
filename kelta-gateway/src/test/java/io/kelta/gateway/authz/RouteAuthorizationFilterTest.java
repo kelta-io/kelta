@@ -287,6 +287,44 @@ class RouteAuthorizationFilterTest {
         }
 
         @Test
+        @DisplayName("Should deny a plain connected-app token (no profile) but authorize a run-as one as its user")
+        void connectedAppTokenShapes() {
+            Map<String, Object> appClaims = Map.of("sub", "kelta_app_client", "tenant_id", "tenant-1",
+                    "connected_app_id", "app-1", "auth_method", "api_key");
+            GatewayPrincipal plain = connectedAppPrincipal(appClaims);
+            MockServerWebExchange plainExchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.get("/api/users").build());
+            plainExchange.getAttributes().put(PRINCIPAL_ATTR, plain);
+
+            StepVerifier.create(filter.filter(plainExchange, filterChain)).expectComplete().verify();
+
+            assertThat(plainExchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            verifyNoInteractions(cerbosService);
+
+            Map<String, Object> runAsClaims = new java.util.HashMap<>(appClaims);
+            runAsClaims.putAll(Map.of("run_as_user_id", "22222222-2222-2222-2222-222222222222",
+                    "user_type", "SERVICE", "profile_id", "module-profile",
+                    "email", "acme-sync.1a2b3c4d@service.kelta.invalid"));
+            GatewayPrincipal runAs = connectedAppPrincipal(runAsClaims);
+            MockServerWebExchange runAsExchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.get("/api/users").build());
+            runAsExchange.getAttributes().put(PRINCIPAL_ATTR, runAs);
+            when(cerbosService.checkSystemPermission(runAs, "API_ACCESS")).thenReturn(Mono.just(false));
+
+            StepVerifier.create(filter.filter(runAsExchange, filterChain)).expectComplete().verify();
+
+            // Past the identity gate: the decision is Cerbos's (API_ACCESS), not "identity not resolved".
+            verify(cerbosService).checkSystemPermission(runAs, "API_ACCESS");
+        }
+
+        private GatewayPrincipal connectedAppPrincipal(Map<String, Object> claims) {
+            org.springframework.security.oauth2.jwt.Jwt.Builder jwt =
+                    org.springframework.security.oauth2.jwt.Jwt.withTokenValue("token").header("alg", "RS256");
+            claims.forEach(jwt::claim);
+            return new io.kelta.gateway.auth.PrincipalExtractor().extractPrincipal(jwt.build());
+        }
+
+        @Test
         @DisplayName("Should deny when missing API_ACCESS system permission")
         void shouldDenyWithoutApiAccess() {
             GatewayPrincipal principal = principalWithIdentity("user@test.com");

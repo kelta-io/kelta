@@ -58,7 +58,10 @@ public class ScimUserService {
         countParams.add(tenantId);
         countParams.addAll(parsed.params());
 
-        String countSql = "SELECT COUNT(*) FROM platform_user pu WHERE pu.tenant_id = ? AND pu.status = 'ACTIVE' AND " + parsed.sql();
+        // SERVICE users (module service principals) are not directory users: an IdP never sees,
+        // renames or deprovisions one — they are absent from every SCIM read and write here.
+        String countSql = "SELECT COUNT(*) FROM platform_user pu WHERE pu.tenant_id = ? AND pu.status = 'ACTIVE' "
+                + "AND pu.user_type <> 'SERVICE' AND " + parsed.sql();
         int total = jdbcTemplate.queryForObject(countSql, Integer.class, countParams.toArray());
 
         List<Object> queryParams = new ArrayList<>();
@@ -68,7 +71,8 @@ public class ScimUserService {
         int offset = Math.max(0, startIndex - 1);
         String sql = "SELECT pu.id, pu.email, pu.username, pu.first_name, pu.last_name, "
                 + "pu.status, pu.locale, pu.timezone, pu.manager_id, pu.created_at, pu.updated_at "
-                + "FROM platform_user pu WHERE pu.tenant_id = ? AND pu.status = 'ACTIVE' AND " + parsed.sql()
+                + "FROM platform_user pu WHERE pu.tenant_id = ? AND pu.status = 'ACTIVE' "
+                + "AND pu.user_type <> 'SERVICE' AND " + parsed.sql()
                 + " ORDER BY pu.created_at ASC LIMIT ? OFFSET ?";
         queryParams.add(count);
         queryParams.add(offset);
@@ -82,7 +86,8 @@ public class ScimUserService {
     public ScimUser getUser(String tenantId, String userId, String baseUrl) {
         String sql = "SELECT pu.id, pu.email, pu.username, pu.first_name, pu.last_name, "
                 + "pu.status, pu.locale, pu.timezone, pu.manager_id, pu.created_at, pu.updated_at "
-                + "FROM platform_user pu WHERE pu.tenant_id = ? AND pu.id = ? AND pu.status <> 'ANONYMIZED'";
+                + "FROM platform_user pu WHERE pu.tenant_id = ? AND pu.id = ? AND pu.status <> 'ANONYMIZED' "
+                + "AND pu.user_type <> 'SERVICE'";
         List<ScimUser> users = jdbcTemplate.query(sql, (rs, rowNum) -> mapUser(rs, baseUrl),
                 tenantId, userId);
         if (users.isEmpty()) {
@@ -203,7 +208,7 @@ public class ScimUserService {
         // ANONYMIZED is terminal, and these writes bypass the users hook that enforces it.
         int rows = jdbcTemplate.update(
                 "UPDATE platform_user SET status = 'INACTIVE', updated_at = NOW() "
-                        + "WHERE tenant_id = ? AND id = ? AND status <> 'ANONYMIZED'",
+                        + "WHERE tenant_id = ? AND id = ? AND status <> 'ANONYMIZED' AND user_type <> 'SERVICE'",
                 tenantId, userId);
         if (rows == 0) {
             throw new ScimException(HttpStatus.NOT_FOUND, "User " + userId + " not found");

@@ -205,6 +205,22 @@ describe('AdminClient tenants.bootstrapToken', () => {
   });
 });
 
+describe('AdminClient users.list', () => {
+  it('leaves SERVICE users (module service principals) out of the people list', async () => {
+    const axios = createMockAxios();
+    const client = new AdminClient(axios);
+    const mockGet = axios.get as Mock;
+    mockGet.mockResolvedValue({ data: { data: [], meta: {} } });
+
+    await client.users.list('ada', 'ACTIVE', 0, 20);
+
+    const url = decodeURIComponent(mockGet.mock.calls[0][0] as string);
+    expect(url).toContain('filter[userType][neq]=SERVICE');
+    expect(url).toContain('filter[search][contains]=ada');
+    expect(url).toContain('filter[status][eq]=ACTIVE');
+  });
+});
+
 describe('AdminClient users.invitePortal', () => {
   let axios: AxiosInstance;
   let client: AdminClient;

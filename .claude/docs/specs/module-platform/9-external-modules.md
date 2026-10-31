@@ -1,6 +1,7 @@
 # Slice 9 — External Modules: Out-of-Process Add-Ons over HTTP
 
-> **Status:** 🔴 **Not started — spec written** (2026-10-30). Planning spec for replacing the
+> **Status:** 🟡 **In progress** — 9a (spec + contract) merged 2026-10-30; 9b (service principal)
+> built 2026-10-30, not yet called by install. Planning spec for replacing the
 > in-process JAR module path with modules that run as **separate HTTP services, in any language**.
 > The machine-readable protocol contract is
 > [`docs/module-protocol/openapi.yaml`](../../../../docs/module-protocol/openapi.yaml); this
@@ -77,7 +78,7 @@ by hash at install so a running module cannot swap it later (§3.9).
 | Part | PR | Security | Depends on |
 |---|---|---|---|
 | 9a | Protocol contract + this spec (docs only) | — | — |
-| 9b | Module service principal: `SERVICE` user type, manifest-generated profile, client_credentials token resolves to it | **yes, no auto-merge** | 9a |
+| 9b | Module service principal: `SERVICE` user type, manifest-generated profile, client_credentials token resolves to it — **built** (V220, `ModuleServicePrincipalService`; install does not call it until 9c) | **yes, no auto-merge** | 9a |
 | 9c | Registry + install by URL: manifest v2 parser, plan/consent, metadata provisioning, worker signing key + JWKS, `KELTA_MODULE_ALLOWED_HOSTS` | **yes, no auto-merge** | 9b |
 | 9d | Invocation layer: remote actions, before-save hooks, service ports, route + webhook proxies, schedules, timeouts, circuit breaker, `DEGRADED`, metrics | **yes, no auto-merge** | 9c |
 | 9e | Event delivery (NATS → HTTP) + UI bundle pinning + Modules page install-by-URL and consent screen | — | 9d |
@@ -233,11 +234,25 @@ Each install gets a **service principal**, created by the install plan's apply (
   `connected_app` has no run-as column (V1 baseline) and a client_credentials token carries
   `connected_app_id`, `auth_method=api_key` and `app_scopes` but no profile
   (`KeltaTokenCustomizer`), so the gateway's `RouteAuthorizationFilter` answers
-  `403 User identity not resolved`. Part 9b adds `connected_app.run_as_user_id` and resolves a
+  `403 User identity not resolved`. Part 9b adds `connected_app.run_as_user_id` (V220) and resolves a
   token with one to that user's identity and profile in `UserIdentityResolutionFilter`.
+  As built: kelta-auth puts the user's `run_as_user_id`, `user_type=SERVICE`, `profile_id`,
+  `profile_name`, `email` and `preferred_username` on the token (`sub` stays the client id),
+  refuses the token unless the user is an `ACTIVE` `SERVICE` user of the app's tenant with a
+  profile, builds a run-as app as a `client_credentials`-only confidential client whatever its
+  other columns say, and gives it a **15-minute** access token. The gateway sets the principal's
+  user id from `run_as_user_id`.
 - The connected app's **plaintext client secret** is kept by the worker, encrypted with the
-  existing `EncryptionService` in a server-only column, because `connected_app` stores only
-  `client_secret_hash` and the worker must request tokens with it.
+  existing `EncryptionService`, because `connected_app` stores only `client_secret_hash` and the
+  worker must request tokens with it. As built it lives on the app itself,
+  `connected_app.client_secret_enc` (V220), JDBC-only like `run_as_user_id` — neither is a field of
+  the `connected-apps` collection, so no generic read path can serve them — and
+  `ModuleServicePrincipalService.clientCredentials` decrypts it. Deactivating the principal clears it.
+- `ModuleServicePrincipalService` (worker) creates the three rows in one transaction under the
+  tenant, validates every collection, field, visibility and system permission against the
+  tenant's metadata (`API_ACCESS` is always granted), marks the profile `is_system`, gives the user
+  an email under the reserved `.invalid` TLD, then requests a Cerbos sync and publishes
+  `kelta.record.changed` for the profile and connected-app collections.
 
 **Token delivery.** The worker requests a client_credentials access token from kelta-auth per
 install, caches it until `exp − 60 s`, and sends it on every module request as
@@ -383,7 +398,7 @@ can change after install) and follows no redirects.
 ### 3.11 Data model (part 9c / 9e migrations)
 
 `tenant_module` gains: `base_url text`, `protocol_version int`, `connected_app_id varchar(36)`,
-`service_user_id varchar(36)`, `client_secret_enc text` (server-only), `settings jsonb`,
+`service_user_id varchar(36)`, `settings jsonb`,
 `ui_bundle_sha256 varchar(64)`, `ui_bundle_key text`. `s3_key`, `jar_checksum`, `jar_signature`,
 `module_class` become nullable in 9c and are dropped in 9g.
 
@@ -394,7 +409,9 @@ last_status int, last_error text, attempts int, created_at)` with the standard t
 
 None in 9a. Later parts, numbered at their own head+1 when written (head is **V219** today):
 
-- 9b: `platform_user_user_type_check` gains `SERVICE`; `connected_app.run_as_user_id`.
+- 9b (V220, built): `platform_user_user_type_check` gains `SERVICE`; `connected_app.run_as_user_id`
+  (FK `platform_user`) and `connected_app.client_secret_enc` (the kept secret, moved here from
+  `tenant_module`).
 - 9c: the `tenant_module` columns in §3.11; `scheduled_jobs` accepts `MODULE_ACTION` if a check
   constraint limits `job_type`.
 - 9e: `module_event_dead_letter`.
@@ -430,12 +447,19 @@ beans.
   `MockWebServer`/WireMock, both already test dependencies); §3.4 filtering removes server-only and
   hidden fields and refuses unwritable `fieldUpdates`; breaker opens, writes `DEGRADED`, recovers.
 - **Unit (auth, gateway):** a client_credentials token for a connected app with `run_as_user_id`
-  resolves to that user and profile; one without keeps today's behavior.
+  resolves to that user and profile; one without keeps today's behavior. (9b: `KeltaTokenCustomizerTest`,
+  `ConnectedAppRegisteredClientRepositoryTest`, `UserIdentityResolutionFilterTest`.)
 - **`kelta-test-harness` scenario** with a WireMock module container: plan → install with
   `planHash` → collections exist → flow step calls the action → hook vetoes a create and rewrites a
   field → route proxy → webhook proxy → event delivered and retried after a 500 → entitlements
   resolve → disable → `ModuleUnavailableException` → uninstall removes unedited `CREATED` resources. Also: a
-  module token cannot read a collection it was not granted (Cerbos), across RLS.
+  module token cannot read a collection it was not granted (Cerbos), across RLS. 9b ships
+  `ModuleServicePrincipalScenarioTest` (token claims, granted read/write audited as the user, a
+  profile-permission refusal, tenant confinement, plain-app token unchanged, inactive user, seat
+  count, no sign-in). The stack's Cerbos is allow-all and its gateway runs with
+  `PERMISSIONS_ENABLED=false`, so the object-permission deny is proven on a real PDP by
+  `CerbosGeneratedPolicyIT.moduleServicePrincipalReadsOnlyItsGrant` and the plain-app 403 by
+  `RouteAuthorizationFilterTest.connectedAppTokenShapes`.
 - **Playwright:** Modules page install by URL against the harness's stub module; the consent
   screen lists grants; approve; uninstall.
 - **9f:** `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt --check`; the harness scenario

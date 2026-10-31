@@ -10,6 +10,7 @@ import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.core.ReactiveValueOperations;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
@@ -36,6 +37,7 @@ class UserIdentityResolutionFilterTest {
 
     private static final String TENANT = "tenant-1";
     private static final String OWNER_ID = "11111111-1111-1111-1111-111111111111";
+    private static final String SERVICE_USER_ID = "22222222-2222-2222-2222-222222222222";
 
     private ReactiveValueOperations<String, String> valueOps;
     private UserIdentityResolutionFilter filter;
@@ -154,5 +156,65 @@ class UserIdentityResolutionFilterTest {
 
         assertThat(resolved.getUserId()).isEqualTo(OWNER_ID);
         assertThat(resolved.getProfileId()).isEqualTo("profile-jwt");
+    }
+
+    /** A kelta-auth client_credentials token, run through the real claim extraction. */
+    private static GatewayPrincipal connectedAppToken(Map<String, Object> extraClaims) {
+        Jwt.Builder jwt = Jwt.withTokenValue("token").header("alg", "RS256")
+                .claim("sub", "kelta_app_client")
+                .claim("tenant_id", TENANT)
+                .claim("connected_app_id", "app-1")
+                .claim("auth_method", "api_key")
+                .claim("app_scopes", "api");
+        extraClaims.forEach(jwt::claim);
+        return new PrincipalExtractor().extractPrincipal(jwt.build());
+    }
+
+    @Test
+    @DisplayName("a run-as app token resolves to its SERVICE user and profile with no lookup")
+    void runAsAppTokenResolvesToItsServiceUser() {
+        GatewayPrincipal token = connectedAppToken(Map.of(
+                "run_as_user_id", SERVICE_USER_ID,
+                "user_type", "SERVICE",
+                "profile_id", "module-profile",
+                "profile_name", "Module: acme-sync",
+                "email", "acme-sync.1a2b3c4d@service.kelta.invalid",
+                "preferred_username", "acme-sync.1a2b3c4d@service.kelta.invalid"));
+
+        ServerWebExchange forwarded = forward(token);
+
+        GatewayPrincipal resolved = JwtAuthenticationFilter.getPrincipal(forwarded);
+        assertThat(resolved.getUserId()).isEqualTo(SERVICE_USER_ID);
+        assertThat(resolved.getProfileId()).isEqualTo("module-profile");
+        assertThat(resolved.getConnectedAppId()).isEqualTo("app-1");
+        assertThat(forwarded.getRequest().getHeaders().getFirst("X-User-Id"))
+                .isEqualTo("acme-sync.1a2b3c4d@service.kelta.invalid");
+        assertThat(forwarded.getRequest().getHeaders().getFirst("X-User-Type")).isEqualTo("SERVICE");
+        verifyNoInteractions(valueOps);
+    }
+
+    @Test
+    @DisplayName("a plain app token stays without a profile or user, as before")
+    void plainAppTokenStaysUnresolved() {
+        when(valueOps.get(anyString())).thenReturn(Mono.just("{}"));
+
+        GatewayPrincipal resolved = JwtAuthenticationFilter.getPrincipal(forward(connectedAppToken(Map.of())));
+
+        assertThat(resolved.getProfileId()).isNull();
+        assertThat(resolved.getUserId()).isNull();
+        assertThat(resolved.getConnectedAppId()).isEqualTo("app-1");
+    }
+
+    @Test
+    @DisplayName("run_as_user_id is honored only on a connected-app token, and only as a UUID")
+    void runAsClaimNeedsAConnectedAppAndAUuid() {
+        GatewayPrincipal notAnApp = new GatewayPrincipal("svc", List.of(),
+                Map.of("sub", "svc", "run_as_user_id", SERVICE_USER_ID), "profile-jwt", "Staff", TENANT,
+                null, null);
+        assertThat(JwtAuthenticationFilter.getPrincipal(forward(notAnApp)).getUserId()).isNull();
+
+        GatewayPrincipal notAUuid = connectedAppToken(Map.of(
+                "run_as_user_id", "admin@example.com", "profile_id", "module-profile"));
+        assertThat(JwtAuthenticationFilter.getPrincipal(forward(notAUuid)).getUserId()).isNull();
     }
 }

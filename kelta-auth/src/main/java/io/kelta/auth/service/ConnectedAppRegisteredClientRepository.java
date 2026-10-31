@@ -45,6 +45,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code connected_app.id} (UUID), so the id stored on an {@code OAuth2Authorization}
  * at {@code /oauth2/authorize} resolves back to the same app on the later token
  * exchange ({@link #findById}).
+ *
+ * <p><b>Run-as apps</b> ({@code run_as_user_id} set — a module service principal, whose tokens
+ * carry a {@code SERVICE} user's identity, see {@link KeltaTokenCustomizer}) are built as
+ * confidential {@code client_credentials}-only clients whatever their {@code grant_types},
+ * {@code redirect_uris} or {@code require_pkce} say: the app exists to mint that principal's
+ * machine tokens, so an edit to those columns must not turn it into a sign-in client or a public
+ * one. Their access tokens live {@link #RUN_AS_ACCESS_TOKEN_TTL}: the worker hands them to an
+ * external service on every call, so a shorter life bounds what a leaked one is worth.
  */
 public class ConnectedAppRegisteredClientRepository implements RegisteredClientRepository {
 
@@ -52,15 +60,18 @@ public class ConnectedAppRegisteredClientRepository implements RegisteredClientR
 
     private static final long CACHE_TTL_SECONDS = 30;
 
+    /** Access-token lifetime of a run-as (service principal) app. */
+    static final Duration RUN_AS_ACCESS_TOKEN_TTL = Duration.ofMinutes(15);
+
     private static final String SELECT_BY_CLIENT_ID = """
             SELECT id, client_id, client_secret_hash, name, redirect_uris, scopes,
-                   grant_types, require_pkce, consent_required
+                   grant_types, require_pkce, consent_required, run_as_user_id
             FROM connected_app WHERE client_id = ? AND active = true
             """;
 
     private static final String SELECT_BY_ID = """
             SELECT id, client_id, client_secret_hash, name, redirect_uris, scopes,
-                   grant_types, require_pkce, consent_required
+                   grant_types, require_pkce, consent_required, run_as_user_id
             FROM connected_app WHERE id = ? AND active = true
             """;
 
@@ -144,12 +155,14 @@ public class ConnectedAppRegisteredClientRepository implements RegisteredClientR
         String clientId = (String) app.get("client_id");
         String secretHash = (String) app.get("client_secret_hash");
         String name = (String) app.get("name");
-        boolean requirePkce = Boolean.TRUE.equals(app.get("require_pkce"));
-        boolean consentRequired = Boolean.TRUE.equals(app.get("consent_required"));
+        Object runAsUserId = app.get("run_as_user_id");
+        boolean runAs = runAsUserId != null && !runAsUserId.toString().isBlank();
+        boolean requirePkce = !runAs && Boolean.TRUE.equals(app.get("require_pkce"));
+        boolean consentRequired = !runAs && Boolean.TRUE.equals(app.get("consent_required"));
 
-        List<String> redirectUris = parseJsonArray(app.get("redirect_uris"));
+        List<String> redirectUris = runAs ? List.of() : parseJsonArray(app.get("redirect_uris"));
         List<String> scopes = parseJsonArray(app.get("scopes"));
-        List<String> grantTypes = parseJsonArray(app.get("grant_types"));
+        List<String> grantTypes = runAs ? List.of("client_credentials") : parseJsonArray(app.get("grant_types"));
         if (grantTypes.isEmpty()) {
             grantTypes = List.of("client_credentials");
         }
@@ -204,7 +217,7 @@ public class ConnectedAppRegisteredClientRepository implements RegisteredClientR
                 .requireProofKey(requirePkce)
                 .build());
         builder.tokenSettings(TokenSettings.builder()
-                .accessTokenTimeToLive(Duration.ofHours(1))
+                .accessTokenTimeToLive(runAs ? RUN_AS_ACCESS_TOKEN_TTL : Duration.ofHours(1))
                 .refreshTokenTimeToLive(Duration.ofDays(7))
                 .reuseRefreshTokens(false)
                 .build());

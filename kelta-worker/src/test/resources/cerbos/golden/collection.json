@@ -19,6 +19,12 @@
             "read" : [ "col-a", "col-b" ],
             "edit" : [ "col-a" ],
             "delete" : [ ]
+          },
+          "module-profile" : {
+            "create" : [ ],
+            "read" : [ "col-b" ],
+            "edit" : [ ],
+            "delete" : [ ]
           }
         },
         "viewAll" : [ "admin-profile", "viewer-profile" ],

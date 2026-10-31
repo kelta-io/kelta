@@ -79,13 +79,13 @@ public class BootstrapRepository {
             """;
 
     private static final String SELECT_USER_BY_EMAIL_ANY_STATUS = """
-            SELECT id, profile_id, status FROM platform_user
+            SELECT id, profile_id, status, user_type FROM platform_user
             WHERE email = ? AND tenant_id = ?
             LIMIT 1
             """;
 
     private static final String SELECT_USER_BY_USERNAME_ANY_STATUS = """
-            SELECT id, profile_id, status FROM platform_user
+            SELECT id, profile_id, status, user_type FROM platform_user
             WHERE username = ? AND tenant_id = ?
             LIMIT 1
             """;

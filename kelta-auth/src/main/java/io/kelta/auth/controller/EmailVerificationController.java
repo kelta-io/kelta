@@ -53,7 +53,7 @@ public class EmailVerificationController {
         var rows = jdbcTemplate.queryForList(
                 "SELECT pu.id, pu.email, pu.first_name, pu.tenant_id, t.name AS tenant_name "
                         + "FROM platform_user pu JOIN tenant t ON t.id = pu.tenant_id "
-                        + "WHERE pu.email = ? AND pu.status = 'ACTIVE'",
+                        + "WHERE pu.email = ? AND pu.status = 'ACTIVE' AND pu.user_type <> 'SERVICE'",
                 request.email());
         if (rows.isEmpty()) {
             // Don't leak account existence.

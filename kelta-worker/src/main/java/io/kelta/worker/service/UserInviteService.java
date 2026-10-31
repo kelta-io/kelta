@@ -48,13 +48,16 @@ public class UserInviteService {
      * Generates a fresh invite token, stores it on {@code user_credential},
      * and queues the {@code user.invite} email.
      *
+     * <p>A {@code SERVICE} user (a module's machine principal) reads as not found: it never
+     * receives mail and never gets a password.
+     *
      * @return the generated invite token, or null if the user was not found.
      */
     public String inviteUser(String tenantId, String userId) {
         var rows = jdbcTemplate.queryForList(
                 "SELECT pu.email, pu.first_name, t.name AS tenant_name "
                         + "FROM platform_user pu JOIN tenant t ON t.id = pu.tenant_id "
-                        + "WHERE pu.id = ? AND pu.tenant_id = ?",
+                        + "WHERE pu.id = ? AND pu.tenant_id = ? AND pu.user_type <> 'SERVICE'",
                 userId, tenantId);
         if (rows.isEmpty()) {
             log.warn("Cannot invite user — not found: tenant={}, user={}", tenantId, userId);
