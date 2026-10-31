@@ -1528,7 +1528,8 @@ for it, not just a `ScopedValue`.
 
 Direct database logins (per-tenant `superset_<slug>` roles) never go through this binder: they
 are pinned by `session_user` in `tenant_db_role` (V201), which every policy prefers over the
-GUC. That table has no RLS, so tenant roles hold **no privilege on it** — the pin is read
+GUC (V223 re-pinned policies created after V201 in the old shape;
+`RowLevelSecurityIntegrationTest.everyGucPolicyIsPinned` fails on any that do not). That table has no RLS, so tenant roles hold **no privilege on it** — the pin is read
 through `kelta_pinned_tenant()`, SECURITY DEFINER with a fixed `search_path` — and are granted
 SELECT in `public` only on RLS tables with a `tenant_id` column (V215 applied this to roles
 provisioned before the narrowing).
