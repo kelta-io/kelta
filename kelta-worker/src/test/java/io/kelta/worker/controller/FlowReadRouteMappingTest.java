@@ -117,6 +117,7 @@ class FlowReadRouteMappingTest {
                 try {
                     return mvc.perform(get(path)
                             .header("X-Tenant-ID", "tenant-1")
+                            .header("X-User-Type", type.name())
                             .header("X-User-Profile-Id", AdminPermissionGuardFixture.PROFILE_ID));
                 } catch (Exception e) {
                     throw new IllegalStateException(e);
@@ -140,15 +141,29 @@ class FlowReadRouteMappingTest {
     }
 
     @Test
-    @DisplayName("the member who started the execution reads it and its steps")
-    void starterReadsOwnExecution() throws Exception {
+    @DisplayName("the member who started the execution reads its status, not its state or steps")
+    void starterReadsOwnStatusOnly() throws Exception {
         memberGet(STARTER, "/api/flows/executions/e-1")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.type").value("flow-executions"))
-                .andExpect(jsonPath("$.data.attributes.status").value("COMPLETED"));
-        memberGet(STARTER, "/api/flows/executions/e-1/steps")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.meta.executionId").value("e-1"));
+                .andExpect(jsonPath("$.data.attributes.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.data.attributes.stateData").doesNotExist())
+                .andExpect(jsonPath("$.data.attributes.initialInput").doesNotExist());
+        memberGet(STARTER, "/api/flows/executions/e-1/steps").andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("a portal caller whose profile holds VIEW_SETUP gets no administrator read")
+    void portalNeverReadsAsAdmin() throws Exception {
+        MockMvc misconfigured = mvc(AdminPermissionGuardFixture.granting("VIEW_SETUP"));
+        getAs(misconfigured, OTHER_MEMBER, CallerContext.UserType.PORTAL, "/api/flows/executions/e-1")
+                .andExpect(status().isNotFound());
+        getAs(misconfigured, STARTER, CallerContext.UserType.PORTAL, "/api/flows/executions/e-1/steps")
+                .andExpect(status().isNotFound());
+        getAs(misconfigured, STARTER, CallerContext.UserType.PORTAL, "/api/flows/f-1/flow-executions")
+                .andExpect(status().isForbidden());
+        getAs(misconfigured, STARTER, CallerContext.UserType.PORTAL, "/api/flows/f-1/schedule")
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -183,7 +198,7 @@ class FlowReadRouteMappingTest {
             "/api/flows/executions/e-1/steps",
             "/api/flows/record-executions?recordId=r-1"
     })
-    @DisplayName("MANAGE_WORKFLOWS reads another user's execution through the flow controller")
+    @DisplayName("MANAGE_WORKFLOWS reads another user's execution in full through the flow controller")
     void managerReadsAll(String path) throws Exception {
         getAs(mvc(AdminPermissionGuardFixture.granting("MANAGE_WORKFLOWS")), OTHER_MEMBER,
                 CallerContext.UserType.INTERNAL, path)

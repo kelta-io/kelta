@@ -24,11 +24,13 @@ import java.util.*;
  * <p>
  * The gateway checks only the writes under {@code /api/flows/**}; every read here leaves it with
  * just {@code API_ACCESS} (a portal member's page action polls its own run), and the worker's
- * record advice does not filter these bodies. So each read authorizes itself: a caller holding
- * {@code MANAGE_WORKFLOWS} or {@code VIEW_SETUP} reads every execution and version; anyone else
- * reads only an execution they started ({@code started_by}), and a different one is a 404 as if
- * it did not exist. The per-flow execution list and the versions need one of the two
- * permissions.
+ * record advice does not filter these bodies. So each read authorizes itself. Internal staff
+ * holding {@code MANAGE_WORKFLOWS} or {@code VIEW_SETUP} read every execution in full, its steps,
+ * the per-flow execution list and the versions. Anyone else — a portal member always — reads
+ * only the status of an execution whose {@code started_by} is them (another one is a 404, as if
+ * it did not exist) and is refused the rest: {@code started_by} is the run's resolved actor, so
+ * it is also the member whose record edit triggered a run, and that run's state was assembled on
+ * the internal tier, not from records they may read.
  *
  * @since 1.0.0
  */
@@ -210,8 +212,8 @@ public class FlowExecutionController {
     }
 
     /**
-     * Gets execution details including state data — for a caller without {@link #MANAGE_WORKFLOWS}
-     * or {@link #VIEW_SETUP}, only an execution they started.
+     * Gets execution details including state data. A caller without {@link #checkFullExecutionAccess}
+     * gets only the status fields of an execution they started ({@link #executionStatusMap}).
      */
     @GetMapping("/executions/{executionId}")
     public ResponseEntity<Map<String, Object>> getExecution(
@@ -220,19 +222,23 @@ public class FlowExecutionController {
 
         log.debug("Get execution request: executionId={}", executionId);
 
-        Optional<FlowExecutionData> execution = loadReadableExecution(executionId, request);
+        boolean full = checkFullExecutionAccess(request);
+        Optional<FlowExecutionData> execution = full
+                ? flowStore.loadExecution(executionId)
+                : loadOwnExecution(executionId);
         if (execution.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
 
-        Map<String, Object> execMap = executionToMap(execution.get());
+        Map<String, Object> execMap = full ? executionToMap(execution.get()) : executionStatusMap(execution.get());
         String id = (String) execMap.remove("id");
         return ResponseEntity.ok(JsonApiResponseBuilder.single("flow-executions", id, execMap));
     }
 
     /**
-     * Gets step-level execution logs for an execution — for a caller without
-     * {@link #MANAGE_WORKFLOWS} or {@link #VIEW_SETUP}, only an execution they started.
+     * Gets step-level execution logs for an execution. Each step carries the state's input and
+     * output snapshots, so a caller without {@link #checkFullExecutionAccess} gets 404 — for their
+     * own run too — before anything is loaded.
      */
     @GetMapping("/executions/{executionId}/steps")
     public ResponseEntity<Map<String, Object>> getExecutionSteps(
@@ -241,7 +247,10 @@ public class FlowExecutionController {
 
         log.debug("Get execution steps request: executionId={}", executionId);
 
-        Optional<FlowExecutionData> execution = loadReadableExecution(executionId, request);
+        if (!checkFullExecutionAccess(request)) {
+            return ResponseEntity.notFound().build();
+        }
+        Optional<FlowExecutionData> execution = flowStore.loadExecution(executionId);
         if (execution.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
@@ -344,8 +353,8 @@ public class FlowExecutionController {
 
     /**
      * Lists executions triggered by a specific record — consumed by the
-     * record activity timeline. Newest first. A caller without {@link #MANAGE_WORKFLOWS} or
-     * {@link #VIEW_SETUP} sees only the executions they started.
+     * record activity timeline. Newest first. A caller without {@link #checkFullExecutionAccess}
+     * sees only the executions they started, without their duration or error message.
      */
     @GetMapping("/record-executions")
     public ResponseEntity<Map<String, Object>> listExecutionsByRecord(
@@ -354,8 +363,9 @@ public class FlowExecutionController {
             HttpServletRequest request) {
 
         int effectiveLimit = Math.min(Math.max(limit, 1), 100);
+        boolean full = checkFullExecutionAccess(request);
         List<Map<String, Object>> rows;
-        if (readsAllExecutions(request)) {
+        if (full) {
             rows = flowRepository.findExecutionsByTriggerRecord(recordId, effectiveLimit);
         } else {
             Optional<String> callerId = CallerContext.current().map(CallerContext::userId);
@@ -372,8 +382,10 @@ public class FlowExecutionController {
             record.put("status", row.get("status"));
             record.put("startedAt", row.get("started_at") != null ? row.get("started_at").toString() : null);
             record.put("completedAt", row.get("completed_at") != null ? row.get("completed_at").toString() : null);
-            record.put("durationMs", row.get("duration_ms"));
-            record.put("errorMessage", row.get("error_message"));
+            if (full) {
+                record.put("durationMs", row.get("duration_ms"));
+                record.put("errorMessage", row.get("error_message"));
+            }
             records.add(record);
         }
 
@@ -390,7 +402,7 @@ public class FlowExecutionController {
             @RequestParam(defaultValue = "0") int offset,
             HttpServletRequest request) {
 
-        permissionGuard.requireAny(request, MANAGE_WORKFLOWS, VIEW_SETUP);
+        permissionGuard.requireInternalAny(request, MANAGE_WORKFLOWS, VIEW_SETUP);
         log.debug("List executions request: flowId={}, limit={}, offset={}", flowId, limit, offset);
 
         List<FlowExecutionData> executions = flowStore.findExecutionsByFlow(flowId, limit, offset);
@@ -465,7 +477,7 @@ public class FlowExecutionController {
     @GetMapping("/{flowId}/versions")
     public ResponseEntity<Map<String, Object>> listVersions(@PathVariable String flowId,
                                                             HttpServletRequest request) {
-        permissionGuard.requireAny(request, MANAGE_WORKFLOWS, VIEW_SETUP);
+        permissionGuard.requireInternalAny(request, MANAGE_WORKFLOWS, VIEW_SETUP);
         log.debug("List flow versions request: flowId={}", flowId);
 
         List<Map<String, Object>> versions = flowRepository.findFlowVersions(flowId);
@@ -482,7 +494,7 @@ public class FlowExecutionController {
             @PathVariable int versionNumber,
             HttpServletRequest request) {
 
-        permissionGuard.requireAny(request, MANAGE_WORKFLOWS, VIEW_SETUP);
+        permissionGuard.requireInternalAny(request, MANAGE_WORKFLOWS, VIEW_SETUP);
         log.debug("Get flow version request: flowId={}, version={}", flowId, versionNumber);
 
         Optional<Map<String, Object>> versionOpt = flowRepository.findFlowVersion(flowId, versionNumber);
@@ -500,27 +512,30 @@ public class FlowExecutionController {
     // Helpers
     // -------------------------------------------------------------------------
 
-    private boolean readsAllExecutions(HttpServletRequest request) {
-        return permissionGuard.holdsAny(request, MANAGE_WORKFLOWS, VIEW_SETUP);
+    /**
+     * Whether the caller reads every execution in full: internal staff whose profile holds
+     * {@link #MANAGE_WORKFLOWS} or {@link #VIEW_SETUP}. Never a {@code PORTAL} caller, whatever
+     * its profile grants. Decided before any execution is loaded.
+     */
+    private boolean checkFullExecutionAccess(HttpServletRequest request) {
+        return permissionGuard.internalHoldsAny(request, MANAGE_WORKFLOWS, VIEW_SETUP);
     }
 
     /**
-     * The execution, when the caller may read it: every one for {@link #readsAllExecutions}, else
-     * only one whose {@code started_by} is the caller. Empty otherwise, so another user's
-     * execution answers the same 404 as a missing one.
+     * The execution when its {@code started_by} is the bound caller; empty otherwise (another
+     * user's answers the same 404 as a missing one), and without a lookup when no caller is bound.
      */
-    private Optional<FlowExecutionData> loadReadableExecution(String executionId, HttpServletRequest request) {
-        Optional<FlowExecutionData> execution = flowStore.loadExecution(executionId);
-        if (execution.isEmpty() || readsAllExecutions(request)) {
-            return execution;
-        }
+    private Optional<FlowExecutionData> loadOwnExecution(String executionId) {
         Optional<String> callerId = CallerContext.current().map(CallerContext::userId);
-        String startedBy = execution.get().startedBy();
-        if (callerId.isPresent() && startedBy != null && startedBy.equalsIgnoreCase(callerId.get())) {
-            return execution;
+        if (callerId.isEmpty()) {
+            return Optional.empty();
         }
-        log.debug("Execution read refused: executionId={} is not the caller's", executionId);
-        return Optional.empty();
+        Optional<FlowExecutionData> execution = flowStore.loadExecution(executionId)
+                .filter(exec -> exec.startedBy() != null && exec.startedBy().equalsIgnoreCase(callerId.get()));
+        if (execution.isEmpty()) {
+            log.debug("Execution read refused: executionId={} is not the caller's", executionId);
+        }
+        return execution;
     }
 
     /** A {@code SCREEN} flow, or one whose {@code trigger_config} sets {@code memberLaunchable: true}. */
@@ -545,6 +560,21 @@ public class FlowExecutionController {
             log.warn("Unreadable trigger_config on flow {}: {}", flow.get("id"), e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * What a caller without {@link #checkFullExecutionAccess} sees of their own run: enough to poll
+     * it to a terminal status ({@code runFlow} with {@code awaitResult}, {@code kelta flows execute
+     * --wait}, MCP {@code get_flow_run}), and none of its state, input or error detail.
+     */
+    static Map<String, Object> executionStatusMap(FlowExecutionData exec) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("id", exec.id());
+        map.put("flowId", exec.flowId());
+        map.put("status", exec.status());
+        map.put("startedAt", exec.startedAt() != null ? exec.startedAt().toString() : null);
+        map.put("completedAt", exec.completedAt() != null ? exec.completedAt().toString() : null);
+        return map;
     }
 
     private Map<String, Object> executionToMap(FlowExecutionData exec) {

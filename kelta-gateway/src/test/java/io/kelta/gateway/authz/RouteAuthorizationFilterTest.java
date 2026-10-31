@@ -1476,8 +1476,9 @@ class RouteAuthorizationFilterTest {
 
         /**
          * Flow execution, version and schedule reads are forwarded on {@code API_ACCESS}: a portal
-         * member's page action polls its own run here. The worker controllers authorize each one
-         * (the caller's own execution, or {@code MANAGE_WORKFLOWS}/{@code VIEW_SETUP}) — see
+         * member's page action polls its own run's status here. The worker controllers authorize
+         * each one (a run's status for its starter; everything for internal staff holding
+         * {@code MANAGE_WORKFLOWS}/{@code VIEW_SETUP}) — see
          * {@code FlowReadRouteMappingTest} in kelta-worker. Checking reads here would refuse that
          * member's poll, and could not tell an execution they started from someone else's.
          */

@@ -12,6 +12,8 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -85,6 +87,24 @@ class AdminPermissionGuardTest {
         assertThat(guard.holdsAny(requestFrom("p-1"), "MANAGE_WORKFLOWS")).isFalse();
         assertThat(guard.holdsAny(requestFrom("p-1"), "MANAGE_WORKFLOWS", "VIEW_SETUP")).isTrue();
         assertThat(guard.holdsAny(new MockHttpServletRequest(), "VIEW_SETUP")).isFalse();
+    }
+
+    @Test
+    @DisplayName("internalHoldsAny and requireInternalAny refuse a portal caller before any lookup")
+    void internalVariantsRefusePortal() {
+        when(bootstrapRepository.findProfileSystemPermissions("p-1")).thenReturn(List.of(
+                Map.of("permission_name", "VIEW_SETUP", "granted", true)));
+        MockHttpServletRequest staff = requestFrom("p-1");
+        assertThat(guard.internalHoldsAny(staff, "MANAGE_WORKFLOWS", "VIEW_SETUP")).isTrue();
+        assertThatCode(() -> guard.requireInternalAny(staff, "MANAGE_WORKFLOWS", "VIEW_SETUP"))
+                .doesNotThrowAnyException();
+
+        MockHttpServletRequest portal = requestFrom("p-2");
+        portal.addHeader("X-User-Type", "portal");
+        assertThat(guard.internalHoldsAny(portal, "VIEW_SETUP")).isFalse();
+        AdminPermissionGuardFixture.assertForbidden(() -> guard.requireInternalAny(portal, "MANAGE_WORKFLOWS",
+                "VIEW_SETUP"), "MANAGE_WORKFLOWS or VIEW_SETUP");
+        verify(bootstrapRepository, never()).findProfileSystemPermissions("p-2");
     }
 
     @Test

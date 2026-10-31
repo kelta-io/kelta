@@ -36,7 +36,7 @@ public class GetFlowRunTool implements UserTool {
         Tool tool = Tool.builder()
                 .name("get_flow_run")
                 .title("Get Flow Run")
-                .description("Fetch the status of a flow execution. Wraps GET /api/flows/executions/{executionId}, with optional step-by-step logs from /steps merged in. Use to poll a long-running flow.")
+                .description("Fetch the status of a flow execution. Wraps GET /api/flows/executions/{executionId}, with optional step-by-step logs from /steps merged in. Use to poll a long-running flow. Without MANAGE_WORKFLOWS or VIEW_SETUP you can read only a run you started, as status fields only, and steps come back null.")
                 .inputSchema(Schemas.object(properties, List.of("executionId")))
                 .annotations(ToolHints.read())
                 .build();

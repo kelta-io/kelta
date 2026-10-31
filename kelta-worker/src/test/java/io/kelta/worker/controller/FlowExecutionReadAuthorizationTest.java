@@ -35,8 +35,9 @@ import static org.mockito.Mockito.when;
 /**
  * The reads of {@link FlowExecutionController}. The gateway leaves every GET under
  * {@code /api/flows/**} at {@code API_ACCESS} and the record advice does not filter these bodies,
- * so the controller is the only check: {@code MANAGE_WORKFLOWS} or {@code VIEW_SETUP} reads every
- * execution, anyone else only one they started.
+ * so the controller is the only check: internal staff holding {@code MANAGE_WORKFLOWS} or
+ * {@code VIEW_SETUP} read every execution in full; anyone else reads only the status of one they
+ * started, and none of the steps.
  */
 @DisplayName("FlowExecutionController reads")
 class FlowExecutionReadAuthorizationTest {
@@ -79,22 +80,26 @@ class FlowExecutionReadAuthorizationTest {
         return CallerContext.callAs(caller, call::get);
     }
 
+    /** {@link #request}, stamped by the gateway as a portal member's. */
+    private MockHttpServletRequest portalRequest() {
+        request.addHeader("X-User-Type", "PORTAL");
+        return request;
+    }
+
     @Nested
-    @DisplayName("GET /executions/{id} and /steps")
+    @DisplayName("GET /executions/{id}")
     class ExecutionDetail {
 
         @Test
-        @DisplayName("a member reads the execution they started, state and steps included")
-        void starterReadsOwnExecution() {
+        @DisplayName("the member who started the run reads its status fields, and none of its state")
+        void starterReadsOwnStatusOnly() {
             ResponseEntity<Map<String, Object>> detail =
                     as(STARTER_MEMBER, () -> member().getExecution(EXECUTION_ID, request));
-            ResponseEntity<Map<String, Object>> steps =
-                    as(STARTER_MEMBER, () -> member().getExecutionSteps(EXECUTION_ID, request));
 
             assertThat(detail.getStatusCode()).isEqualTo(HttpStatus.OK);
-            assertThat(attributes(detail)).containsEntry("startedBy", STARTER).containsKey("stateData");
-            assertThat(steps.getStatusCode()).isEqualTo(HttpStatus.OK);
-            assertThat((List<?>) steps.getBody().get("data")).hasSize(1);
+            assertThat(attributes(detail)).containsOnlyKeys("flowId", "status", "startedAt", "completedAt")
+                    .containsEntry("status", FlowExecutionData.STATUS_FAILED)
+                    .containsEntry("flowId", FLOW_ID);
         }
 
         @Test
@@ -106,13 +111,10 @@ class FlowExecutionReadAuthorizationTest {
         }
 
         @Test
-        @DisplayName("another member's execution is a 404 and its steps are never loaded")
+        @DisplayName("another member's execution is a 404")
         void otherMembersExecutionIsNotFound() {
             assertThat(as(OTHER_MEMBER, () -> member().getExecution(EXECUTION_ID, request)).getStatusCode())
                     .isEqualTo(HttpStatus.NOT_FOUND);
-            assertThat(as(OTHER_MEMBER, () -> member().getExecutionSteps(EXECUTION_ID, request)).getStatusCode())
-                    .isEqualTo(HttpStatus.NOT_FOUND);
-            verify(flowStore, never()).loadStepLogs(any());
         }
 
         @Test
@@ -123,24 +125,38 @@ class FlowExecutionReadAuthorizationTest {
         }
 
         @Test
-        @DisplayName("no bound caller is a 404, even for an execution with no starter")
+        @DisplayName("no bound caller is a 404 without loading the execution")
         void noCallerIsNotFound() {
-            when(flowStore.loadExecution(EXECUTION_ID)).thenReturn(Optional.of(execution(null)));
-
             assertThat(member().getExecution(EXECUTION_ID, request).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            verify(flowStore, never()).loadExecution(any());
         }
 
         @Test
-        @DisplayName("MANAGE_WORKFLOWS or VIEW_SETUP reads any execution")
+        @DisplayName("MANAGE_WORKFLOWS or VIEW_SETUP reads any execution in full")
         void flowPermissionsReadAll() {
             for (String permission : List.of("MANAGE_WORKFLOWS", "VIEW_SETUP")) {
                 FlowExecutionController admin = controller(AdminPermissionGuardFixture.granting(permission));
 
-                assertThat(as(OTHER_STAFF, () -> admin.getExecution(EXECUTION_ID, request)).getStatusCode())
-                        .as(permission).isEqualTo(HttpStatus.OK);
-                assertThat(as(OTHER_STAFF, () -> admin.getExecutionSteps(EXECUTION_ID, request)).getStatusCode())
-                        .as(permission).isEqualTo(HttpStatus.OK);
+                ResponseEntity<Map<String, Object>> detail =
+                        as(OTHER_STAFF, () -> admin.getExecution(EXECUTION_ID, request));
+                assertThat(detail.getStatusCode()).as(permission).isEqualTo(HttpStatus.OK);
+                assertThat(attributes(detail)).as(permission)
+                        .containsEntry("startedBy", STARTER)
+                        .containsEntry("stateData", Map.of("secret", "state"))
+                        .containsEntry("errorMessage", "boom: secret value");
             }
+        }
+
+        @Test
+        @DisplayName("a portal caller whose profile holds MANAGE_WORKFLOWS still gets only their own status")
+        void portalNeverReadsInFull() {
+            FlowExecutionController misconfigured = controller(AdminPermissionGuardFixture.granting("MANAGE_WORKFLOWS"));
+            MockHttpServletRequest portal = portalRequest();
+
+            assertThat(as(OTHER_MEMBER, () -> misconfigured.getExecution(EXECUTION_ID, portal)).getStatusCode())
+                    .isEqualTo(HttpStatus.NOT_FOUND);
+            assertThat(attributes(as(STARTER_MEMBER, () -> misconfigured.getExecution(EXECUTION_ID, portal))))
+                    .doesNotContainKeys("stateData", "initialInput", "errorMessage");
         }
 
         @Test
@@ -154,19 +170,59 @@ class FlowExecutionReadAuthorizationTest {
     }
 
     @Nested
+    @DisplayName("GET /executions/{id}/steps")
+    class ExecutionSteps {
+
+        @Test
+        @DisplayName("is a 404 without the flow permissions, for the starter too, before anything is loaded")
+        void memberGetsNotFound() {
+            for (CallerContext caller : List.of(STARTER_MEMBER, OTHER_MEMBER, OTHER_STAFF)) {
+                assertThat(as(caller, () -> member().getExecutionSteps(EXECUTION_ID, request)).getStatusCode())
+                        .as(caller.userId()).isEqualTo(HttpStatus.NOT_FOUND);
+            }
+            verifyNoInteractions(flowStore);
+        }
+
+        @Test
+        @DisplayName("a portal caller is refused whatever its profile grants")
+        void portalRefused() {
+            FlowExecutionController misconfigured = controller(AdminPermissionGuardFixture.granting("VIEW_SETUP"));
+            MockHttpServletRequest portal = portalRequest();
+
+            assertThat(as(STARTER_MEMBER, () -> misconfigured.getExecutionSteps(EXECUTION_ID, portal)).getStatusCode())
+                    .isEqualTo(HttpStatus.NOT_FOUND);
+            verifyNoInteractions(flowStore);
+        }
+
+        @Test
+        @DisplayName("MANAGE_WORKFLOWS reads the steps with their snapshots")
+        void managerReadsSteps() {
+            ResponseEntity<Map<String, Object>> steps = as(OTHER_STAFF, () ->
+                    controller(AdminPermissionGuardFixture.granting("MANAGE_WORKFLOWS"))
+                            .getExecutionSteps(EXECUTION_ID, request));
+
+            assertThat(steps.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat((List<?>) steps.getBody().get("data")).hasSize(1);
+        }
+    }
+
+    @Nested
     @DisplayName("GET /record-executions")
     class RecordExecutions {
 
         @Test
-        @DisplayName("a member sees only the executions they started on the record")
-        void memberSeesOwnOnly() {
+        @DisplayName("a member sees only the runs they started, without duration or error message")
+        void memberSeesOwnStatusOnly() {
             when(flowRepository.findExecutionsByTriggerRecordStartedBy(RECORD_ID, STARTER, 20))
-                    .thenReturn(List.of(Map.of("id", EXECUTION_ID, "flow_id", FLOW_ID, "status", "COMPLETED")));
+                    .thenReturn(List.of(row()));
 
             ResponseEntity<Map<String, Object>> response =
                     as(STARTER_MEMBER, () -> member().listExecutionsByRecord(RECORD_ID, 20, request));
 
-            assertThat((List<?>) response.getBody().get("data")).hasSize(1);
+            List<Map<String, Object>> data = rows(response);
+            assertThat(data).hasSize(1);
+            assertThat(data.get(0))
+                    .containsOnlyKeys("flowId", "flowName", "status", "startedAt", "completedAt");
             verify(flowRepository, never()).findExecutionsByTriggerRecord(anyString(), anyInt());
         }
 
@@ -180,16 +236,17 @@ class FlowExecutionReadAuthorizationTest {
         }
 
         @Test
-        @DisplayName("VIEW_SETUP sees every execution on the record")
+        @DisplayName("VIEW_SETUP sees every run on the record, with duration and error message")
         void viewSetupSeesAll() {
-            when(flowRepository.findExecutionsByTriggerRecord(RECORD_ID, 20)).thenReturn(List.of(
-                    Map.of("id", "exec-a"), Map.of("id", "exec-b")));
+            when(flowRepository.findExecutionsByTriggerRecord(RECORD_ID, 20)).thenReturn(List.of(row(), row()));
 
             ResponseEntity<Map<String, Object>> response = as(OTHER_STAFF, () ->
                     controller(AdminPermissionGuardFixture.granting("VIEW_SETUP"))
                             .listExecutionsByRecord(RECORD_ID, 20, request));
 
-            assertThat((List<?>) response.getBody().get("data")).hasSize(2);
+            List<Map<String, Object>> data = rows(response);
+            assertThat(data).hasSize(2);
+            assertThat(data.get(0)).containsKeys("durationMs", "errorMessage");
             verify(flowRepository, never()).findExecutionsByTriggerRecordStartedBy(any(), any(), anyInt());
         }
     }
@@ -198,16 +255,28 @@ class FlowExecutionReadAuthorizationTest {
     @DisplayName("GET /{flowId}/flow-executions and versions")
     class SetupReads {
 
+        private static final String EXPECTED = "MANAGE_WORKFLOWS or VIEW_SETUP";
+
         @Test
         @DisplayName("a caller with API_ACCESS only is refused, before any lookup")
         void memberRefused() {
-            String expected = "MANAGE_WORKFLOWS or VIEW_SETUP";
             AdminPermissionGuardFixture.assertForbidden(() -> as(STARTER_MEMBER,
-                    () -> member().listExecutions(FLOW_ID, 50, 0, request)), expected);
-            AdminPermissionGuardFixture.assertForbidden(() -> member().listVersions(FLOW_ID, request), expected);
-            AdminPermissionGuardFixture.assertForbidden(() -> member().getVersion(FLOW_ID, 1, request), expected);
-            verify(flowStore, never()).findExecutionsByFlow(any(), anyInt(), anyInt());
-            verifyNoInteractions(flowRepository);
+                    () -> member().listExecutions(FLOW_ID, 50, 0, request)), EXPECTED);
+            AdminPermissionGuardFixture.assertForbidden(() -> member().listVersions(FLOW_ID, request), EXPECTED);
+            AdminPermissionGuardFixture.assertForbidden(() -> member().getVersion(FLOW_ID, 1, request), EXPECTED);
+            verifyNoInteractions(flowStore, flowRepository);
+        }
+
+        @Test
+        @DisplayName("a portal caller is refused whatever its profile grants")
+        void portalRefused() {
+            FlowExecutionController misconfigured = controller(AdminPermissionGuardFixture.granting("VIEW_SETUP"));
+            MockHttpServletRequest portal = portalRequest();
+
+            AdminPermissionGuardFixture.assertForbidden(
+                    () -> misconfigured.listExecutions(FLOW_ID, 50, 0, portal), EXPECTED);
+            AdminPermissionGuardFixture.assertForbidden(() -> misconfigured.listVersions(FLOW_ID, portal), EXPECTED);
+            verifyNoInteractions(flowStore, flowRepository);
         }
 
         @Test
@@ -227,9 +296,22 @@ class FlowExecutionReadAuthorizationTest {
         return (Map<String, Object>) ((Map<?, ?>) response.getBody().get("data")).get("attributes");
     }
 
+    /** Each JSON:API resource's {@code attributes}. */
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> rows(ResponseEntity<Map<String, Object>> response) {
+        return ((List<Map<String, Object>>) response.getBody().get("data")).stream()
+                .map(resource -> (Map<String, Object>) resource.get("attributes"))
+                .toList();
+    }
+
+    private static Map<String, Object> row() {
+        return Map.of("id", EXECUTION_ID, "flow_id", FLOW_ID, "flow_name", "Flow", "status", "FAILED",
+                "duration_ms", 10, "error_message", "boom: secret value");
+    }
+
     private static FlowExecutionData execution(String startedBy) {
-        return new FlowExecutionData(EXECUTION_ID, "tenant-1", FLOW_ID, FlowExecutionData.STATUS_COMPLETED,
-                startedBy, null, Map.of("secret", "state"), null, null, null, 1, 10,
+        return new FlowExecutionData(EXECUTION_ID, "tenant-1", FLOW_ID, FlowExecutionData.STATUS_FAILED,
+                startedBy, RECORD_ID, Map.of("secret", "state"), "s1", "boom: secret value", "E_STEP", 1, 10,
                 Map.of("input", Map.of()), false, Instant.parse("2026-10-31T00:00:00Z"),
                 Instant.parse("2026-10-31T00:00:01Z"));
     }

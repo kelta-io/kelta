@@ -33,8 +33,9 @@ import java.util.Optional;
  * {@code scheduleStatus} ({@code ACTIVE}/{@code PAUSED}/{@code UNSYNCED}/{@code
  * NONE}); {@link #getFlowRuns} returns recent {@code job_execution_log} rows.
  *
- * <p>Both need {@code MANAGE_WORKFLOWS} or {@code VIEW_SETUP}: the gateway checks only writes under
- * {@code /api/flows/**}, so a read here otherwise needs no more than {@code API_ACCESS}.
+ * <p>Both need internal staff holding {@code MANAGE_WORKFLOWS} or {@code VIEW_SETUP} (never a
+ * portal member): the gateway checks only writes under {@code /api/flows/**}, so a read here
+ * otherwise needs no more than {@code API_ACCESS}.
  *
  * @since 1.0.0
  */
@@ -55,7 +56,7 @@ public class FlowScheduleStatusController {
     @GetMapping("/{flowId}/schedule")
     public ResponseEntity<Map<String, Object>> getFlowSchedule(@PathVariable String flowId,
                                                                HttpServletRequest request) {
-        permissionGuard.requireAny(request, FlowExecutionController.MANAGE_WORKFLOWS,
+        permissionGuard.requireInternalAny(request, FlowExecutionController.MANAGE_WORKFLOWS,
                 FlowExecutionController.VIEW_SETUP);
         String tenantId = TenantContext.get();
         if (tenantId == null) {
@@ -110,7 +111,7 @@ public class FlowScheduleStatusController {
             @PathVariable String flowId,
             @RequestParam(defaultValue = "20") int limit,
             HttpServletRequest request) {
-        permissionGuard.requireAny(request, FlowExecutionController.MANAGE_WORKFLOWS,
+        permissionGuard.requireInternalAny(request, FlowExecutionController.MANAGE_WORKFLOWS,
                 FlowExecutionController.VIEW_SETUP);
         String tenantId = TenantContext.get();
         if (tenantId == null) {

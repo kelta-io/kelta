@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Enforces a system permission on an {@code /api/admin/**} handler.
@@ -65,6 +66,30 @@ public class AdminPermissionGuard {
     public boolean holdsAny(HttpServletRequest request, String... permissions) {
         String profileId = permissionResolver.getProfileId(request);
         return profileId != null && !profileId.isBlank() && profileHoldsAny(profileId, permissions);
+    }
+
+    /**
+     * {@link #holdsAny}, but false for a {@code PORTAL} caller before any lookup
+     * ({@link SupportPermissions#internalHoldsAny}): a member never gets an administrator's view,
+     * whatever their profile happens to grant.
+     */
+    public boolean internalHoldsAny(HttpServletRequest request, String... permissions) {
+        return SupportPermissions.internalHoldsAny(request, permissionResolver, bootstrapRepository,
+                Set.of(permissions));
+    }
+
+    /**
+     * {@link #requireAny}, also refusing a {@code PORTAL} caller whatever its profile grants.
+     *
+     * @throws ResponseStatusException 403 when the caller is a portal member, the request carries
+     *         no profile, or the profile holds none of {@code permissions}
+     */
+    public void requireInternalAny(HttpServletRequest request, String... permissions) {
+        if (SupportPermissions.isPortal(request)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    String.join(" or ", permissions) + " permission required");
+        }
+        requireAny(request, permissions);
     }
 
     private boolean profileHoldsAny(String profileId, String... permissions) {

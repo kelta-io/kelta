@@ -229,19 +229,19 @@ not a supported integration surface and may change without notice.
 | POST | `/api/environments/{envId}/snapshots` | worker | API_ACCESS; handler checks MANAGE_SANDBOXES | [platform/environments-and-promotion](/docs/platform/environments-and-promotion/#sandboxes-are-tenants) |
 | POST | `/api/environments/{envId}/test` | worker | API_ACCESS; handler checks MANAGE_SANDBOXES | [platform/environments-and-promotion](/docs/platform/environments-and-promotion/#remote-targets-multi-cluster) |
 | GET | `/api/files/**` | worker | API_ACCESS | [data-model/search-and-attachments](/docs/data-model/search-and-attachments/#attachments) |
-| GET | `/api/flows/executions/{executionId}` | worker | API_ACCESS | [automation/flow-runs](/docs/automation/flow-runs/#inspecting-runs) |
+| GET | `/api/flows/executions/{executionId}` | worker | API_ACCESS; handler checks MANAGE_WORKFLOWS / VIEW_SETUP | [automation/flow-runs](/docs/automation/flow-runs/#inspecting-runs) |
 | POST | `/api/flows/executions/{executionId}/cancel` | worker | API_ACCESS + flows grant or MANAGE_WORKFLOWS | [automation/flow-runs](/docs/automation/flow-runs/#cancel-and-retry) |
 | POST | `/api/flows/executions/{executionId}/retry` | worker | API_ACCESS + flows grant or MANAGE_WORKFLOWS | [automation/flow-runs](/docs/automation/flow-runs/#cancel-and-retry) |
-| GET | `/api/flows/executions/{executionId}/steps` | worker | API_ACCESS | [automation/flow-runs](/docs/automation/flow-runs/#inspecting-runs) |
-| GET | `/api/flows/record-executions` | worker | API_ACCESS | [automation/flow-runs](/docs/automation/flow-runs/#inspecting-runs) |
+| GET | `/api/flows/executions/{executionId}/steps` | worker | API_ACCESS; handler checks MANAGE_WORKFLOWS / VIEW_SETUP | [automation/flow-runs](/docs/automation/flow-runs/#inspecting-runs) |
+| GET | `/api/flows/record-executions` | worker | API_ACCESS; handler checks MANAGE_WORKFLOWS / VIEW_SETUP | [automation/flow-runs](/docs/automation/flow-runs/#inspecting-runs) |
 | GET | `/api/flows/resources` | worker | API_ACCESS | internal — Backs the flow designer's step palette: the task resources (built-in and from runtime modules) a Task state can name. |
 | POST | `/api/flows/{flowId}/execute` | worker | API_ACCESS; handler checks MANAGE_WORKFLOWS | [automation/triggers](/docs/automation/triggers/#manual-and-api-invocation) |
-| GET | `/api/flows/{flowId}/flow-executions` | worker | API_ACCESS | [automation/flow-runs](/docs/automation/flow-runs/#inspecting-runs) |
+| GET | `/api/flows/{flowId}/flow-executions` | worker | API_ACCESS; handler checks MANAGE_WORKFLOWS / VIEW_SETUP | [automation/flow-runs](/docs/automation/flow-runs/#inspecting-runs) |
 | POST | `/api/flows/{flowId}/publish` | worker | API_ACCESS + flows grant or MANAGE_WORKFLOWS | [automation/flow-runs](/docs/automation/flow-runs/#versions) |
-| GET | `/api/flows/{flowId}/runs` | worker | API_ACCESS | [automation/triggers](/docs/automation/triggers/#schedules) |
-| GET | `/api/flows/{flowId}/schedule` | worker | API_ACCESS | [automation/triggers](/docs/automation/triggers/#schedules) |
-| GET | `/api/flows/{flowId}/versions` | worker | API_ACCESS | [automation/flow-runs](/docs/automation/flow-runs/#versions) |
-| GET | `/api/flows/{flowId}/versions/{versionNumber}` | worker | API_ACCESS | [automation/flow-runs](/docs/automation/flow-runs/#versions) |
+| GET | `/api/flows/{flowId}/runs` | worker | API_ACCESS; handler checks MANAGE_WORKFLOWS / VIEW_SETUP | [automation/triggers](/docs/automation/triggers/#schedules) |
+| GET | `/api/flows/{flowId}/schedule` | worker | API_ACCESS; handler checks MANAGE_WORKFLOWS / VIEW_SETUP | [automation/triggers](/docs/automation/triggers/#schedules) |
+| GET | `/api/flows/{flowId}/versions` | worker | API_ACCESS; handler checks MANAGE_WORKFLOWS / VIEW_SETUP | [automation/flow-runs](/docs/automation/flow-runs/#versions) |
+| GET | `/api/flows/{flowId}/versions/{versionNumber}` | worker | API_ACCESS; handler checks MANAGE_WORKFLOWS / VIEW_SETUP | [automation/flow-runs](/docs/automation/flow-runs/#versions) |
 | GET | `/api/flows/{flowId}/webhook-url` | worker | API_ACCESS | [automation/triggers](/docs/automation/triggers/#inbound-webhooks) |
 | DELETE | `/api/global-picklists/{id}` | worker | API_ACCESS + global-picklists grant or CUSTOMIZE_APPLICATION | [cli/commands](/docs/cli/commands/#kelta-picklists-delete-picklist) |
 | GET | `/api/governor-limits` | worker | API_ACCESS; handler checks VIEW_SETUP | [platform/governor-limits](/docs/platform/governor-limits/#view) |

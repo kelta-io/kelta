@@ -54,6 +54,21 @@ class FlowScheduleStatusControllerTest {
         }
 
         @Test
+        @DisplayName("a portal caller is refused both reads whatever its profile grants")
+        void portalRefused() {
+            FlowScheduleStatusController misconfigured = new FlowScheduleStatusController(repository,
+                    AdminPermissionGuardFixture.granting("VIEW_SETUP"));
+            MockHttpServletRequest portal = AdminPermissionGuardFixture.request();
+            portal.addHeader("X-User-Type", "PORTAL");
+
+            AdminPermissionGuardFixture.assertForbidden(() -> misconfigured.getFlowSchedule("flow-1", portal),
+                    "MANAGE_WORKFLOWS or VIEW_SETUP");
+            AdminPermissionGuardFixture.assertForbidden(() -> misconfigured.getFlowRuns("flow-1", 20, portal),
+                    "MANAGE_WORKFLOWS or VIEW_SETUP");
+            verifyNoInteractions(repository);
+        }
+
+        @Test
         @DisplayName("VIEW_SETUP alone admits both reads")
         void viewSetupAdmits() {
             FlowScheduleStatusController viewer = new FlowScheduleStatusController(repository,

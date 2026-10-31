@@ -542,7 +542,7 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   | `/api/oidc-providers/**`, `/api/connected-apps/**` | writes, incl. `ConnectedAppTokenController`'s token writes | `MANAGE_CONNECTED_APPS` | `API_ACCESS` at the gateway; generic `connected-apps` reads are record-filtered in the worker |
   | `/api/scripts/**` | writes, except `POST /{id}/execute` | `MANAGE_CONNECTED_APPS` | `API_ACCESS`; record-filtered. Execute is exempt: record quick actions run scripts for end users and `ScriptExecutionController` enforces the script's `requiredPermission` |
   | `/api/email-templates/**` | writes | `MANAGE_EMAIL_TEMPLATES` | `API_ACCESS`; record-filtered |
-  | `/api/flows/**` | writes, incl. `/{id}/publish` and `/executions/{id}/cancel\|retry`, except `POST /{id}/execute` | `MANAGE_WORKFLOWS` | `API_ACCESS` at the gateway; generic reads record-filtered; the dedicated execution, version and schedule reads authorize themselves in the worker (→ Flow execution read authorization) — a portal `runFlow` with `awaitResult` polls its own run here. Execute is exempt: page actions (`runFlow`) start flows for end users; `FlowExecutionController` admits a caller without `MANAGE_WORKFLOWS` only to a member-launchable flow (→ Flow execute authorization) |
+  | `/api/flows/**` | writes, incl. `/{id}/publish` and `/executions/{id}/cancel\|retry`, except `POST /{id}/execute` | `MANAGE_WORKFLOWS` | `API_ACCESS` at the gateway; generic reads record-filtered; the dedicated execution, version and schedule reads authorize themselves in the worker (→ Flow execution read authorization) — a portal `runFlow` with `awaitResult` polls its own run's status here. Execute is exempt: page actions (`runFlow`) start flows for end users; `FlowExecutionController` admits a caller without `MANAGE_WORKFLOWS` only to a member-launchable flow (→ Flow execute authorization) |
   | `/api/approval-processes/**` | writes | `MANAGE_APPROVALS` | `API_ACCESS`; record-filtered. Submitting/deciding is `/api/approvals/**`, a separate route |
   | `/api/reports/**`, `/api/dashboards/**` | writes, incl. `PUT /api/dashboards/{name}/tree` and `POST /{id}/validate`, except `POST /api/reports/{id}/execute` and `POST /api/dashboards/{id}/data`, `/{id}/components/{cid}/data` | `MANAGE_REPORTS` | `API_ACCESS`; record-filtered. The exempt POSTs are reads by `VIEW_ANALYTICS` viewers, gated in their controllers |
 
@@ -2850,25 +2850,36 @@ Pinned by `FlowExecutionControllerTest`.
 The gateway checks only writes under `/api/flows/**`, and `CerbosRecordAuthorizationAdvice` does not
 filter the dedicated controllers' bodies there (`ROUTER_FILTERED_ONLY_PREFIXES`), so before
 2026-10-31 any `API_ACCESS` caller — a portal member included — read any execution's `stateData`,
-`initialInput` and step snapshots by id. Each read now authorizes itself in the worker, reading the
-profile from `X-User-Profile-Id` (`AdminPermissionGuard.holdsAny` / `requireAny`) and the caller from
-`CallerContext`:
+`initialInput` and step snapshots by id. Each read now authorizes itself in the worker. "Admin" below
+is **internal** staff whose profile (`X-User-Profile-Id`) holds `MANAGE_WORKFLOWS` or `VIEW_SETUP`
+(`AdminPermissionGuard.internalHoldsAny` / `requireInternalAny`, which refuse an `X-User-Type: PORTAL`
+caller before any lookup, whatever its profile grants); it is decided before the execution is loaded.
+The caller is `CallerContext`:
 
-| Endpoint | `MANAGE_WORKFLOWS` or `VIEW_SETUP` | Anyone else |
+| Endpoint | Admin | Anyone else |
 |---|---|---|
-| `GET /api/flows/executions/{id}`, `/executions/{id}/steps` | any execution | only one whose `started_by` is the caller (case-insensitive); another user's is **404**, the same as a missing one |
-| `GET /api/flows/record-executions?recordId=` (record timeline) | every execution on the record | only the ones the caller started (`FlowRepository.findExecutionsByTriggerRecordStartedBy`); empty with no caller bound |
+| `GET /api/flows/executions/{id}` | any execution, every field | **status fields only** (`id`, `flowId`, `status`, `startedAt`, `completedAt` — `executionStatusMap`) of one whose `started_by` is the caller (case-insensitive); another user's is **404**, the same as a missing one; no caller bound → 404 without a lookup |
+| `GET /api/flows/executions/{id}/steps` | any execution | **404** — the starter too; nothing is loaded |
+| `GET /api/flows/record-executions?recordId=` (record timeline) | every run on the record, with `durationMs` / `errorMessage` | only the runs the caller started (`FlowRepository.findExecutionsByTriggerRecordStartedBy`), `id`/`flowId`/`flowName`/`status`/`startedAt`/`completedAt` only; empty with no caller bound |
 | `GET /api/flows/{id}/flow-executions`, `/{id}/versions`, `/{id}/versions/{n}`, `/{id}/schedule`, `/{id}/runs` | allowed | **403** `MANAGE_WORKFLOWS or VIEW_SETUP permission required` |
 
-`started_by` is the execution's resolved actor (`FlowActorResolver`): the initiating user for a
-manual, page or MCP run and for a record-triggered run, so the member who clicked a `runFlow` action
-(and an agent polling `get_flow_run` on a run it started) keeps reading it. `VIEW_ALL_DATA` does not
-widen these reads — a flow's state is assembled on the internal tier, not from records the caller
-was authorized for. `GET /{id}/webhook-url` stays `API_ACCESS`-only: it returns the public receiver
-URL, which the flow id already determines. The gateway forwards every one of these reads on
+Why status only: `started_by` is the execution's resolved actor (`FlowActorResolver`) — the
+initiating user for a manual, page or MCP run, but also the member whose record edit triggered a
+run (`FlowEventListener`) and the starter of a parent run for a `TRIGGER_FLOW` child — and a run's
+state, step snapshots and error text were assembled on the internal tier (query results, callout
+responses), not from records the caller may read. Full state is admin-only. The status fields are
+what every poller reads: the page `runFlow` with `awaitResult` (`pollFlowExecution` reads `status`),
+`kelta flows execute --wait`, MCP `get_flow_run` (its `includeSteps` comes back `null`), the record
+timeline (`flowName`/`status`/`startedAt`). `VIEW_ALL_DATA` does not widen these reads.
+`GET /{id}/webhook-url` stays `API_ACCESS`-only: it returns the public receiver URL, which the flow id
+already determines. Limits (`concerns.md` → Authorization gaps still open): a scheduled, webhook,
+NATS-triggered or machine run's `started_by` falls back to the flow's `run_as_user_id` / `created_by`,
+who then sees its status; a connected-app caller binds no `CallerContext`, so it reads none of its runs
+without the permissions. The gateway forwards every one of these reads on
 `API_ACCESS` (`RouteAuthorizationFilterTest.flowReadsLeftToTheWorker`); `FlowReadRouteMappingTest`
 sends each URL through Spring MVC beside a `DynamicCollectionRouter` stand-in and pins which caller
-gets 200/403/404; `FlowExecutionReadAuthorizationTest` covers the controller rules.
+gets 200/403/404 and that the starter's body carries no state; `FlowExecutionReadAuthorizationTest`
+covers the controller rules.
 
 ### Inbound flow webhooks (KLT-798)
 
