@@ -32,6 +32,7 @@ class ModuleHttpClientTest {
     private String baseUrl;
     private final Map<String, Map<String, List<String>>> requestHeaders = new ConcurrentHashMap<>();
     private final Map<String, byte[]> requestBodies = new ConcurrentHashMap<>();
+    private final Map<String, String> requestQueries = new ConcurrentHashMap<>();
     private final AtomicInteger redirectTargetHits = new AtomicInteger();
     private final ModuleAssertionSigner signer = new ModuleAssertionSigner(ModuleAssertionSignerTest.KEY_PEM, ISSUER);
     private ModuleHttpClient client;
@@ -67,6 +68,25 @@ class ModuleHttpClientTest {
             byte[] body = "{\"error\":\"not ready\"}".getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(503, body.length);
             exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.createContext("/ok/kelta/v1/routes/report", exchange -> {
+            requestHeaders.put("route", Map.copyOf(exchange.getRequestHeaders()));
+            requestBodies.put("route", exchange.getRequestBody().readAllBytes());
+            requestQueries.put("route", String.valueOf(exchange.getRequestURI().getRawQuery()));
+            byte[] body = "{\"rows\":3}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(418, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.createContext("/slow/kelta/v1/actions/ping", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            try {
+                Thread.sleep(2_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.sendResponseHeaders(200, -1);
             exchange.close();
         });
         server.start();
@@ -136,6 +156,53 @@ class ModuleHttpClientTest {
                 .hasMessageContaining("503")
                 .hasMessageContaining("not ready")
                 .extracting(e -> ((ModuleHttpClient.ModuleCallException) e).status()).isEqualTo(503);
+    }
+
+    @Test
+    @DisplayName("invoke signs the exact URL with its query, forwards headers and the actor, and returns any status")
+    void invokeSignsTheExactUrl() throws Exception {
+        byte[] body = "{\"q\":1}".getBytes(StandardCharsets.UTF_8);
+        var response = client.invoke(module("/ok"), "acme", new ModuleHttpClient.Call("POST",
+                "/kelta/v1/routes/report", "from=2026-01-01&to=x%20y", body, "application/json",
+                Map.of("Idempotency-Key", "exec-1:Step"), java.time.Duration.ofSeconds(5),
+                new ModuleAssertionSigner.Actor("user-1", "INTERNAL", "profile-1")), "service-token");
+
+        // Any status is the caller's to judge (ExternalModuleInvoker); nothing here throws on a 418.
+        assertThat(response.statusCode()).isEqualTo(418);
+        assertThat(response.bodyAsString()).isEqualTo("{\"rows\":3}");
+        assertThat(requestQueries.get("route")).isEqualTo("from=2026-01-01&to=x%20y");
+        Map<String, List<String>> headers = requestHeaders.get("route");
+        assertThat(headers.get("Idempotency-key")).containsExactly("exec-1:Step");
+        assertThat(headers.get("Kelta-access-token")).containsExactly("service-token");
+        assertThat(requestBodies.get("route")).isEqualTo(body);
+
+        SignedJWT jwt = SignedJWT.parse(headers.get("Authorization").getFirst().substring("Bearer ".length()));
+        var claims = jwt.getJWTClaimsSet();
+        assertThat(claims.getStringClaim("htu"))
+                .isEqualTo(baseUrl + "/ok/kelta/v1/routes/report?from=2026-01-01&to=x%20y");
+        assertThat(claims.getStringClaim("body_sha256")).isEqualTo(ModuleAssertionSigner.bodySha256(body));
+        Map<String, Object> act = claims.getJSONObjectClaim("act");
+        assertThat(act).containsEntry("sub", "user-1").containsEntry("user_type", "INTERNAL")
+                .containsEntry("profile_id", "profile-1");
+    }
+
+    @Test
+    @DisplayName("invoke enforces the call's own timeout and says the call timed out")
+    void invokeTimesOut() {
+        long started = System.nanoTime();
+        assertThatThrownBy(() -> client.invoke(module("/slow"), "acme", ModuleHttpClient.Call.postJson(
+                "/kelta/v1/actions/ping", "{}".getBytes(StandardCharsets.UTF_8), java.time.Duration.ofMillis(300),
+                null), "service-token"))
+                .isInstanceOf(ModuleHttpClient.ModuleCallException.class)
+                .extracting(e -> ((ModuleHttpClient.ModuleCallException) e).timedOut()).isEqualTo(true);
+        assertThat(java.time.Duration.ofNanos(System.nanoTime() - started)).isLessThan(java.time.Duration.ofSeconds(2));
+    }
+
+    @Test
+    @DisplayName("a Call never waits longer than the protocol's 120 s cap")
+    void callTimeoutIsCapped() {
+        assertThat(ModuleHttpClient.Call.postJson("/kelta/v1/actions/x", null, java.time.Duration.ofMinutes(10), null)
+                .timeout()).isEqualTo(java.time.Duration.ofSeconds(120));
     }
 
     @Test

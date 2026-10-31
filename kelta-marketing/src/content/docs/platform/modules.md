@@ -117,7 +117,43 @@ DELETE /api/modules/{id}?planHash=…&purgeData=false
 - A module host must be public `https`, unless the operator lists it in `KELTA_MODULE_ALLOWED_HOSTS`. Redirects
   are never followed.
 
-The platform does not yet call an external module's actions, hooks, routes or webhook.
+### What the platform calls
+
+The contract is
+[`docs/module-protocol/openapi.yaml`](https://github.com/kelta-io/kelta/blob/main/docs/module-protocol/openapi.yaml).
+An external module is called only while its install is `ACTIVE` or `DEGRADED`:
+
+- **Flow actions.** A flow Task whose `Resource` is `<moduleId>:<key>` calls
+  `POST /kelta/v1/actions/{key}`, with the manifest's `timeoutMs`. The request has
+  `Idempotency-Key: <executionId>:<stepName>`, the same on every retry of one step. A timeout fails the step
+  with the error code `ModuleTimeoutException`. Any other failure, or a disabled module, gives
+  `ModuleUnavailableException`. A `Catch` can match either code.
+- **Before-save hooks.** `POST /kelta/v1/hooks` answers `{ allowed, fieldUpdates, errors, conflict }`:
+  - `errors` reject the write with `400`;
+  - `conflict` rejects it with `409`;
+  - `fieldUpdates` change the record before it is saved.
+
+  A hook's timeout is 100–5000 ms (default 2000). If the module fails or times out, `failurePolicy` decides:
+  - `fail` (the default): the write is refused with `503 ModuleUnavailable` / `ModuleTimeout`;
+  - `ignore`: the write goes ahead.
+
+  A disabled module's hooks do not run at all.
+- **Entitlements.** `POST /kelta/v1/services/entitlements/resolve` answers a member's plan, cached for
+  `cacheTtlSeconds`. Any failure means no entitlements, which is the restrictive answer.
+- **Routes.** `/api/modules/{moduleId}/x/{path}` is proxied to `/kelta/v1/routes/{path}`, for the declared
+  methods only, after the route's `permission` is checked. The answer is your status and JSON:
+  - a `5xx` or a timeout is `502 ModuleUnreachable`;
+  - a module that cannot be reached is `503`.
+- **Webhooks.** `POST /api/modules/webhooks/{tenantId}/{moduleId}` forwards the raw body and the provider's
+  signature headers to `/kelta/v1/webhooks`. The module verifies the signature. Its status goes back to the
+  sender.
+- **Schedules.** Each manifest `schedules[]` entry runs its action on a 6-field cron, in UTC. The request has
+  `Idempotency-Key: <jobId>:<fireTime>` and no calling user. A schedule can fire twice, so deduplicate on the
+  key.
+
+Records the module receives are what its service user may read: server-only and hidden fields are left out,
+and masked fields arrive masked. After 5 failures in a row, the platform stops calling the module for 30 s
+and marks the install `DEGRADED`. The first successful call marks it `ACTIVE` again.
 
 ## What a module can contribute
 

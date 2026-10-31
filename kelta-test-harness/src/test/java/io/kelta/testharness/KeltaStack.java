@@ -215,7 +215,10 @@ public final class KeltaStack {
             .withEnv("EMAIL_ENABLED",              "false")
             .withEnv("SMTP_AUTH",                  "false")
             .withEnv("SMTP_STARTTLS",              "false")
-            .withEnv("SCHEDULER_ENABLED",          "false")
+            // On, polling fast: ExternalModuleInstallScenarioTest waits for a module schedule to fire.
+            // No other scenario creates scheduled jobs.
+            .withEnv("SCHEDULER_ENABLED",          "true")
+            .withEnv("SCHEDULER_POLL_INTERVAL_MS", "2000")
             .withEnv("SPRING_FLYWAY_ENABLED",      "true")   // disabled by default (K8s PreSync Job); re-enable for the test harness
             // Media fields only ever presign (a local HMAC) — no object store runs in the harness,
             // so an unreachable endpoint is enough for MediaFieldScenarioTest.

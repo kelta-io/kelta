@@ -67,6 +67,89 @@ class ScheduledJobExecutorServiceTest {
     }
 
     @Nested
+    @DisplayName("executeAll — MODULE_ACTION jobs")
+    class ModuleActionJobs {
+
+        private final io.kelta.worker.module.ExternalModuleRegistry modules =
+                mock(io.kelta.worker.module.ExternalModuleRegistry.class);
+        private final Instant fireTime = Instant.parse("2026-10-30T12:00:00Z");
+
+        private Map<String, Object> job() {
+            Map<String, Object> job = new HashMap<>();
+            job.put("id", "job-9");
+            job.put("tenant_id", "t1");
+            job.put("job_type", "MODULE_ACTION");
+            job.put("job_reference_id", "install-1");
+            job.put("cron_expression", "0 0 * * * *");
+            job.put("timezone", "UTC");
+            job.put("config", "{\"moduleId\":\"stub\",\"action\":\"expire\"}");
+            job.put("next_run_at", java.sql.Timestamp.from(fireTime));
+            return job;
+        }
+
+        @Test
+        @DisplayName("runs the module's action with Idempotency-Key <jobId>:<fireTime> and records SUCCESS")
+        void runsTheAction() {
+            executor.setExternalModuleRegistry(modules);
+            when(repository.findDueJobs()).thenReturn(List.of(job()));
+            when(modules.callable("t1", "stub")).thenReturn(true);
+            when(modules.runScheduledAction("t1", "stub", "expire", "job-9:" + fireTime))
+                    .thenReturn(io.kelta.runtime.workflow.ActionResult.success());
+
+            executor.executeAll();
+
+            verify(modules).runScheduledAction("t1", "stub", "expire", "job-9:2026-10-30T12:00:00Z");
+            verify(repository).updateAfterExecution(eq("job-9"), eq("SUCCESS"), any(), any());
+            verify(repository).insertExecutionLog(eq("job-9"), eq("SUCCESS"), isNull(), any(), any(), anyLong());
+        }
+
+        @Test
+        @DisplayName("an install that is not callable is SKIPPED, not failed, and nothing is sent")
+        void skipsAnInactiveInstall() {
+            executor.setExternalModuleRegistry(modules);
+            when(repository.findDueJobs()).thenReturn(List.of(job()));
+            when(modules.callable("t1", "stub")).thenReturn(false);
+
+            executor.executeAll();
+
+            verify(modules, never()).runScheduledAction(anyString(), anyString(), anyString(), anyString());
+            verify(repository).updateAfterExecution(eq("job-9"), eq("SKIPPED"), any(), any());
+            verify(repository).insertExecutionLog(eq("job-9"), eq("SKIPPED"), contains("not active"), any(), any(),
+                    anyLong());
+        }
+
+        @Test
+        @DisplayName("an action failure or an unreachable module is FAILED with the reason")
+        void recordsFailures() {
+            executor.setExternalModuleRegistry(modules);
+            when(repository.findDueJobs()).thenReturn(List.of(job()));
+            when(modules.callable("t1", "stub")).thenReturn(true);
+            when(modules.runScheduledAction(anyString(), anyString(), anyString(), anyString()))
+                    .thenReturn(io.kelta.runtime.workflow.ActionResult.failure("QUOTA: over"))
+                    .thenThrow(io.kelta.runtime.workflow.ModuleUnavailableException.of("stub", "unreachable"));
+
+            executor.executeAll();
+            executor.executeAll();
+
+            verify(repository).insertExecutionLog(eq("job-9"), eq("FAILED"), eq("QUOTA: over"), any(), any(),
+                    anyLong());
+            verify(repository).insertExecutionLog(eq("job-9"), eq("FAILED"), eq("unreachable"), any(), any(),
+                    anyLong());
+        }
+
+        @Test
+        @DisplayName("without runtime modules the job fails with a reason instead of being dropped")
+        void noModuleSupport() {
+            when(repository.findDueJobs()).thenReturn(List.of(job()));
+
+            executor.executeAll();
+
+            verify(repository).insertExecutionLog(eq("job-9"), eq("FAILED"), contains("disabled"), any(), any(),
+                    anyLong());
+        }
+    }
+
+    @Nested
     @DisplayName("executeAll — FLOW jobs")
     class FlowJobs {
 

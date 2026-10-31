@@ -1,0 +1,1 @@
+- 2026-10-30 feat(modules): invoke external modules — remote flow actions, before-save hooks with failurePolicy, the entitlements port, route and webhook proxies, MODULE_ACTION schedules, a per-pod circuit breaker that marks installs DEGRADED, a 60 s registry reconcile and call metrics (external modules part 9d)

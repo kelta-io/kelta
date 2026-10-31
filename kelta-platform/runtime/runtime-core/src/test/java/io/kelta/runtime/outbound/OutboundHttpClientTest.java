@@ -254,6 +254,35 @@ class OutboundHttpClientTest {
     }
 
     @Test
+    @DisplayName("a request's own deadline replaces the client's")
+    void perRequestDeadline() {
+        routes.put("main/slow", exchange -> {
+            try {
+                Thread.sleep(3_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            respond(exchange, 200, "late");
+        });
+        OutboundHttpClient client = new OutboundHttpClient(new OutboundUrlGuard("127.0.0.0/8"), LIMITS);
+
+        long started = System.nanoTime();
+        assertThatThrownBy(() -> client.send(new Request("GET", base + "/slow", Map.of(), null,
+                Duration.ofMillis(300))))
+                .isInstanceOf(OutboundRequestException.class)
+                .extracting(e -> ((OutboundRequestException) e).kind())
+                .isEqualTo(OutboundRequestException.Kind.TIMEOUT);
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(2));
+    }
+
+    @Test
+    @DisplayName("a request deadline must be positive")
+    void requestDeadlineMustBePositive() {
+        assertThatThrownBy(() -> new Request("GET", base, Map.of(), null, Duration.ZERO))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     @DisplayName("skips headers the HTTP client manages itself instead of failing")
     void skipsRestrictedHeaders() {
         routes.put("main/doc", exchange -> respond(exchange, 200, "ok"));

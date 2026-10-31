@@ -101,6 +101,8 @@ public class TaskStateExecutor implements StateExecutor {
                     .resolvedData(input)
                     .triggerDepth(context.triggerDepth())
                     .stateData(context.stateData())
+                    .stepName(task.name())
+                    .attempt(attempt)
                     .build();
 
                 actionResult = handler.get().execute(actionContext);

@@ -560,6 +560,31 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void moduleUnavailable_emits503WithGenericDetail() {
+        ResponseEntity<Map<String, Object>> response = handler.handleModuleUnavailable(
+                io.kelta.runtime.workflow.ModuleUnavailableException.of("billing", "module answered 500: secret body"),
+                request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        Map<String, Object> e = firstError(response);
+        assertThat(str(e, "status")).isEqualTo("503");
+        assertThat(str(e, "code")).isEqualTo("ModuleUnavailable");
+        assertThat(str(e, "detail")).contains("billing").doesNotContain("secret body");
+        assertThat(meta(e)).containsEntry("moduleId", "billing");
+    }
+
+    @Test
+    void moduleTimeout_emits503WithItsOwnCode() {
+        ResponseEntity<Map<String, Object>> response = handler.handleModuleUnavailable(
+                new io.kelta.runtime.workflow.ModuleTimeoutException("billing", "timed out after 1500ms"), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        Map<String, Object> e = firstError(response);
+        assertThat(str(e, "code")).isEqualTo("ModuleTimeout");
+        assertThat(str(e, "detail")).contains("did not answer in time");
+    }
+
+    @Test
     void genericException_emits500WithGenericDetail() {
         ResponseEntity<Map<String, Object>> response =
                 handler.handleGenericException(new RuntimeException("secret stack trace"), request);

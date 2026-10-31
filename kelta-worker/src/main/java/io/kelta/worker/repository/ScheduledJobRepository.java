@@ -11,6 +11,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,7 +43,8 @@ public class ScheduledJobRepository {
      */
     public List<Map<String, Object>> findDueJobs() {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT id, tenant_id, name, job_type, job_reference_id, cron_expression, timezone, config " +
+                "SELECT id, tenant_id, name, job_type, job_reference_id, cron_expression, timezone, config, " +
+                        "next_run_at " +
                         "FROM scheduled_job " +
                         "WHERE active = true AND next_run_at <= NOW() " +
                         "ORDER BY next_run_at " +
@@ -325,6 +327,58 @@ public class ScheduledJobRepository {
         if (deleted > 0) {
             log.info("Deleted {} scheduled_job(s) for flow {}", deleted, flowId);
         }
+    }
+
+    // ── MODULE_ACTION: an external module's manifest schedules ─────────────────────────────
+
+    /**
+     * The {@code MODULE_ACTION} jobs of one external-module install ({@code job_reference_id} is
+     * the {@code tenant_module} id), with their cron and {@code config} as JSON text.
+     */
+    public List<Map<String, Object>> findModuleSchedules(String installId, String tenantId) {
+        return jdbcTemplate.queryForList(
+                "SELECT id, name, cron_expression, config FROM scheduled_job " +
+                        "WHERE job_type = 'MODULE_ACTION' AND job_reference_id = ? AND tenant_id = ?",
+                installId, tenantId
+        ).stream().map(row -> {
+            Map<String, Object> normalized = new LinkedHashMap<>(row);
+            normalized.computeIfPresent("config", (k, v) -> v.toString());
+            return normalized;
+        }).toList();
+    }
+
+    /** Inserts a {@code MODULE_ACTION} job (UTC: a manifest cron names no zone). */
+    public String insertModuleSchedule(String tenantId, String installId, String name, String cronExpression,
+                                       String configJson, Instant nextRunAt) {
+        String id = UUID.randomUUID().toString();
+        jdbcTemplate.update(
+                "INSERT INTO scheduled_job (id, tenant_id, name, job_type, job_reference_id, " +
+                        "cron_expression, timezone, active, next_run_at, config) " +
+                        "VALUES (?, ?, ?, 'MODULE_ACTION', ?, ?, 'UTC', true, ?, ?::jsonb)",
+                id, tenantId, name, installId, cronExpression,
+                nextRunAt != null ? Timestamp.from(nextRunAt) : null, configJson
+        );
+        return id;
+    }
+
+    /**
+     * Deletes {@code MODULE_ACTION} jobs and their execution history (the history's foreign key
+     * has no cascade). {@code jobIds} null deletes every job of the install.
+     *
+     * @return the number of jobs deleted
+     */
+    public int deleteModuleSchedules(String installId, String tenantId, Collection<String> jobIds) {
+        List<String> ids = jobIds != null ? List.copyOf(jobIds) : jdbcTemplate.queryForList(
+                "SELECT id FROM scheduled_job WHERE job_type = 'MODULE_ACTION' AND job_reference_id = ? " +
+                        "AND tenant_id = ?", String.class, installId, tenantId);
+        int deleted = 0;
+        for (String id : ids) {
+            jdbcTemplate.update("DELETE FROM job_execution_log WHERE job_id = ?", id);
+            deleted += jdbcTemplate.update(
+                    "DELETE FROM scheduled_job WHERE id = ? AND job_type = 'MODULE_ACTION' AND tenant_id = ?",
+                    id, tenantId);
+        }
+        return deleted;
     }
 
     /**

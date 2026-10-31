@@ -90,6 +90,12 @@ kelta:
     # no entry. Never widen KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS for a module instead -- that
     # variable also opens HTTP_CALLOUT, CALL_API and outbound messages.
     allowed-hosts: ${KELTA_MODULE_ALLOWED_HOSTS:}
+    # Each pod re-reads every external module's row this often and re-registers what changed
+    # (handlers, hooks, entitlements port), so a missed module.changed event heals; the same pass
+    # probes GET /kelta/v1/health of a DEGRADED module or one whose breaker is open. Runtime-checked.
+    external:
+      reconcile-enabled: ${KELTA_MODULES_EXTERNAL_RECONCILE_ENABLED:true}
+      reconcile-interval-ms: ${KELTA_MODULES_EXTERNAL_RECONCILE_INTERVAL_MS:60000}
   # The running Kelta release (e.g. 0.1.0), compared against a module's minPlatformVersion at
   # install and upgrade. Blank = unknown: the check is skipped with a WARN, never failed.
   platform:

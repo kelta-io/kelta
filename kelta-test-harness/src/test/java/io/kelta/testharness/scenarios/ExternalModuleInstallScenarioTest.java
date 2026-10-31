@@ -2,6 +2,7 @@ package io.kelta.testharness.scenarios;
 
 import io.kelta.testharness.KeltaStack;
 import io.kelta.testharness.ScenarioBase;
+import io.kelta.testharness.fixtures.AuthFixture;
 import io.kelta.testharness.fixtures.TenantFixture;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -17,6 +18,7 @@ import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.math.BigInteger;
@@ -60,6 +62,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * ({@code VIEW_SETUP}, not requested by the manifest), plus the generated profile carrying no
  * object grant beyond the manifest's; a real PDP's reading of that profile shape is
  * {@code CerbosGeneratedPolicyIT.moduleServicePrincipalReadsOnlyItsGrant}.
+ *
+ * <p>{@link #invokesTheModule()} covers the invocation layer (part 9d): a flow Task calls the
+ * module's action, its before-save hook vetoes one write and stamps a field on another, its route
+ * and webhook are proxied, its entitlements port answers the watch quota, and its schedule fires
+ * through the worker scheduler. Disabling the module unregisters the hook and the route and fails
+ * the flow step with {@code ModuleUnavailableException}.
  */
 @DisplayName("External module install scenario")
 class ExternalModuleInstallScenarioTest extends ScenarioBase {
@@ -190,6 +198,115 @@ class ExternalModuleInstallScenarioTest extends ScenarioBase {
         assertThat(lifecycleRequests()).isEmpty();
     }
 
+    @Test
+    @DisplayName("install → flow action → hook veto + field update → route → webhook → entitlements → schedule → disable")
+    void invokesTheModule() throws Exception {
+        String suffix = Long.toHexString(System.nanoTime());
+        String moduleId = "harness-stub-" + suffix;
+        String owned = "harness_stub_items_" + suffix;
+        serveManifest(invocationManifest(manifest(moduleId, owned), owned));
+        serveInvocationStubs();
+
+        String hash = admin("POST", "/" + SLUG + "/api/modules/plan", "{\"baseUrl\":\"" + BASE_URL + "\"}",
+                HttpStatus.OK).get("data").get("attributes").get("planHash").stringValue();
+        JsonNode installed = admin("POST", "/" + SLUG + "/api/modules/install",
+                "{\"baseUrl\":\"" + BASE_URL + "\",\"planHash\":\"" + hash + "\"}", HttpStatus.OK)
+                .get("data").get("attributes");
+        assertThat(installed.get("status").stringValue()).as("install: %s", installed).isEqualTo("ACTIVE");
+        String installId = queryString("SELECT id FROM tenant_module WHERE tenant_id = ? AND module_id = ?",
+                tenantId, moduleId);
+
+        // A flow Task whose Resource is the module's action key calls POST /kelta/v1/actions/ping.
+        String flowId = createFlow(moduleId + ":ping", suffix);
+        String executionId = executeFlow(flowId);
+        JsonNode execution = awaitExecution(executionId);
+        assertThat(execution.get("status").stringValue()).as("execution: %s", execution).isEqualTo("COMPLETED");
+        assertThat(execution.get("stateData").get("ping").get("pong").asBoolean()).as("execution: %s", execution)
+                .isTrue();
+        JsonNode actionCall = requests("POST", "/kelta/v1/actions/ping").stream()
+                .filter(r -> header(r, "Idempotency-Key").equals(executionId + ":Ping"))
+                .findFirst().orElseThrow(() -> new AssertionError("no action call for " + executionId));
+        JsonNode actionBody = mapper.readTree(Base64.getDecoder().decode(actionCall.get("bodyAsBase64").stringValue()));
+        assertThat(actionBody.get("input").get("greeting").stringValue()).isEqualTo("hi");
+        assertThat(actionBody.get("execution").get("flowId").stringValue()).isEqualTo(flowId);
+        assertThat(header(actionCall, "Authorization")).startsWith("Bearer ");
+
+        // The before-save hook stamps a field on one write and vetoes another.
+        waitForStatus(gatewayClientWithToken(adminToken), "/" + SLUG + "/api/" + owned, HttpStatus.OK, 20);
+        ResponseEntity<String> stamped = createItem(owned, "OK1");
+        assertThat(stamped.getStatusCode()).as("create: %s", stamped.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(mapper.readTree(stamped.getBody()).get("data").get("attributes").get("status").stringValue())
+                .as("the module's fieldUpdates were applied").isEqualTo("STAMPED");
+        ResponseEntity<String> vetoed = createItem(owned, "BLOCK");
+        assertThat(vetoed.getStatusCode()).as("veto: %s", vetoed.getBody()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(vetoed.getBody()).contains("blocked by stub");
+        List<String> codes = new ArrayList<>();
+        mapper.readTree(get(adminToken, "/" + SLUG + "/api/" + owned).getBody()).get("data")
+                .forEach(item -> codes.add(item.get("attributes").get("code").stringValue()));
+        assertThat(codes).as("the vetoed record was not saved").containsExactly("OK1");
+
+        // The route proxy forwards a declared route with its query, signed for the calling user.
+        ResponseEntity<String> routed = get(adminToken, "/" + SLUG + "/api/modules/" + moduleId + "/x/report?page=2");
+        assertThat(routed.getStatusCode()).as("route: %s", routed.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(mapper.readTree(routed.getBody()).get("rows").asInt()).isEqualTo(3);
+        JsonNode routeCall = requests("GET", "/kelta/v1/routes/report").getFirst();
+        assertThat(routeCall.get("url").stringValue()).isEqualTo("/kelta/v1/routes/report?page=2");
+        JsonNode routeClaims = claims(header(routeCall, "Authorization"));
+        assertThat(routeClaims.get("htu").stringValue()).isEqualTo(BASE_URL + "/kelta/v1/routes/report?page=2");
+        assertThat(routeClaims.get("act").get("sub").stringValue()).isEqualTo(queryString(
+                "SELECT id FROM platform_user WHERE tenant_id = ? AND email = ?", tenantId,
+                AuthFixture.adminUsername(SLUG)));
+        assertThat(get(adminToken, "/" + SLUG + "/api/modules/" + moduleId + "/x/undeclared").getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+
+        // The webhook proxy forwards the raw bytes and only the allowlisted headers.
+        byte[] payload = "{\"type\":\"invoice.paid\"}".getBytes(StandardCharsets.UTF_8);
+        ResponseEntity<String> hooked = gatewayClient().post()
+                .uri("/api/modules/webhooks/" + tenantId + "/" + moduleId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("Stripe-Signature", "t=1,v1=stub")
+                .header("Cookie", "session=leak")
+                .body(payload)
+                .retrieve().onStatus(st -> true, (req, resp) -> {}).toEntity(String.class);
+        assertThat(hooked.getStatusCode()).as("webhook: %s", hooked.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        JsonNode webhookCall = requests("POST", "/kelta/v1/webhooks").getFirst();
+        assertThat(Base64.getDecoder().decode(webhookCall.get("bodyAsBase64").stringValue())).isEqualTo(payload);
+        assertThat(header(webhookCall, "stripe-signature")).isEqualTo("t=1,v1=stub");
+        assertThat(hasHeader(webhookCall, "Cookie")).as("cookies are never forwarded").isFalse();
+
+        // The entitlements port answers the watch quota: maxActiveWatches 0 refuses a new watch.
+        ResponseEntity<String> watch = gatewayClientWithToken(adminToken).post().uri("/" + SLUG + "/api/watches")
+                .contentType(MediaType.APPLICATION_JSON).body("{}")
+                .retrieve().onStatus(st -> true, (req, resp) -> {}).toEntity(String.class);
+        assertThat(watch.getStatusCode().value()).as("watch: %s", watch.getBody()).isEqualTo(422);
+        assertThat(watch.getBody()).contains("plan limit (0/0)");
+        assertThat(requests("POST", "/kelta/v1/services/entitlements/resolve")).isNotEmpty();
+
+        // The manifest schedule is a MODULE_ACTION job the worker scheduler runs.
+        String jobId = queryString("SELECT id FROM scheduled_job WHERE tenant_id = ? AND job_reference_id = ? "
+                + "AND job_type = 'MODULE_ACTION'", tenantId, installId);
+        awaitScheduledCall(jobId);
+
+        // Disabled: the hook is gone (BLOCK saves), the route is gone, and the action refuses.
+        admin("POST", "/" + SLUG + "/api/modules/" + moduleId + "/disable", "{}", HttpStatus.OK);
+        assertThat(createItem(owned, "BLOCK").getStatusCode()).as("no hook while disabled")
+                .isEqualTo(HttpStatus.CREATED);
+        assertThat(get(adminToken, "/" + SLUG + "/api/modules/" + moduleId + "/x/report").getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        JsonNode refused = awaitExecution(executeFlow(flowId));
+        assertThat(refused.get("stateData").has("error")).as("execution: %s", refused).isTrue();
+        assertThat(refused.get("stateData").get("error").get("Error").stringValue())
+                .as("the flow error code a Catch matches").isEqualTo("ModuleUnavailableException");
+
+        // Uninstall removes the module's jobs with it.
+        JsonNode uninstallPlan = admin("GET", "/" + SLUG + "/api/modules/" + moduleId
+                + "/uninstall-plan?purgeData=true", null, HttpStatus.OK).get("data").get("attributes");
+        JsonNode removed = admin("DELETE", "/" + SLUG + "/api/modules/" + moduleId + "?purgeData=true&planHash="
+                + uninstallPlan.get("planHash").stringValue(), null, HttpStatus.OK).get("data").get("attributes");
+        assertThat(removed.get("failed")).as("uninstall: %s", removed).isEmpty();
+        assertThat(queryCount("SELECT count(*) FROM scheduled_job WHERE job_reference_id = ?", installId)).isZero();
+    }
+
     // ── the stub module ──────────────────────────────────────────────────────────────────
 
     private RestClient stub() {
@@ -233,13 +350,82 @@ class ExternalModuleInstallScenarioTest extends ScenarioBase {
 
     /** The lifecycle calls the stub received, oldest first. */
     private List<JsonNode> lifecycleRequests() {
+        return requests("POST", "/kelta/v1/lifecycle");
+    }
+
+    /** The calls the stub received for {@code method} and {@code urlPath} (query ignored), oldest first. */
+    private List<JsonNode> requests(String method, String urlPath) {
+        ObjectNode pattern = mapper.createObjectNode().put("method", method).put("urlPath", urlPath);
         String found = stub().post().uri("/__admin/requests/find").contentType(MediaType.APPLICATION_JSON)
-                .body("{\"method\":\"POST\",\"url\":\"/kelta/v1/lifecycle\"}")
+                .body(pattern.toString())
                 .retrieve().body(String.class);
         List<JsonNode> requests = new ArrayList<>();
         mapper.readTree(found).get("requests").forEach(requests::add);
         requests.sort((a, b) -> Long.compare(a.get("loggedDate").asLong(), b.get("loggedDate").asLong()));
         return requests;
+    }
+
+    /**
+     * {@link #manifest} plus everything the invocation layer serves: a {@code status} field for the
+     * hook to stamp, the hook itself, the entitlements port (uncached, so every lookup reaches the
+     * stub), a route, the webhook, and a schedule firing every second.
+     */
+    private ObjectNode invocationManifest(ObjectNode manifest, String owned) {
+        ObjectNode field = mapper.createObjectNode();
+        field.put("type", "FIELD").putObject("data").put("collection_name", owned).put("name", "status")
+                .put("display_name", "Status").put("type", "STRING");
+        ((ArrayNode) manifest.get("metadata").get("items")).add(field);
+        ((ObjectNode) manifest.get("actions").get(0)).put("timeoutMs", 5000);
+        manifest.putArray("hooks").addObject().put("collection", owned).put("timeoutMs", 3000)
+                .putArray("events").add("beforeCreate");
+        manifest.putArray("services").addObject().put("port", "entitlements").put("cacheTtlSeconds", 0);
+        manifest.putArray("routes").addObject().put("path", "report").putArray("methods").add("GET");
+        manifest.putArray("schedules").addObject().put("action", "ping").put("cron", "* * * * * *");
+        manifest.putObject("webhook").put("enabled", true);
+        return manifest;
+    }
+
+    /** The module's protocol endpoints; {@link #serveManifest} must have run first (it resets the stub). */
+    private void serveInvocationStubs() {
+        stubJson("POST", "/kelta/v1/actions/ping", 5, null, 200, "{\"success\":true,\"output\":{\"pong\":true}}");
+        stubJson("POST", "/kelta/v1/hooks", 1, "{\"matchesJsonPath\":{\"expression\":\"$.record.code\","
+                + "\"equalTo\":\"BLOCK\"}}", 200, "{\"allowed\":false,\"errors\":[{\"field\":\"code\","
+                + "\"message\":\"blocked by stub\",\"code\":\"STUB_BLOCK\"}]}");
+        stubJson("POST", "/kelta/v1/hooks", 5, null, 200,
+                "{\"allowed\":true,\"fieldUpdates\":{\"status\":\"STAMPED\"}}");
+        stubJson("GET", "/kelta/v1/routes/report", 5, null, 200, "{\"rows\":3}");
+        stubJson("POST", "/kelta/v1/webhooks", 5, null, 202, "");
+        stubJson("POST", "/kelta/v1/services/entitlements/resolve", 5, null, 200,
+                "{\"planCode\":\"free\",\"subscriptionStatus\":\"active\",\"values\":{\"maxActiveWatches\":0}}");
+        stubJson("GET", "/kelta/v1/health", 5, null, 200, "{\"status\":\"ok\"}");
+    }
+
+    private void stubJson(String method, String urlPath, int priority, String bodyPattern, int status, String body) {
+        ObjectNode mapping = mapper.createObjectNode().put("priority", priority);
+        ObjectNode request = mapping.putObject("request").put("method", method).put("urlPath", urlPath);
+        if (bodyPattern != null) {
+            request.putArray("bodyPatterns").add(mapper.readTree(bodyPattern));
+        }
+        ObjectNode response = mapping.putObject("response").put("status", status).put("body", body);
+        response.putObject("headers").put("Content-Type", "application/json");
+        stub().post().uri("/__admin/mappings").contentType(MediaType.APPLICATION_JSON)
+                .body(mapping.toString())
+                .retrieve().toBodilessEntity();
+    }
+
+    /** Waits for the scheduler to run job {@code jobId}: its action call carries {@code <jobId>:<fireTime>}. */
+    private void awaitScheduledCall(String jobId) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 30_000;
+        while (System.currentTimeMillis() < deadline) {
+            boolean fired = requests("POST", "/kelta/v1/actions/ping").stream()
+                    .anyMatch(r -> hasHeader(r, "Idempotency-Key")
+                            && header(r, "Idempotency-Key").startsWith(jobId + ":"));
+            if (fired) {
+                return;
+            }
+            Thread.sleep(1_000);
+        }
+        throw new AssertionError("scheduled job " + jobId + " never called the module");
     }
 
     private String eventOf(JsonNode request) {
@@ -255,6 +441,21 @@ class ExternalModuleInstallScenarioTest extends ScenarioBase {
             }
         }
         throw new AssertionError("no " + name + " header on " + request.get("headers"));
+    }
+
+    private static boolean hasHeader(JsonNode request, String name) {
+        for (var entry : request.get("headers").properties()) {
+            if (entry.getKey().equalsIgnoreCase(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The claims of a {@code Bearer} platform assertion, unverified ({@link #verifyAssertion} checks one). */
+    private JsonNode claims(String authorization) {
+        String jwt = authorization.substring("Bearer ".length());
+        return mapper.readTree(Base64.getUrlDecoder().decode(jwt.split("\\.")[1]));
     }
 
     // ── the platform assertion (spec §3.2) ───────────────────────────────────────────────
@@ -325,6 +526,62 @@ class ExternalModuleInstallScenarioTest extends ScenarioBase {
     private ResponseEntity<String> get(String token, String uri) {
         return gatewayClientWithToken(token).get().uri(uri).retrieve().onStatus(s -> true, (req, resp) -> {})
                 .toEntity(String.class);
+    }
+
+    /**
+     * An AUTOLAUNCHED flow of one Task, {@code Ping}, whose Resource is {@code resource}; a
+     * {@code ModuleUnavailableException} is caught into {@code $.error} and ends at {@code Unavailable}.
+     */
+    private String createFlow(String resource, String suffix) {
+        ObjectNode payload = mapper.createObjectNode();
+        ObjectNode attributes = payload.putObject("data").put("type", "flows").putObject("attributes");
+        attributes.put("name", "module-invoke-harness-" + suffix).put("flowType", "AUTOLAUNCHED").put("active", true);
+        ObjectNode definition = attributes.putObject("definition").put("StartAt", "Ping");
+        ObjectNode states = definition.putObject("States");
+        ObjectNode ping = states.putObject("Ping").put("Type", "Task").put("Resource", resource)
+                .put("ResultPath", "$.ping").put("Next", "Done");
+        ObjectNode caught = ping.putArray("Catch").addObject().put("ResultPath", "$.error").put("Next", "Unavailable");
+        caught.putArray("ErrorEquals").add("ModuleUnavailableException");
+        states.putObject("Done").put("Type", "Succeed");
+        states.putObject("Unavailable").put("Type", "Succeed");
+        ResponseEntity<String> created = gatewayClientWithToken(adminToken).post().uri("/" + SLUG + "/api/flows")
+                .contentType(MediaType.APPLICATION_JSON).body(payload.toString())
+                .retrieve().onStatus(st -> true, (req, resp) -> {}).toEntity(String.class);
+        assertThat(created.getStatusCode().is2xxSuccessful()).as("flow: %s", created.getBody()).isTrue();
+        return mapper.readTree(created.getBody()).get("data").get("id").stringValue();
+    }
+
+    private String executeFlow(String flowId) {
+        ResponseEntity<String> executed = gatewayClientWithToken(adminToken).post()
+                .uri("/" + SLUG + "/api/flows/" + flowId + "/execute")
+                .contentType(MediaType.APPLICATION_JSON).body("{\"input\":{\"greeting\":\"hi\"}}")
+                .retrieve().onStatus(st -> true, (req, resp) -> {}).toEntity(String.class);
+        assertThat(executed.getStatusCode().is2xxSuccessful()).as("execute: %s", executed.getBody()).isTrue();
+        return mapper.readTree(executed.getBody()).get("data").get("id").stringValue();
+    }
+
+    /** Polls an execution until it is COMPLETED, FAILED or CANCELLED and returns its attributes. */
+    private JsonNode awaitExecution(String executionId) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 30_000;
+        JsonNode attributes = null;
+        while (System.currentTimeMillis() < deadline) {
+            attributes = mapper.readTree(get(adminToken, "/" + SLUG + "/api/flows/executions/" + executionId)
+                    .getBody()).get("data").get("attributes");
+            String status = attributes.get("status").stringValue();
+            if ("COMPLETED".equals(status) || "FAILED".equals(status) || "CANCELLED".equals(status)) {
+                return attributes;
+            }
+            Thread.sleep(500);
+        }
+        throw new AssertionError("execution " + executionId + " never finished: " + attributes);
+    }
+
+    private ResponseEntity<String> createItem(String collection, String code) {
+        ObjectNode payload = mapper.createObjectNode();
+        payload.putObject("data").put("type", collection).putObject("attributes").put("code", code);
+        return gatewayClientWithToken(adminToken).post().uri("/" + SLUG + "/api/" + collection)
+                .contentType(MediaType.APPLICATION_JSON).body(payload.toString())
+                .retrieve().onStatus(st -> true, (req, resp) -> {}).toEntity(String.class);
     }
 
     private long queryCount(String sql, Object... args) throws Exception {

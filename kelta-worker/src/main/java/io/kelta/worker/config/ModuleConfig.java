@@ -13,7 +13,11 @@ import io.kelta.runtime.workflow.BeforeSaveHookRegistry;
 import io.kelta.runtime.workflow.module.ModuleContext;
 import io.kelta.runtime.outbound.ModuleHostGuard;
 import io.kelta.worker.listener.CollectionDeletionGuardHook;
+import io.kelta.worker.module.ExternalModuleInvoker;
 import io.kelta.worker.module.ExternalModulePlanner;
+import io.kelta.worker.module.ExternalModuleProxy;
+import io.kelta.worker.module.ExternalModuleReconcileScheduler;
+import io.kelta.worker.module.ExternalModuleRegistry;
 import io.kelta.worker.module.ExternalModuleService;
 import io.kelta.worker.module.JdbcModuleSigningKeyStore;
 import io.kelta.worker.module.ModuleAccessTokenService;
@@ -30,8 +34,11 @@ import io.kelta.worker.module.ModuleLoadRetryScheduler;
 import io.kelta.worker.module.ModuleMetadataProvisioner;
 import io.kelta.worker.module.ModuleProvenanceStore;
 import io.kelta.worker.module.ModuleRouteRegistry;
+import io.kelta.worker.module.ModuleScheduleSync;
 import io.kelta.worker.module.ModuleSignatureVerifier;
 import io.kelta.worker.module.RuntimeModuleManager;
+import io.kelta.worker.repository.ScheduledJobRepository;
+import io.kelta.worker.service.FieldMaskingService;
 import io.kelta.worker.service.S3StorageService;
 import io.kelta.worker.service.TenantSlugResolver;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -69,7 +76,7 @@ import java.util.Map;
  */
 @Configuration
 @ConditionalOnProperty(name = "kelta.modules.runtime.enabled", havingValue = "true", matchIfMissing = true)
-@Import(ModuleLoadRetryScheduler.class)
+@Import({ModuleLoadRetryScheduler.class, ExternalModuleReconcileScheduler.class})
 public class ModuleConfig {
 
     private static final Logger log = LoggerFactory.getLogger(ModuleConfig.class);
@@ -222,9 +229,54 @@ public class ModuleConfig {
                                                        ModuleConfigEventPublisher eventPublisher,
                                                        TenantSlugResolver tenantSlugResolver,
                                                        UserIdResolver userIdResolver,
+                                                       ExternalModuleRegistry externalModuleRegistry,
+                                                       ModuleScheduleSync moduleScheduleSync,
                                                        ObjectMapper objectMapper) {
-        return new ExternalModuleService(planner, moduleStore, provenanceStore, metadataProvisioner, principals,
-            tokens, moduleHttpClient, eventPublisher, tenantSlugResolver, userIdResolver, objectMapper);
+        ExternalModuleService service = new ExternalModuleService(planner, moduleStore, provenanceStore,
+            metadataProvisioner, principals, tokens, moduleHttpClient, eventPublisher, tenantSlugResolver,
+            userIdResolver, objectMapper);
+        service.setInvocation(externalModuleRegistry, moduleScheduleSync);
+        return service;
+    }
+
+    /**
+     * The single path of every call to an external module (part 9d): status gate, per-pod circuit
+     * breaker, service-principal token, signed request through {@link ModuleHttpClient}, metrics.
+     */
+    @Bean
+    public ExternalModuleInvoker externalModuleInvoker(ModuleStore moduleStore, ModuleHttpClient moduleHttpClient,
+                                                       ModuleAccessTokenService tokens,
+                                                       TenantSlugResolver tenantSlugResolver,
+                                                       @Nullable MeterRegistry meterRegistry) {
+        return new ExternalModuleInvoker(moduleStore, moduleHttpClient, tokens, tenantSlugResolver, meterRegistry);
+    }
+
+    /** This pod's registrations of external modules (handlers, hooks, entitlements port), from their rows. */
+    @Bean
+    public ExternalModuleRegistry externalModuleRegistry(ModuleStore moduleStore,
+                                                         ActionHandlerRegistry actionHandlerRegistry,
+                                                         BeforeSaveHookRegistry beforeSaveHookRegistry,
+                                                         ModuleServiceRegistry moduleServiceRegistry,
+                                                         ExternalModuleInvoker externalModuleInvoker,
+                                                         JdbcTemplate jdbcTemplate,
+                                                         CollectionRegistry collectionRegistry,
+                                                         FieldMaskingService fieldMaskingService,
+                                                         ObjectMapper objectMapper) {
+        return new ExternalModuleRegistry(moduleStore, actionHandlerRegistry, beforeSaveHookRegistry,
+            moduleServiceRegistry, externalModuleInvoker, jdbcTemplate, collectionRegistry, fieldMaskingService,
+            objectMapper);
+    }
+
+    @Bean
+    public ExternalModuleProxy externalModuleProxy(ExternalModuleRegistry externalModuleRegistry,
+                                                   ExternalModuleInvoker externalModuleInvoker) {
+        return new ExternalModuleProxy(externalModuleRegistry, externalModuleInvoker);
+    }
+
+    @Bean
+    public ModuleScheduleSync moduleScheduleSync(ScheduledJobRepository scheduledJobRepository,
+                                                 ObjectMapper objectMapper) {
+        return new ModuleScheduleSync(scheduledJobRepository, objectMapper);
     }
 
     @Bean

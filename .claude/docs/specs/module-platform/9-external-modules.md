@@ -1,8 +1,9 @@
 # Slice 9 — External Modules: Out-of-Process Add-Ons over HTTP
 
 > **Status:** 🟡 **In progress** — 9a (spec + contract) merged 2026-10-30; 9b (service principal)
-> built 2026-10-30; 9c (install by URL) built 2026-10-30 — external modules install, upgrade and
-> uninstall, but nothing invokes them until 9d. Planning spec for replacing the
+> built 2026-10-30; 9c (install by URL) built 2026-10-30; 9d (invocation) built 2026-10-30 —
+> external modules install, run flow actions, hooks, the entitlements port, routes, webhooks and
+> schedules; record events, UI bundle pinning and the consent screen are 9e. Planning spec for replacing the
 > in-process JAR module path with modules that run as **separate HTTP services, in any language**.
 > The machine-readable protocol contract is
 > [`docs/module-protocol/openapi.yaml`](../../../../docs/module-protocol/openapi.yaml); this
@@ -81,7 +82,7 @@ by hash at install so a running module cannot swap it later (§3.9).
 | 9a | Protocol contract + this spec (docs only) | — | — |
 | 9b | Module service principal: `SERVICE` user type, manifest-generated profile, client_credentials token resolves to it — **built** (V220, `ModuleServicePrincipalService`; install does not call it until 9c) | **yes, no auto-merge** | 9a |
 | 9c | Registry + install by URL: manifest v2 parser, plan/consent, metadata provisioning, worker signing key + JWKS, `KELTA_MODULE_ALLOWED_HOSTS` — **built** (V221, `ExternalModuleService`, `ExternalModulePlanner`, `ModuleUninstaller`, `ModuleAssertionSigner`, `ModuleHostGuard`). Deferred: UI bundle pinning (9e), schedule registration (9d), `settings` validation (column only) | **yes, no auto-merge** | 9b |
-| 9d | Invocation layer: remote actions, before-save hooks, service ports, route + webhook proxies, schedules, timeouts, circuit breaker, `DEGRADED`, metrics | **yes, no auto-merge** | 9c |
+| 9d | Invocation layer: remote actions, before-save hooks, service ports, route + webhook proxies, schedules, timeouts, circuit breaker, `DEGRADED`, metrics — **built** (`ExternalModuleRegistry`, `ExternalModuleInvoker`, `ModuleCircuitBreaker`, `RemoteActionHandler`, `RemoteBeforeSaveHook`, `RemoteEntitlementProvider`, `ExternalModuleProxy`, `ModuleScheduleSync`; no migration — V221 already allows `MODULE_ACTION`) | **yes, no auto-merge** | 9c |
 | 9e | Event delivery (NATS → HTTP) + UI bundle pinning + Modules page install-by-URL and consent screen | — | 9d |
 | 9f | Rust billing module + `kelta-module` Rust SDK; cut the prod tenant over | — | 9e |
 | 9g | Delete the JAR path | — | 9f soaked one release |
@@ -300,7 +301,7 @@ Every state change publishes `kelta.config.module.changed.<tenantId>.<moduleId>`
 (`ModuleConfigEventPublisher`, already exists), and every pod refreshes its **endpoint registry**
 from the database. No code is loaded on a pod, so the "install activates immediately" and
 "cross-pod divergence" hazards of the JAR path do not apply: a pod that missed an event reads
-current rows on its next refresh (part 9d adds a periodic reconcile, every 60 s).
+current rows on its next refresh (part 9d reconciles every 60 s, `ExternalModuleReconcileScheduler`).
 
 ### 3.6 Capability map (nothing lost from the in-process SPI)
 
@@ -328,6 +329,15 @@ timeout is the enforcement.
 | Timeout | `ModuleTimeoutException` | `failurePolicy`: `fail` → `503`, `ignore` → proceed | `EMPTY` | `502` |
 | Connect error / 5xx / invalid body | `ModuleUnavailableException` | as timeout | `EMPTY` | `502` |
 | Module disabled or breaker open | `ModuleUnavailableException` | as timeout | `EMPTY` | `503` |
+
+*As built (9d):* a route whose module cannot be reached (connect error) answers `503`
+`ModuleUnavailable` like an open breaker, not `502` — the invoker cannot tell them apart and both
+mean "retry later"; a timeout or a module `5xx` is `502 ModuleUnreachable`. A **disabled** (or
+`FAILED`) install's hooks and entitlements port are unregistered rather than failing: its hooks
+are skipped and the write proceeds, its port is absent (so `EMPTY`). Only a breaker that opens on
+an `ACTIVE`/`DEGRADED` install takes the "as timeout" row. A hook's `fieldUpdates` key that its
+principal may not write (§3.4) is a module failure and follows `failurePolicy`. The flow error code
+for `success: false` is the handler's failure result, message `<error.code>: <error.message>`.
 
 `TaskStateExecutor` uses a thrown exception's simple class name as the flow error code, so the
 remote handler throws `ModuleUnavailableException` (the class today's quarantined handlers throw)
@@ -361,11 +371,16 @@ filtered per §3.4.
 
 ### 3.7 Schedules
 
-`schedules[]` become `scheduled_jobs` rows with a new `job_type = 'MODULE_ACTION'` and
-`job_reference_id = '<moduleId>:<actionKey>'`, executed by `ScheduledJobExecutorService` (today it
-handles `FLOW`, `SCRIPT`, `REPORT_EXPORT`, `DATA_EXPORT`). The action is invoked as in §3.6 with no
-`act` claim. Rows are owned by the install and removed on uninstall. This replaces billing's
-"a module has no scheduler; create a scheduled flow by hand" workaround.
+`schedules[]` become `scheduled_job` rows with a new `job_type = 'MODULE_ACTION'`, executed by
+`ScheduledJobExecutorService` (today it handles `FLOW`, `SCRIPT`, `REPORT_EXPORT`, `DATA_EXPORT`).
+The action is invoked as in §3.6 with no `act` claim. Rows are owned by the install and removed on
+uninstall. This replaces billing's "a module has no scheduler; create a scheduled flow by hand"
+workaround. *As built (9d, `ModuleScheduleSync`):* `job_reference_id` is the install id (the column
+is `varchar(36)`, too short for `<moduleId>:<actionKey>`), `name` is
+`module:<moduleId>:<action>@<cron>` (truncated to 200), `config` is `{"moduleId", "action"}`, and the
+timezone is `UTC`. Sync runs on install and upgrade: a schedule whose name is gone is deleted (with
+its `job_execution_log` rows), a new one inserted, so a changed cron is a new job. The call's
+`Idempotency-Key` is `<jobId>:<fireTime>`; a non-callable install records `SKIPPED`.
 
 ### 3.8 Settings
 
@@ -432,7 +447,7 @@ Later parts, representative files (each part's PR lists all):
 |---|---|
 | 9b | `kelta-auth/.../service/ConnectedAppRegisteredClientRepository.java`, `KeltaTokenCustomizer.java`; `kelta-gateway/.../UserIdentityResolutionFilter.java`, `authz/RouteAuthorizationFilter.java`; worker `CerbosPolicyGenerator.java`, new `ModuleServicePrincipalService`; user listing / governor-limit counting to exclude `SERVICE` |
 | 9c | (as built) runtime-core: new `ExternalModuleManifest`, `ModuleVersion`, `ModuleManifestParser.parseExternal` (v2), new `outbound/ModuleHostGuard` + `OutboundTargetGuard` (so `OutboundHttpClient` takes either guard); worker: `ModuleController.java`, `ModuleMetadataProvisioner.java` (plan/provision with ownership), new `ModuleAssertionSigner`, `ModuleJwksController`, `ModuleHttpClient`, `ModuleAccessTokenService`, `ExternalModulePlanner`, `ExternalModuleService`, `ModuleUninstaller`, `PlatformVersion`; `ModuleServicePrincipalService.updatePermissions`; `CollectionDeletionGuardHook.FORCE`; gateway `application.yml` `unauthenticated-paths` += `/api/modules/.well-known/jwks.json` (the file, not the directory) |
-| 9d | new `RemoteActionHandler`, `RemoteBeforeSaveHook`, `ModuleHttpClient` (assertion, token, timeouts, breaker, metrics); `ModuleRegistrar.java`, `ModuleHttpController.java`, `ModuleWebhookController.java`, `ModuleEntitlementService.java`, `ScheduledJobExecutorService.java` |
+| 9d | (as built) runtime-core: new `ModuleTimeoutException` (extends `ModuleUnavailableException`), `ActionContext.stepName/attempt`, `OutboundHttpClient.Request.deadline`, `ModuleStore.findAllExternal/compareAndSetStatus`, `GlobalExceptionHandler` 503 `ModuleUnavailable`/`ModuleTimeout`; worker: new `ExternalModuleRegistry` (per-pod endpoint registry; registers into `ActionHandlerRegistry`, `BeforeSaveHookRegistry`, `ModuleServiceRegistry` — not `ModuleRegistrar`, which stays JAR-only), `ExternalModuleInvoker`, `ModuleCircuitBreaker`, `ModulePrincipalAccess`, `RemoteActionHandler`, `RemoteBeforeSaveHook`, `RemoteEntitlementProvider` (`ModuleEntitlementService` unchanged), `ExternalModuleProxy`, `ModuleScheduleSync`, `ExternalModuleReconcileScheduler`; `ModuleHttpClient.invoke`; `ModuleHttpController.java`, `ModuleWebhookController.java` (raw bytes), `ModuleController.java` (health), `ModuleEventListener.java`, `ExternalModuleService.java`, `ScheduledJobRepository.java`, `ScheduledJobExecutorService.java` |
 | 9e | new `ModuleEventDeliveryListener` (beside `RecordWebhookPublisher.java`), `NatsSubscriptionConfig.java`; `ModuleController.java` (bundle pin); `kelta-ui/app/src/pages/ModulesPage/` (install by URL, consent, settings form) |
 | 9f | `kelta-modules/billing/` (Rust, replaces the Java module), new `kelta-modules/sdk-rust/`; homelab-argo manifests (outside this repo) |
 | 9g | delete `SandboxedModuleClassLoader`, `ModuleLoader`, `ModuleJarService`, `ModuleSignatureVerifier`, `ModuleLoadRetryScheduler`, `ModuleLoadFailureClassifier`, signing-key endpoints, `install-jar`; JAR branches in `RuntimeModuleManager`. Compiled-in `KeltaModule`s (`runtime-module-core`, `runtime-module-integration`) stay |
@@ -463,7 +478,12 @@ beans.
   install with `planHash` → owned collection exists → the principal's `Kelta-Access-Token` reads
   its grant and owned collection and is refused `VIEW_SETUP` → the lifecycle assertion verifies
   against the anonymous JWKS → uninstall plan + `DELETE` remove the collection and deactivate the
-  principal; a changed manifest is `409 PlanChanged`). The stack's Cerbos is allow-all and its gateway runs with
+  principal; a changed manifest is `409 PlanChanged`). 9d adds `invokesTheModule` to it (flow Task →
+  action with `Idempotency-Key` `<executionId>:Ping`; the hook stamps a field and vetoes a create;
+  route proxy with query and `act`; webhook proxy drops `Cookie`; entitlements `maxActiveWatches: 0`
+  refuses a watch with 422; the `MODULE_ACTION` job fires; disable unregisters hook and route and
+  fails the step with `ModuleUnavailableException`; uninstall deletes the job). The harness now runs
+  the worker scheduler (`SCHEDULER_ENABLED=true`, 2 s poll). Event delivery is 9e. The stack's Cerbos is allow-all and its gateway runs with
   `PERMISSIONS_ENABLED=false`, so the object-permission deny is proven on a real PDP by
   `CerbosGeneratedPolicyIT.moduleServicePrincipalReadsOnlyItsGrant` and the plain-app 403 by
   `RouteAuthorizationFilterTest.connectedAppTokenShapes`.

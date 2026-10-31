@@ -11,6 +11,8 @@ import io.kelta.runtime.validation.RecordValidationException;
 import io.kelta.runtime.validation.ValidationException;
 import io.kelta.runtime.validation.ValidationResult;
 import io.kelta.runtime.workflow.HookConflictException;
+import io.kelta.runtime.workflow.ModuleTimeoutException;
+import io.kelta.runtime.workflow.ModuleUnavailableException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
@@ -291,6 +293,31 @@ public class GlobalExceptionHandler {
         error.setMeta(meta);
 
         return ResponseEntity.status(HttpStatus.CONFLICT).body(errorBody(error));
+    }
+
+    /**
+     * Handles a write that an external module's before-save hook could not decide: the module
+     * timed out, was unreachable, answered with an error, or its circuit breaker is open, and the
+     * hook's {@code failurePolicy} is {@code fail}. Returns 503 {@code ModuleTimeout} or
+     * {@code ModuleUnavailable}; nothing was written, so the client may retry.
+     */
+    @ExceptionHandler(ModuleUnavailableException.class)
+    public ResponseEntity<Map<String, Object>> handleModuleUnavailable(
+            ModuleUnavailableException ex, HttpServletRequest request) {
+
+        String requestId = generateRequestId();
+        logger.warn("Module unavailable [requestId={}, module={}]: {}", requestId, ex.moduleId(), ex.getMessage());
+
+        // The message is logged, never returned: it can quote the module's own error body. The
+        // caller gets which module and whether it timed out, which is what it can act on.
+        boolean timedOut = ex instanceof ModuleTimeoutException;
+        JsonApiError error = new JsonApiError("503",
+            ex instanceof ModuleTimeoutException ? "ModuleTimeout" : "ModuleUnavailable",
+            "Service Unavailable", "Module '" + ex.moduleId() + "' "
+                + (timedOut ? "did not answer in time" : "is unavailable"));
+        error.setMeta(Map.of("requestId", requestId, "moduleId", String.valueOf(ex.moduleId())));
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(errorBody(error));
     }
 
     /**
