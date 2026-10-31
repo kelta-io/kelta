@@ -64,6 +64,7 @@ class SqlQueryBuilderTest {
             .addField(FieldDefinition.string("name"))
             .addField(FieldDefinition.integer("score"))
             .addField(new FieldDefinition("tags", FieldType.MULTI_PICKLIST, true, false, false, null, null, null, null, null))
+            .addField(FieldDefinition.json("touches"))
             .build();
 
     private final SqlQueryBuilder builder = new SqlQueryBuilder((value, type) -> value);
@@ -113,5 +114,26 @@ class SqlQueryBuilderTest {
         assertThat(where(List.of(filter("tags", FilterOperator.ICONTAINS, "RED")), params))
                 .isEqualTo("EXISTS (SELECT 1 FROM unnest(\"tags\") AS elt WHERE LOWER(elt) = ?)");
         assertThat(params).containsExactly("red", "red", "red", "red");
+    }
+
+    @Test
+    @DisplayName("JSONB-backed JSON columns match text-pattern operators against their JSON text")
+    void jsonColumnTextPatternOperators() {
+        List<Object> params = new ArrayList<>();
+        assertThat(where(List.of(filter("touches", FilterOperator.CONTAINS, "agents/x.sh")), params))
+                .isEqualTo("\"touches\"::text LIKE ?");
+        assertThat(where(List.of(filter("touches", FilterOperator.STARTS, "[\"a")), params))
+                .isEqualTo("\"touches\"::text LIKE ?");
+        assertThat(where(List.of(filter("touches", FilterOperator.ENDS, "\"]")), params))
+                .isEqualTo("\"touches\"::text LIKE ?");
+        assertThat(where(List.of(filter("touches", FilterOperator.ICONTAINS, "AGENTS")), params))
+                .isEqualTo("LOWER(\"touches\"::text) LIKE ?");
+        assertThat(where(List.of(filter("touches", FilterOperator.ISTARTS, "[")), params))
+                .isEqualTo("LOWER(\"touches\"::text) LIKE ?");
+        assertThat(where(List.of(filter("touches", FilterOperator.IENDS, "]")), params))
+                .isEqualTo("LOWER(\"touches\"::text) LIKE ?");
+        assertThat(where(List.of(filter("touches", FilterOperator.IEQ, "[]")), params))
+                .isEqualTo("LOWER(\"touches\"::text) = ?");
+        assertThat(params).containsExactly("%agents/x.sh%", "[\"a%", "%\"]", "%agents%", "[%", "%]", "[]");
     }
 }

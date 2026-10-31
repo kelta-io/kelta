@@ -9,6 +9,7 @@ import io.kelta.runtime.query.Pagination;
 import io.kelta.runtime.query.QueryRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -102,6 +103,7 @@ class SqlQueryBuilderFilterOperatorIntegrationTest {
         items = new CollectionDefinitionBuilder().name("filter_operator_items")
                 .addField(FieldDefinition.string("name"))
                 .addField(FieldDefinition.integer("score"))
+                .addField(FieldDefinition.json("touches"))
                 .build();
         adapter.initializeCollection(items);
         insert("r1", "Alpha Widget", 10);
@@ -111,12 +113,19 @@ class SqlQueryBuilderFilterOperatorIntegrationTest {
     }
 
     private void insert(String id, String name, int score) {
+        insert(id, name, score, null);
+    }
+
+    private void insert(String id, String name, int score, List<String> touches) {
         Map<String, Object> data = new HashMap<>();
         data.put("id", id);
         if (name != null) {
             data.put("name", name);
         }
         data.put("score", score);
+        if (touches != null) {
+            data.put("touches", touches);
+        }
         data.put("createdBy", "tester");
         data.put("updatedBy", "tester");
         data.put("createdAt", Instant.parse("2026-01-01T00:00:00Z"));
@@ -139,5 +148,17 @@ class SqlQueryBuilderFilterOperatorIntegrationTest {
         for (Case c : CASES.get(operator)) {
             assertThat(ids(c.filter())).as(c.filter().toString()).containsExactlyElementsOf(c.expectedIds());
         }
+    }
+
+    @Test
+    @DisplayName("text-pattern operators on a JSONB column match its JSON text instead of failing")
+    void jsonColumnTextPatterns() {
+        insert("r5", "Gamma", 50, List.of("agents/planner/run.sh", "tenant/apply.sh"));
+        insert("r6", "Delta", 60, List.of("docs/README.md"));
+
+        assertThat(ids(new FilterCondition("touches", FilterOperator.CONTAINS, "agents/planner"))).containsExactly("r5");
+        assertThat(ids(new FilterCondition("touches", FilterOperator.CONTAINS, "readme"))).isEmpty();
+        assertThat(ids(new FilterCondition("touches", FilterOperator.ICONTAINS, "readme"))).containsExactly("r6");
+        assertThat(ids(new FilterCondition("touches", FilterOperator.STARTS, "[\"docs/"))).containsExactly("r6");
     }
 }
