@@ -298,7 +298,7 @@ class FlowExecutionControllerTest {
     void retryKeepsTheRecordedActorSource() {
         FlowStore flowStore = mock(FlowStore.class);
         controller = new FlowExecutionController(flowEngine, flowStore, initialStateBuilder,
-                flowRepository, flowActorResolver, new CerbosPermissionResolver(), bootstrapRepository);
+                flowRepository, flowActorResolver, new AdminPermissionGuard(new CerbosPermissionResolver(), bootstrapRepository));
         givenFlow(true);
         when(flowStore.loadExecution("exec-0")).thenReturn(Optional.of(new FlowExecutionData("exec-0", TENANT_ID,
                 FLOW_ID, FlowExecutionData.STATUS_FAILED, "owner-1", ActorSource.OWNER, null, Map.of(), null,
