@@ -66,7 +66,7 @@ Raw `JdbcTemplate` SQL issued with no tenant bound still relies on its own `WHER
 
 ### RLS invariants
 
-RLS is enforced in production (`NOBYPASSRLS` app role, V200–V202, V205). Rules that keep it working:
+RLS is enforced in production (`NOBYPASSRLS` app role, V200–V202, V205, V223). Rules that keep it working:
 - **Bind a tenant only with a `ScopedValue` helper** — `runWithTenant`/`callWithTenant(id, slug, …)`
   to act for a given tenant (shadows any outer binding), or `runWithTenantIfUnbound`/
   `callWithTenantIfUnbound` in shared code that must let an outer request binding win. There
@@ -84,7 +84,9 @@ RLS is enforced in production (`NOBYPASSRLS` app role, V200–V202, V205). Rules
   `field_version`, whose policies key strictly on the parent's `tenant_id`.
 - **Superset logins** are granted table by table on RLS-enforced `tenant_id` tables only
   (`supersetRoleIsGrantedOnlyTenantScopedTables`); pinned roles cannot hop tenants via the GUC
-  (V201). Tenant roles hold **no privilege on `tenant_db_role`** (it has no RLS — reading it lists
+  (V201) — but only on policies written with `kelta_pinned_tenant()`, so a new migration copies
+  the pinned expressions from `conventions.md`, never an older plain one
+  (`everyGucPolicyIsPinned` fails on any unpinned policy). Tenant roles hold **no privilege on `tenant_db_role`** (it has no RLS — reading it lists
   every tenant's id and DB role): the pin works through `kelta_pinned_tenant()`, SECURITY
   DEFINER with a fixed `search_path`. V215 revoked it from every pinned and `superset_%` role and
   applied the narrowing to roles provisioned before it (blanket public grant until next rotation);
@@ -1313,6 +1315,7 @@ its own change with a full compose run.
 One line each; full write-ups are in git history.
 
 **Security**
+- 2026-10-31 (rls-pin-late-policies) — two policies created after V201 (`notification`, `module_event_dead_letter`) lacked the pinned-role check; V223 re-pins every such policy generically; `RowLevelSecurityIntegrationTest` now fails on any unpinned policy (`everyGucPolicyIsPinned`, `pinnedRoleCannotHopTenantsOnTablesCreatedAfterV201`).
 - 2026-10-26 (PLT-826) — validation-rule reloads failed open: a DB error while loading a collection's rules registered an empty set (validation off until the next reload), deleting a rule broadcast nothing (other pods kept enforcing it), and a system collection first loaded inside one tenant's request registered only that tenant's rules (the rest went unvalidated until an unbound reload). Now a failed load keeps the previous rules (`ValidationRuleRegistry.markLoadFailed`/`markSystemCollectionLoadFailed`) and a collection whose rules never loaded refuses writes with 503 (`RulesUnavailableException`) until a load succeeds; `ValidationRuleRefreshHook` captures the rule's `collection_id` in `beforeDelete` and publishes the same `collection.changed` event on delete; `CollectionLifecycleManager` initialize (and a refresh of a never-fully-loaded system collection) reads every tenant's rules, off the bound `ScopedValue` scope on a fresh virtual thread so RLS selects `admin_bypass`, while a tenant-bound refresh still replaces only that tenant's set; a tenant-owned collection loaded while another tenant is bound reads its owner's rules the same way instead of skipping the load. `CollectionLifecycleManagerValidationRuleLoadFailureTest`, `ValidationRuleRefreshHookTest`, `ValidationRuleRegistryTest`. Still open: a delete whose `beforeDelete` lookup fails is logged and not broadcast (other pods keep the rule until the collection's next refresh).
 - 2026-10-25 (KLT-790) — deleting a collection unregistered it from each pod's `ConcurrentCollectionRegistry` by bare name, whose fallback removes the first entry with that name in any tenant: deleting tenant A's `orders` could drop tenant B's, so B's `/api/orders` 404'd on that pod until restart (the likely cause of the PR #2011 `ChildResourceScopingScenarioTest` failure: `/orders` never answered 200 in its 20 s wait). `CollectionLifecycleManager.teardownCollection` now unregisters the definition's `registryKey()`. `CollectionLifecycleManagerTeardownTest`. `ValidationRuleRegistry` was keyed by bare name too; resolved by kelta#2046 (keyed by tenant).
 - 2026-10-12 (password-change-sign-out) — changing a password in kelta-auth (`/auth/password/change`, email-link `/auth/password/reset`, forced `/change-password`) now ends the user's other HTTP sessions and revokes their OAuth2 authorizations (refresh tokens), scoped by tenant + user id (`UserSessionRevoker`); `/auth/password/change` resolves the signed-in user by tenant + id instead of by email. `PasswordChangeSignOutFlowTest`, `SharedHttpSessionIntegrationTest`.
