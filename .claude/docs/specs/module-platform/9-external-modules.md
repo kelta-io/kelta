@@ -7,7 +7,9 @@
 > webhooks and schedules, receive record events, and ship a pinned admin UI bundle; 9e.1
 > (credential read) built 2026-10-31 — a module reads the tenant credentials its manifest declares
 > (§3.3); 9f (Rust `kelta-module` SDK + `kelta-billing` service, CI, image, harness scenario)
-> built 2026-10-31, prod cutover pending (`kelta-modules/billing/CUTOVER.md`); the settings form
+> built 2026-10-31 and every billing tenant cut over the same day (`kelta-modules/billing/CUTOVER.md`).
+> 9g (delete the JAR path) waits for the last tenant JAR module, a long-running ingest action, to
+> move out of process, which needs 9h (async actions). The settings form
 > (§3.8) and a dead-letter list are not built yet. Planning spec for replacing the
 > in-process JAR module path with modules that run as **separate HTTP services, in any language**.
 > The machine-readable protocol contract is

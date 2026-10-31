@@ -142,4 +142,22 @@ Record the result here, with the date, the image tag and any deviation.
 
 | Date | Image | Tenant | Result |
 |---|---|---|---|
-| — | — | — | not yet run (needs the emf and homelab-argo PRs merged and deployed) |
+| 2026-10-31 | `main-03f18ce` | sandbox (JAR → Rust rehearsal, CUTOVER.md steps 0–6) | **Pass, with the deviations below.** Gap 11 s. Exports unchanged apart from the new `lastStripeEventAt`; `me` and `plans` equal the JAR's. Checkout returns a `cs_test_` URL, portal returns a URL. Two real `customer.subscription.updated` deliveries (cancel at period end, then renew, both done in the test-mode customer portal) answered and updated the row, including `lastStripeEventAt`. Forged and unsigned webhooks: `401`, no change. Quota: a create past a zero cap → `400` `VALIDATION_FAILED` with the rule's message. Module log: no `ERROR`, no secret, token or query string. |
+| 2026-10-31 | `main-03f18ce` | production tenant A (no billing rows, 6 plans, no rules) | **Pass.** Gap 1.5 s. Exports, `me` and `plans` unchanged. Checkout returns a live URL (not paid; no customer created). |
+| 2026-10-31 | `main-03f18ce` | production tenant B (1 active subscription, 3 quota rules) | **Pass.** Gap 9.5 s. Exports unchanged apart from the new `lastStripeEventAt`; `me`, `plans` and a quota refusal equal the JAR's. Checkout returns a live URL (not paid; no customer created). |
+
+Deviations and gaps from the sandbox run:
+
+- **Flow-invoked member actions fail.** A flow step calling `resolve-entitlements`,
+  `create-checkout-session` or `create-portal-session` answers `No calling member`, because the
+  platform sends no actor on a flow step. The JAR read the flow's user. This is held for an owner
+  decision in kelta-io/kelta#2116. Neither production tenant has an active flow that calls a
+  billing action.
+- **Not exercised live:**
+  - A new checkout paid end to end: the sandbox member already holds the subscription.
+  - A one-time pass and its hourly expiry: the sandbox has no `ONE_TIME` plan.
+  - The resend of an older subscription event: this needs Stripe dashboard access.
+  - All three are covered by unit tests.
+- **Still to do in the Stripe dashboard:** subscribe each production webhook endpoint to
+  `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed`
+  (CUTOVER.md step 0). Card payments do not need them.
