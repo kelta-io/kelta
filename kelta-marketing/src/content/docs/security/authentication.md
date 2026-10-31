@@ -79,7 +79,7 @@ endpoints. "Open" means no session is needed; "signed in" needs the auth-server 
 | `GET`/`POST /forgot-password`, `GET`/`POST /reset-password` | open | Signed-out password reset pages: request a link, then set a new password. |
 | `POST /auth/password/reset-request`, `POST /auth/password/reset` | open | The same reset as JSON for an external frontend; the request always answers the same, account or not. |
 | `POST /auth/email/send-verification`, `GET /auth/email/verify` | signed in | Email-ownership verification; the emailed link is valid for 48 hours. |
-| `POST /auth/direct-login` | open, off by default | Username + password in, tokens out, for headless test runs. Enabled only with `kelta.auth.direct-login.enabled=true`. |
+| `POST /auth/direct-login` | open, off by default | Username + password in, tokens out, for headless test runs. Enabled only with `kelta.auth.direct-login.enabled=true`. An account that requires MFA (enrolled, or its tenant requires it) is refused with `401 mfa_required` and must use the browser sign-in; failed attempts count toward lockout as on the sign-in page. |
 | `POST`/`DELETE /auth/session` | open | Exchange a federated provider's token for an auth-server session cookie, and end it. |
 | `GET /logout/saml2/initiate` | open | Starts SAML Single Logout at the identity provider ([SSO](/docs/security/sso/)). |
 | `GET /portal/login`, `POST /portal/login/request`, `GET /portal/login/verify` | open | Portal magic-link pages: request a link, then open it. |

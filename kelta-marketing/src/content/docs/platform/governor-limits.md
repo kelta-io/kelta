@@ -17,7 +17,7 @@ defaults; an operator can override any key.
 | `maxUsers`, `maxPortalUsers` | when creating or inviting users |
 | `maxCollections`, `maxFieldsPerCollection` | when creating collections and fields |
 | `maxWorkflows`, `maxReports` | when creating flows and reports |
-| `aiEnabled`, `aiTokensPerMonth` | AI assistant availability and monthly token budget |
+| `aiEnabled`, `aiTokensPerMonth` | reported only; the AI assistant enforces the switch and budget in its own [AI settings](/docs/console/ai-assistant/) |
 | `campaignEmailsPerDay` | outbound campaign email (optional feature area) |
 | `telehealthEnabled`, `videoMinutesPerMonth` | optional feature area |
 | `archiveAfterDays`, `retentionYears`, `purgeLiveAfterDays` | data-lifecycle policies used by archival features |

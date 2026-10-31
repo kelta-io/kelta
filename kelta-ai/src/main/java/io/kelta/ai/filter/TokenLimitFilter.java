@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.MediaType;
+import org.springframework.http.server.PathContainer;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -34,9 +35,29 @@ public class TokenLimitFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        String path = request.getRequestURI();
-        // Only filter chat endpoints, not config or history endpoints
-        return !path.startsWith("/api/ai/chat");
+        // Only filter chat endpoints, not config or history endpoints. Test the path as Spring MVC
+        // matches it (segments percent-decoded, path parameters and empty segments dropped), so
+        // every spelling that reaches a chat mapping is filtered.
+        return !matchedPath(request.getRequestURI()).startsWith("/api/ai/chat");
+    }
+
+    /** {@code rawPath} as the handler mappings match it; the raw path when it cannot be decoded. */
+    static String matchedPath(String rawPath) {
+        if (rawPath == null || rawPath.isEmpty()) {
+            return "/";
+        }
+        StringBuilder matched = new StringBuilder(rawPath.length());
+        try {
+            for (PathContainer.Element element : PathContainer.parsePath(rawPath).elements()) {
+                if (element instanceof PathContainer.PathSegment segment && !segment.valueToMatch().isEmpty()) {
+                    matched.append('/').append(segment.valueToMatch());
+                }
+            }
+        } catch (IllegalArgumentException e) {
+            // Malformed percent-encoding: no handler mapping matches such a path either.
+            return rawPath;
+        }
+        return matched.isEmpty() ? "/" : matched.toString();
     }
 
     @Override

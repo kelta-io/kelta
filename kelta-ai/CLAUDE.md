@@ -57,6 +57,17 @@ public record AiConfigProperties(
 ) {}
 ```
 
+### AI settings (`AiConfigController`, `/api/ai/config`)
+- `GET` needs `API_ACCESS`. `PUT` needs `MANAGE_TENANTS` — enforced by the **gateway**
+  (`RouteAuthorizationFilter`, `static-ai` route, on the decoded path), since this service holds no
+  permission data. Every key is a platform control: `TokenLimitFilter` enforces `aiTokensPerMonth`
+  and `aiEnabled` from these `ai_config` rows (not the worker's governor-limit values), and the
+  model and max tokens decide request cost.
+- A `PUT` accepts only `CONFIG_KEYS` (`model`, `maxTokens`, `temperature`, `aiTokensPerMonth`,
+  `aiEnabled`), each validated (`normalize`) before anything is written; an unknown key or bad value
+  is `400 {"errors":[…]}` with `code: VALIDATION_FAILED` and `source.pointer` naming the key, and
+  nothing is stored. A new setting needs an entry in `CONFIG_KEYS`, a `normalize` case and a test.
+
 ### Error Handling
 - No retry/backoff around Anthropic calls — a 429/5xx/context-length error surfaces to the caller on that turn
 - `ChatService.chat()` and `chatStream()` both catch any exception from the tool loop and return/emit a clean `{"code": "AI_PROVIDER_ERROR", "message": ...}` shape instead of letting it propagate as a raw 500 — `chatStream()` as an `error` SSE event, `chat()` as an `error` key in the response map

@@ -83,6 +83,14 @@ public class CerbosPolicySeeder {
 
     @EventListener(ApplicationReadyEvent.class)
     public void seedPolicies() {
+        // Without an Admin API password nothing can be pushed. Skip before the lock and, above
+        // all, before the done-marker: a marker written by a seed that pushed nothing would make
+        // the pods that start once the password is set skip the seed this build needs.
+        if (!syncService.isAdminApiConfigured()) {
+            meterRegistry.counter("cerbos.policy.seed.skipped", "reason", "admin-password-missing").increment();
+            log.error("Cerbos startup seed skipped: {}", CerbosPolicySyncService.ADMIN_PASSWORD_MISSING);
+            return;
+        }
         if (alreadySeededByThisBuild()) {
             skippedCounter.increment();
             log.info("Cerbos policies already seeded by build {} and base policy present — skipping startup seed",

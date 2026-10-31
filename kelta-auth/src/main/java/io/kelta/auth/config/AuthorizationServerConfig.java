@@ -48,6 +48,7 @@ import io.kelta.auth.federation.FederatedLoginSuccessHandler;
 import io.kelta.auth.federation.FederatedUserMapper;
 import io.kelta.auth.model.KeltaUserDetails;
 import io.kelta.auth.service.AuthDomainResolver;
+import io.kelta.auth.service.LoginMfaPolicy;
 import io.kelta.auth.service.PasswordPolicyService;
 import io.kelta.auth.service.TotpService;
 import io.kelta.auth.service.WorkerClient;
@@ -149,6 +150,7 @@ public class AuthorizationServerConfig {
                     org.springframework.security.oauth2.core.user.OAuth2User> oauth2LoginUserService) throws Exception {
         org.springframework.security.web.authentication.SavedRequestAwareAuthenticationSuccessHandler
                 savedRequestHandler = new org.springframework.security.web.authentication.SavedRequestAwareAuthenticationSuccessHandler();
+        LoginMfaPolicy mfaPolicy = new LoginMfaPolicy(totpService, passwordPolicyService);
 
         http
                 .cors(Customizer.withDefaults())
@@ -191,17 +193,16 @@ public class AuthorizationServerConfig {
                         .loginPage("/login")
                         .loginProcessingUrl("/login")
                         .successHandler((request, response, authentication) -> {
-                            // Check MFA requirements after successful password authentication
-                            if (authentication.getPrincipal() instanceof KeltaUserDetails userDetails
-                                    && totpService != null) {
+                            // Check MFA requirements after successful password authentication.
+                            // LoginMfaPolicy is the rule /auth/direct-login applies too.
+                            if (authentication.getPrincipal() instanceof KeltaUserDetails userDetails) {
                                 String userId = userDetails.getId();
                                 String tenantId = userDetails.getTenantId();
                                 String email = userDetails.getEmail();
 
-                                boolean mfaEnrolled = totpService.isEnrolled(userId);
-                                boolean mfaRequired = isMfaRequiredForTenant(passwordPolicyService, tenantId);
+                                LoginMfaPolicy.Step mfaStep = mfaPolicy.requiredStep(userId, tenantId);
 
-                                if (mfaEnrolled) {
+                                if (mfaStep == LoginMfaPolicy.Step.CHALLENGE) {
                                     // User has MFA — redirect to challenge
                                     HttpSession session = request.getSession();
                                     session.setAttribute(MfaController.SESSION_MFA_PENDING, true);
@@ -213,7 +214,7 @@ public class AuthorizationServerConfig {
                                     return;
                                 }
 
-                                if (mfaRequired && !mfaEnrolled) {
+                                if (mfaStep == LoginMfaPolicy.Step.SETUP) {
                                     // Tenant requires MFA but user not enrolled — redirect to setup
                                     HttpSession session = request.getSession();
                                     session.setAttribute(MfaController.SESSION_MFA_PENDING, true);
@@ -465,10 +466,6 @@ public class AuthorizationServerConfig {
                 }
             }
         };
-    }
-
-    private boolean isMfaRequiredForTenant(PasswordPolicyService policyService, String tenantId) {
-        return policyService.isMfaRequired(tenantId);
     }
 
     private static RSAKey generateRsaKey() {

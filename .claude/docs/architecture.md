@@ -417,6 +417,12 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
     pinned against a real PDP by `CerbosGeneratedPolicyIT` (harness) via the golden files in
     `kelta-worker/src/test/resources/cerbos/golden/` — change the generator, regenerate the
     goldens (the unit test prints the JSON on drift), and the IT re-checks the allow/deny matrix.
+  - **How policies reach Cerbos.** The worker's `CerbosPolicySyncService` pushes the generated
+    policies to the Cerbos Admin API (seed at startup, then per tenant on every profile or
+    permission change), authenticated with `KELTA_WORKER_CERBOS_ADMIN_PASSWORD`, which has **no
+    built-in default**. Blank: one startup ERROR, every push skipped with an ERROR, checks keep using
+    what Cerbos already holds, and permission changes stop taking effect. **Deploy ordering: set it
+    before deploying a worker with this change** (`integrations.md` → Cerbos policy seeding).
 - **Endpoints nested under a collection's own path** (`/api/{collection}/<literal>/...`) need no
   gateway static route: `RouteRegistry.findByPath` resolves the caller's collection route and the
   gateway runs that collection's Cerbos object check for the HTTP verb (POST→`create`,
@@ -530,6 +536,25 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   (`GatewayStaticRoutesSyncTest` fails on drift). Adding a row is a security decision —
   check which UI flows read the route under an ordinary profile first; most seeded profiles
   ("Standard User") hold neither `VIEW_ALL_DATA` nor per-collection grants on system collections.
+- **Static-route prefix rules test the decoded path.** The gateway routes on the raw path
+  (`/api/ai/**` matches `/api/ai/%63onfig`), while the Spring MVC service behind it matches the
+  percent-decoded segments with path parameters (`;v=1`) dropped and empty segments skipped
+  (`/api/ai/config`). A prefix test on the raw path is therefore passed by encoding one letter.
+  `RouteAuthorizationFilter`'s static-route special cases (module signing keys, AI settings, below)
+  test `MatchedPath.of(path)` — the service's reading of the path — instead; a new prefix rule must
+  do the same. (Spring Security's `StrictServerWebExchangeFirewall` already refuses `;`, `//`, dot
+  segments and an encoded `/`, `.`, `%`, `\` or NUL, but not an encoded letter.)
+- **AI settings writes** (`PUT /api/ai/config`, kelta-ai `AiConfigController`): ride `static-ai`,
+  and `RouteAuthorizationFilter` gates every write on `/api/ai/config` on `MANAGE_TENANTS` — the
+  platform-administrator grant that also gates governor-limit writes, and the one the admin UI's AI
+  settings page requires. The seeded tenant "System Administrator" profile does not hold it. Reads
+  stay `API_ACCESS`. Every key (model, max tokens, temperature, the monthly token quota, the on/off
+  switch) is a platform control: the quota and switch are what kelta-ai's `TokenLimitFilter`
+  enforces, and the model and max tokens decide what a tenant's requests cost. The rule is not
+  mirrored in the worker's `GatewayStaticRoutes`: `/api/ai/**` routes to kelta-ai, never the worker
+  (`GatewayStaticRoutesSyncTest` leaves it out). kelta-ai validates the body: only `model`,
+  `maxTokens`, `temperature`, `aiTokensPerMonth` and `aiEnabled`, each type- and range-checked,
+  else `400 VALIDATION_FAILED` per key (`source.pointer` names it) and nothing is written.
 - **Tenant admin invite** (`POST /api/tenants/{id}/admin-invite` with `{"email"}`,
   `TenantAdminInviteController` → `TenantAdminInviteService`): rides `static-tenants`, whose
   writes the gateway already gates on `MANAGE_TENANTS`; the controller re-checks `MANAGE_TENANTS`
@@ -1239,6 +1264,18 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   so a caller can tell "wrong password" from "right password, account still needs a forced
   change" apart. `kelta sandbox create`'s human-readable output states the `POST
   /auth/direct-login` login path alongside the printed credentials.
+- **Direct login refuses accounts that require MFA** (2026-10-31). `POST /auth/direct-login` has
+  no second step, so after the password check it asks the same rule the browser sign-in uses
+  (`LoginMfaPolicy`, shared with `AuthorizationServerConfig`'s success handler): a verified TOTP
+  enrollment (`TotpService.isEnrolled`) → the browser would send a challenge; else the tenant's
+  `password_policy.mfa_required` → the browser would send MFA setup. Either answers
+  `401 {"error":"mfa_required","error_description":"…use the browser sign-in"}` and issues no
+  token; an account with neither still gets its token. Failed attempts and lockout are the browser
+  form's: direct login authenticates through the same global `AuthenticationManager`, whose
+  `DefaultAuthenticationEventPublisher` feeds `AuthenticationEventListener`, and a locked account
+  is refused by `KeltaUserDetailsService`'s lock flag. A wrong password never reaches the MFA
+  question. Tests: `DirectLoginControllerTest`, `LoginMfaPolicyTest`,
+  `FailedSignInLockoutIntegrationTest` (Postgres, real filter, lockout counted for direct login).
 - **Sandbox create returns where to sign in** (KLT-588): the `POST /api/environments` (sandbox)
   response attributes carry `signInUrl` = `<kelta.ui-base-url>/<sandboxSlug>/login` (the UI's
   tenant-scoped `login` route) and `apiBaseUrl` = `<kelta.external-base-url>/<sandboxSlug>` (the

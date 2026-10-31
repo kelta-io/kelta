@@ -431,7 +431,7 @@ export function parseFilterWriteRules(routeAuthz: string): FilterWriteRule[] {
   const { code } = maskJava(routeAuthz);
   return [
     ...code.matchAll(
-      /"static-([\w-]+)"\.equals\(collectionId\)\s*(?:&&\s*path\.startsWith\("([^"]+)"\)\s*)?&&\s*StaticCollectionCheck\.isWrite\(method\)\)\s*\{\s*return cerbosService\.checkSystemPermission\(principal,\s*"(\w+)"\)/g,
+      /"static-([\w-]+)"\.equals\(collectionId\)\s*(?:&&\s*(?:matchedPath|path)\.startsWith\("([^"]+)"\)\s*)?&&\s*StaticCollectionCheck\.isWrite\(method\)\)\s*\{\s*return cerbosService\.checkSystemPermission\(principal,\s*"(\w+)"\)/g,
     ),
   ].map((m) => ({ routeId: m[1], pathPrefix: m[2] ?? null, permission: m[3] }));
 }
