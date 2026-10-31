@@ -259,10 +259,11 @@ class BillingModuleScenarioTest extends ScenarioBase {
         // ── Webhook: a Stripe-signed subscription event through the platform's proxy upgrades the member.
         long periodEnd = Instant.now().plusSeconds(30L * 86_400).getEpochSecond();
         String event = """
-                {"id":"evt_harness_%1$s","type":"customer.subscription.created","data":{"object":{
+                {"id":"evt_harness_%1$s","type":"customer.subscription.created","created":%5$d,"data":{"object":{
                   "id":"sub_harness_%1$s","customer":"cus_harness_%1$s","status":"active",
                   "metadata":{"userId":"%2$s"},"cancel_at_period_end":false,"current_period_end":%3$d,
-                  "items":{"data":[{"price":{"id":"%4$s"}}]}}}}""".formatted(suffix, userId, periodEnd, PRO_PRICE);
+                  "items":{"data":[{"price":{"id":"%4$s"}}]}}}}""".formatted(suffix, userId, periodEnd, PRO_PRICE,
+                Instant.now().getEpochSecond());
         ResponseEntity<String> unsigned = webhook(event, "t=" + Instant.now().getEpochSecond() + ",v1=00");
         assertThat(unsigned.getStatusCode()).as("unsigned: %s", unsigned.getBody()).isEqualTo(HttpStatus.UNAUTHORIZED);
         // The proxy answers with the module's status only (it goes back to Stripe, which retries a non-2xx).
@@ -273,6 +274,8 @@ class BillingModuleScenarioTest extends ScenarioBase {
                 .get("attributes");
         assertThat(subscription.get("status").stringValue()).isEqualTo("active");
         assertThat(subscription.get("planId").stringValue()).isEqualTo(proId);
+        assertThat(subscription.get("lastStripeEventAt").isNull()).as("the install provisioned lastStripeEventAt")
+                .isFalse();
 
         JsonNode upgraded = route("GET", "me", null, HttpStatus.OK);
         assertThat(upgraded.get("plan").get("code").stringValue()).isEqualTo("pro");
@@ -282,6 +285,17 @@ class BillingModuleScenarioTest extends ScenarioBase {
         assertThat(allowed.getStatusCode().value()).as("the quota passes on pro: %s", allowed.getBody())
                 .isNotEqualTo(422);
         assertThat(allowed.getBody()).doesNotContain("plan limit");
+
+        // ── One pass per checkout session: the install made the session id unique, so the platform refuses
+        // a second grant (validation's 400 `unique`; the constraint's 409 when two race) instead of minting it.
+        Map<String, Object> pass = Map.of("userId", userId, "stripeCheckoutSessionId", "cs_harness_" + suffix,
+                "status", "EXPIRED");
+        createRecord("billing_passes", pass);
+        ResponseEntity<String> duplicate = postJson(adminToken, "/" + SLUG + "/api/billing_passes",
+                mapper.writeValueAsString(Map.of("data", Map.of("type", "billing_passes", "attributes", pass))));
+        assertThat(duplicate.getStatusCode()).as("duplicate pass: %s", duplicate.getBody())
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(mapper.readTree(duplicate.getBody()).at("/errors/0/code").stringValue()).isEqualTo("unique");
 
         // ── Uninstall: the plan removes the module's collections; the principal is deactivated.
         JsonNode uninstallPlan = admin("GET", "/" + SLUG + "/api/modules/" + MODULE_ID

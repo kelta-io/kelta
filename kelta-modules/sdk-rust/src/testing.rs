@@ -161,6 +161,7 @@ struct MemoryState {
     collections: HashMap<String, Vec<Resource>>,
     credentials: HashMap<String, ModuleCredential>,
     refused: HashSet<String>,
+    unique: HashSet<(String, String)>,
     unavailable: bool,
     next_id: u64,
     writes: Vec<String>,
@@ -215,6 +216,13 @@ impl MemoryPlatform {
         self.lock().refused.insert(collection.to_string());
     }
 
+    /// Enforces a unique `field` on `collection`, as a field with `unique_constraint` does: a
+    /// create repeating a stored non-null value answers `400` `unique`, as the platform's
+    /// validation does.
+    pub fn unique(&self, collection: &str, field: &str) {
+        self.lock().unique.insert((collection.to_string(), field.to_string()));
+    }
+
     /// Answers `503` to every call while `true`.
     pub fn set_unavailable(&self, unavailable: bool) {
         self.lock().unavailable = unavailable;
@@ -223,6 +231,25 @@ impl MemoryPlatform {
     /// Every write, as `create <collection>` or `update <collection>/<id>`.
     pub fn writes(&self) -> Vec<String> {
         self.lock().writes.clone()
+    }
+
+    fn check_unique(&self, collection: &str, attributes: &Map<String, Value>) -> Result<(), ClientError> {
+        let state = self.lock();
+        let rows = state.collections.get(collection).map(Vec::as_slice).unwrap_or_default();
+        for (unique_collection, field) in &state.unique {
+            let Some(value) = attributes.get(field).filter(|v| !v.is_null()) else {
+                continue;
+            };
+            if unique_collection == collection && rows.iter().any(|r| r.attributes.get(field) == Some(value)) {
+                // What the platform's validation answers for a value it finds stored.
+                return Err(ClientError::Status {
+                    status: 400,
+                    code: Some("unique".into()),
+                    message: format!("{collection}.{field} must be unique"),
+                });
+            }
+        }
+        Ok(())
     }
 
     fn check(&self, collection: &str) -> Result<(), ClientError> {
@@ -283,7 +310,7 @@ impl Platform for MemoryPlatform {
         collection: &str,
         attributes: Map<String, Value>,
     ) -> impl Future<Output = Result<Resource, ClientError>> + Send {
-        let result = self.check(collection).map(|()| {
+        let result = self.check(collection).and_then(|()| self.check_unique(collection, &attributes)).map(|()| {
             let id = self.insert(collection, Value::Object(attributes.clone()));
             self.lock().writes.push(format!("create {collection}"));
             Resource { id, attributes }

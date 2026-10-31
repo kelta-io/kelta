@@ -27,6 +27,15 @@ const MAX_PAGE: u32 = 200;
 /// Subscription statuses that confer their plan's entitlements.
 pub const ENTITLING_STATUSES: [&str; 3] = ["active", "trialing", "past_due"];
 
+/// Subscription statuses Stripe never leaves: a row in one is not moved out by a later event.
+pub const TERMINAL_STATUSES: [&str; 2] = ["canceled", "incomplete_expired"];
+
+/// The subscription field holding the `created` time of the newest Stripe event applied to the
+/// row. Events older than it are ignored, so a retried old `updated` cannot undo a newer change.
+/// A collection adopted from the JAR install may lack it: the platform then drops the value and
+/// only the terminal-status guard applies.
+pub const LAST_EVENT_FIELD: &str = "lastStripeEventAt";
+
 /// True when `name` is one of this module's own collections: the quota hook never caps them.
 pub fn is_module_collection(name: &str) -> bool {
     MODULE_COLLECTIONS.contains(&name)
@@ -36,6 +45,28 @@ pub fn is_module_collection(name: &str) -> bool {
 pub fn is_entitling(subscription: &Resource) -> bool {
     text_of(&subscription.attributes, "status")
         .is_some_and(|status| ENTITLING_STATUSES.contains(&status.to_lowercase().as_str()))
+}
+
+/// Why an event must not be applied to the stored `existing` subscription row, if it must not:
+/// the row already reached a terminal status the event would move it out of, or the row already
+/// reflects a newer event.
+pub fn stale_reason(
+    existing: &Resource,
+    new_status: Option<&str>,
+    event_created: Option<DateTime<Utc>>,
+) -> Option<&'static str> {
+    let stored = text_of(&existing.attributes, "status").map(|s| s.to_lowercase());
+    if let Some(stored) = stored.as_deref()
+        && TERMINAL_STATUSES.contains(&stored)
+        && new_status.map(str::to_lowercase).as_deref() != Some(stored)
+    {
+        return Some("the subscription already ended");
+    }
+    let last = instant(existing.attributes.get(LAST_EVENT_FIELD));
+    match (event_created, last) {
+        (Some(event), Some(last)) if event < last => Some("a newer event was already applied"),
+        _ => None,
+    }
 }
 
 /// The billing collections of one tenant, as seen through `platform`.
@@ -107,6 +138,7 @@ impl<'a, P: Platform> BillingStore<'a, P> {
     }
 
     /// Mirrors a Stripe subscription, keyed on its id so a redelivered event updates in place.
+    /// Returns `false`, writing nothing, when [`stale_reason`] refuses the event.
     #[allow(clippy::too_many_arguments)]
     pub async fn upsert_subscription(
         &self,
@@ -118,7 +150,14 @@ impl<'a, P: Platform> BillingStore<'a, P> {
         current_period_end: Option<DateTime<Utc>>,
         cancel_at_period_end: bool,
         canceled_at: Option<DateTime<Utc>>,
-    ) -> Result<(), ClientError> {
+        event_created: Option<DateTime<Utc>>,
+    ) -> Result<bool, ClientError> {
+        let existing =
+            self.first(SUBSCRIPTIONS, Query::new().eq("stripeSubscriptionId", stripe_subscription_id)).await?;
+        if let Some(reason) = existing.as_ref().and_then(|row| stale_reason(row, status, event_created)) {
+            tracing::info!(reason, status = ?status, "ignoring a stale Stripe subscription event");
+            return Ok(false);
+        }
         let mut data = Map::new();
         data.insert("userId".into(), json!(user_id));
         data.insert("planId".into(), json!(plan_id));
@@ -128,18 +167,23 @@ impl<'a, P: Platform> BillingStore<'a, P> {
         data.insert("currentPeriodEnd".into(), json!(current_period_end.map(format_instant)));
         data.insert("cancelAtPeriodEnd".into(), json!(cancel_at_period_end));
         data.insert("canceledAt".into(), json!(canceled_at.map(format_instant)));
-        match self.first(SUBSCRIPTIONS, Query::new().eq("stripeSubscriptionId", stripe_subscription_id)).await? {
-            Some(existing) => self.platform.update(SUBSCRIPTIONS, &existing.id, data).await.map(drop),
-            None => self.platform.create(SUBSCRIPTIONS, data).await.map(drop),
+        if let Some(event_created) = event_created {
+            data.insert(LAST_EVENT_FIELD.into(), json!(format_instant(event_created)));
+        }
+        match existing {
+            Some(existing) => self.platform.update(SUBSCRIPTIONS, &existing.id, data).await.map(|_| true),
+            None => self.platform.create(SUBSCRIPTIONS, data).await.map(|_| true),
         }
     }
 
-    /// Marks a subscription canceled; returns its member, if the row exists.
+    /// Marks a subscription canceled; returns its member, if the row exists. Always applied:
+    /// cancellation is terminal, so no later or earlier event can outrank it.
     pub async fn mark_subscription_canceled(
         &self,
         stripe_subscription_id: &str,
         status: &str,
         canceled_at: DateTime<Utc>,
+        event_created: Option<DateTime<Utc>>,
     ) -> Result<Option<String>, ClientError> {
         let Some(existing) =
             self.first(SUBSCRIPTIONS, Query::new().eq("stripeSubscriptionId", stripe_subscription_id)).await?
@@ -149,6 +193,10 @@ impl<'a, P: Platform> BillingStore<'a, P> {
         let mut data = Map::new();
         data.insert("status".into(), json!(status));
         data.insert("canceledAt".into(), json!(format_instant(canceled_at)));
+        let last = instant(existing.attributes.get(LAST_EVENT_FIELD));
+        if let Some(event_created) = event_created.filter(|e| last.is_none_or(|last| *e >= last)) {
+            data.insert(LAST_EVENT_FIELD.into(), json!(format_instant(event_created)));
+        }
         self.platform.update(SUBSCRIPTIONS, &existing.id, data).await?;
         Ok(text_of(&existing.attributes, "userId"))
     }
@@ -160,6 +208,8 @@ impl<'a, P: Platform> BillingStore<'a, P> {
         Ok(self.first(PASSES, Query::new().eq("stripeCheckoutSessionId", checkout_session_id)).await?.is_some())
     }
 
+    /// Creates the pass; `false` when the platform refused it as a duplicate of the checkout
+    /// session (the field is unique): a concurrent delivery granted it.
     pub async fn grant_pass(
         &self,
         user_id: &str,
@@ -168,7 +218,7 @@ impl<'a, P: Platform> BillingStore<'a, P> {
         payment_intent_id: Option<&str>,
         starts_at: DateTime<Utc>,
         expires_at: Option<DateTime<Utc>>,
-    ) -> Result<(), ClientError> {
+    ) -> Result<bool, ClientError> {
         let mut data = Map::new();
         data.insert("userId".into(), json!(user_id));
         data.insert("planId".into(), json!(plan_id));
@@ -177,7 +227,11 @@ impl<'a, P: Platform> BillingStore<'a, P> {
         data.insert("status".into(), json!("ACTIVE"));
         data.insert("startsAt".into(), json!(format_instant(starts_at)));
         data.insert("expiresAt".into(), json!(expires_at.map(format_instant)));
-        self.platform.create(PASSES, data).await.map(drop)
+        match self.platform.create(PASSES, data).await {
+            Ok(_) => Ok(true),
+            Err(e) if e.is_unique_violation() => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     /// A member's live passes: expiry is judged at read time, not from the stored status. A pass

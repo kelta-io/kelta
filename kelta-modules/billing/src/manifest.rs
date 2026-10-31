@@ -6,7 +6,7 @@ use kelta_module::manifest::{
 };
 use serde_json::Value;
 
-use crate::store::{CUSTOMERS, ENTITLEMENT_RULES, MODULE_COLLECTIONS, PASSES, PLANS, SUBSCRIPTIONS};
+use crate::store::{CUSTOMERS, ENTITLEMENT_RULES, LAST_EVENT_FIELD, MODULE_COLLECTIONS, PASSES, PLANS, SUBSCRIPTIONS};
 
 /// The module id: stable forever, the assertion `aud`.
 pub const MODULE_ID: &str = "kelta-billing";
@@ -124,13 +124,15 @@ fn subscriptions() -> CollectionSpec {
         .field(field("currentPeriodEnd", "Renews On", "DATETIME"))
         .field(field("cancelAtPeriodEnd", "Cancels At Period End", "BOOLEAN"))
         .field(field("canceledAt", "Canceled At", "DATETIME"))
+        .field(field(LAST_EVENT_FIELD, "Last Stripe Event", "DATETIME"))
 }
 
 fn passes() -> CollectionSpec {
     CollectionSpec::new(PASSES, "Billing Passes")
         .field(field("userId", "Member", "STRING").required())
         .field(field("planId", "Plan", "STRING"))
-        .field(field("stripeCheckoutSessionId", "Checkout Session Id", "STRING").required())
+        // Unique: two concurrent deliveries of one checkout cannot both mint a pass.
+        .field(field("stripeCheckoutSessionId", "Checkout Session Id", "STRING").required().unique())
         .field(field("stripePaymentIntentId", "Payment Intent Id", "STRING"))
         .field(field("status", "Status", "STRING").required())
         .field(field("startsAt", "Starts At", "DATETIME"))
@@ -163,7 +165,23 @@ mod tests {
         assert_eq!(manifest["permissions"]["objects"].as_array().unwrap().len(), 5);
         let items = manifest["metadata"]["items"].as_array().unwrap();
         assert_eq!(items.iter().filter(|i| i["type"] == "COLLECTION").count(), 5);
-        assert_eq!(items.iter().filter(|i| i["type"] == "FIELD").count(), 10 + 3 + 8 + 7 + 6);
+        assert_eq!(items.iter().filter(|i| i["type"] == "FIELD").count(), 10 + 3 + 9 + 7 + 6);
         assert_eq!(manifest["ui"]["bundlePath"], UI_BUNDLE_PATH);
+    }
+
+    #[test]
+    fn the_checkout_session_is_unique_and_subscriptions_record_their_last_event() {
+        let manifest = manifest().expect("a valid manifest");
+        let field = |collection: &str, name: &str| {
+            manifest["metadata"]["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|i| i["data"]["collection_name"] == collection && i["data"]["name"] == name)
+                .map(|i| i["data"].clone())
+                .unwrap_or_else(|| panic!("{collection}.{name} is declared"))
+        };
+        assert_eq!(field(PASSES, "stripeCheckoutSessionId")["unique_constraint"], true);
+        assert_eq!(field(SUBSCRIPTIONS, LAST_EVENT_FIELD)["type"], "DATETIME");
     }
 }

@@ -116,6 +116,14 @@ impl FieldSpec {
         self.attr("indexed", true)
     }
 
+    /// A unique column: a create or update that repeats a stored non-null value is refused
+    /// ([`crate::client::ClientError::is_unique_violation`]). Applied only when the install creates
+    /// the field: a field that already exists, adopted or kept from an earlier install, is never
+    /// changed.
+    pub fn unique(self) -> Self {
+        self.attr("unique_constraint", true)
+    }
+
     pub fn description(self, description: impl Into<String>) -> Self {
         self.attr("description", description.into())
     }

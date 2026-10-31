@@ -39,15 +39,21 @@ For every call under `/kelta/v1/*`, before the handler runs:
 | Signature | not ES256, or the key id (`kid`) is not in the platform's JWKS |
 | `iss` | not exactly the configured issuer |
 | `aud` | not exactly the module id |
-| `exp` / `iat` | expired, issued in the future, or `exp - iat` over the lifetime cap, with 30 s skew allowed |
+| `exp` / `iat` | expired, issued in the future, or `exp - iat` over the lifetime cap (60 s, what the platform signs), with 30 s skew allowed |
 | `htm` / `htu` | the method, or the base URL + path + query, differs from the request actually received |
 | `body_sha256` | the hex SHA-256 of the **raw** body differs |
-| `jti` | seen before while the assertion is still valid (replay) |
+| `jti` | seen before while the assertion is still valid (replay); see the note below |
 
 The JWKS comes from `{issuer}/.well-known/jwks.json`, or from `VerifierConfig::jwks_url` when the
 module reaches the platform by another route, such as an in-cluster gateway (`iss` is still
 checked against the issuer). It is cached for 10 minutes. An unknown `kid` refetches it, at most
 once every 10 seconds, so a rotated platform key is picked up without a restart.
+
+**The `jti` replay cache is per process.** It lives in the verifier's memory, so a module run as
+several replicas (or restarted) does not see the `jti`s another one accepted. A captured assertion
+can then be replayed once against each other replica until it expires: at most 60 s plus the 30 s
+skew, and only for the exact method, URL and body it was signed for. Run one replica, put the
+cache in a store the replicas share, or accept that window.
 
 Every refusal is `401` with a generic body. The reason is logged at `debug` and never returned.
 When the JWKS cannot be fetched and no cached key matches, the answer is `503`, so the platform

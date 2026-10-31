@@ -225,7 +225,8 @@ impl<S: PlatformSource> ModuleHandlers for Billing<S> {
     async fn webhook(&self, call: Call, request: WebhookRequest) -> Result<WebhookResponse, HandlerError> {
         let platform = self.platform(&call)?;
         let signature = request.headers.get("stripe-signature");
-        let (outcome, touched) = webhook::process(&platform, &request.body, signature, Utc::now()).await;
+        let (outcome, touched) =
+            webhook::process(&platform, call.tenant_id(), &request.body, signature, Utc::now()).await;
         for member in &touched.members {
             self.caches.invalidate_member(call.tenant_id(), member);
         }

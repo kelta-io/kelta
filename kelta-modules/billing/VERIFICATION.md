@@ -17,9 +17,9 @@ cargo test --workspace --locked
 
 | Suite | Proves |
 |---|---|
-| `sdk-rust/tests/assertion.rs` | Each assertion refusal: bad signature, unknown `kid`, wrong `iss`/`aud`, expired, future `iat`, over-long lifetime, `htm`/`htu` mismatch, `body_sha256` mismatch, replayed `jti`. JWKS refetch on an unknown `kid`, rate-limited. |
+| `sdk-rust/tests/assertion.rs` | Each assertion refusal: bad signature, unknown `kid`, wrong `iss`/`aud`, expired, future `iat`, over-long lifetime (the default cap is the protocol's 60 s), `htm`/`htu` mismatch, `body_sha256` mismatch, replayed `jti`. JWKS refetch on an unknown `kid`, rate-limited. |
 | `sdk-rust/tests/server.rs` | The router refuses before any handler runs; the manifest and assets are the only open paths. |
-| `billing/src/*` unit tests | Entitlement merge, quota kinds (boolean/count/unlimited), PORTAL rules, Stripe signature (tolerance, rotation, constant-time), webhook outcomes, return-URL origin matching, configuration. |
+| `billing/src/*` unit tests | Entitlement merge, quota kinds (boolean/count/unlimited), PORTAL rules, Stripe signature (tolerance, rotation, constant-time), webhook outcomes, return-URL origin matching, configuration. Webhook: a pass only once paid (`async_payment_succeeded` grants, `async_payment_failed` does not); a concurrent duplicate grant refused by the unique session id; an old `updated` after `deleted` does not re-activate, and an older event never overwrites a newer one; an event naming another tenant is acknowledged and ignored. |
 | `billing/tests/module.rs` | The whole service through signed requests against an in-memory platform and a stub Stripe. |
 
 ## 2. Cross-service harness (CI: `integration-tests`)
@@ -44,7 +44,8 @@ Without the image the scenario skips, unless `KELTA_HARNESS_PREBUILT_IMAGES=true
 | Hook | A rule caps a new collection at 1 record; the second create is refused with the plan-limit message. |
 | Event | Changing the rule's message reaches the module as an event; the next refusal uses the new message. |
 | Entitlements | 120 × `POST /api/watches` at a 0 limit → `422` (the worker asks the module each time). |
-| Webhook | An unsigned body → `401`. A signed `customer.subscription.created` → `200`, the subscription row is `active`, `me` shows the paid plan, and the watch limit lifts. |
+| Webhook | An unsigned body → `401`. A signed `customer.subscription.created` → `200`, the subscription row is `active` with `lastStripeEventAt` set (the install provisioned the field), `me` shows the paid plan, and the watch limit lifts. |
+| One pass per session | A second pass with the same `stripeCheckoutSessionId` → `400` `unique`: the install made the field unique. |
 | Uninstall | With `purgeData=true` and the plan's hash; the hook no longer runs. |
 
 ### Gate 0 measurements
@@ -120,7 +121,9 @@ is also the cutover rehearsal: follow [`CUTOVER.md`](CUTOVER.md) steps 1–6 on 
 
 3. Create a DEFAULT plan and a SUBSCRIPTION plan whose `stripePriceId` is a test-mode price.
 4. Point a Stripe **test-mode** webhook endpoint at
-   `https://<api-host>/api/modules/webhooks/<sandbox-tenant-id>/kelta-billing`.
+   `https://<api-host>/api/modules/webhooks/<sandbox-tenant-id>/kelta-billing`, subscribed to
+   `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   `checkout.session.async_payment_failed` and `customer.subscription.created|updated|deleted`.
 5. As a portal member of the sandbox: `GET /api/modules/kelta-billing/x/me` shows the DEFAULT plan.
    `POST /api/modules/kelta-billing/x/checkout-sessions` returns a Stripe URL. Pay with the test card
    `4242 4242 4242 4242`.
@@ -128,9 +131,12 @@ is also the cutover rehearsal: follow [`CUTOVER.md`](CUTOVER.md) steps 1–6 on 
    `active` subscription. `portal-sessions` returns a portal URL.
 7. Add a rule capping a collection at the paid plan's limit; the create past it is refused.
 8. Buy a one-time pass (if a `ONE_TIME` plan exists) and check it expires on the hourly schedule
-   after `expiresAt`.
-9. In the module log (`kubectl -n kelta-billing logs deploy/kelta-billing`), confirm no secret,
-   token or query string appears.
+   after `expiresAt`. Resend that `checkout.session.completed` from the Stripe dashboard: still one
+   pass.
+9. Cancel the subscription in the Stripe dashboard, then resend an earlier
+   `customer.subscription.updated` (status `active`): the row stays `canceled`.
+10. In the module log (`kubectl -n kelta-billing logs deploy/kelta-billing`), confirm no secret,
+    token or query string appears.
 
 Record the result here, with the date, the image tag and any deviation.
 

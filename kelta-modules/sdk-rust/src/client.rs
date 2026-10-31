@@ -54,6 +54,17 @@ impl ClientError {
         self.status() == Some(404)
     }
 
+    /// True when a unique field already holds the value. The platform's validation answers `400`
+    /// with code `unique` when it finds the stored value; the database constraint answers `409`
+    /// `UNIQUE_VIOLATION` when two writes race past that check. Any other `409` is not this.
+    pub fn is_unique_violation(&self) -> bool {
+        match self {
+            ClientError::Status { status: 400, code, .. } => code.as_deref() == Some("unique"),
+            ClientError::Status { status: 409, code, .. } => code.as_deref() == Some("UNIQUE_VIOLATION"),
+            _ => false,
+        }
+    }
+
     /// True when the failure may pass on retry: the platform was unreachable or answered `5xx`
     /// or `429`.
     pub fn is_transient(&self) -> bool {
@@ -452,6 +463,18 @@ mod tests {
         let e = status_error(StatusCode::SERVICE_UNAVAILABLE, b"oops");
         assert_eq!(e.status(), Some(503));
         assert!(e.is_transient());
+    }
+
+    #[test]
+    fn unique_violations_are_the_validator_400_or_the_constraint_409() {
+        let validator = br#"{"errors":[{"status":"400","code":"unique","detail":"Value must be unique"}]}"#;
+        assert!(status_error(StatusCode::BAD_REQUEST, validator).is_unique_violation());
+        let race = br#"{"errors":[{"status":"409","code":"UNIQUE_VIOLATION","detail":"duplicate"}]}"#;
+        assert!(status_error(StatusCode::CONFLICT, race).is_unique_violation());
+        let hook = br#"{"errors":[{"status":"409","code":"CONFLICT","detail":"a hook refused"}]}"#;
+        assert!(!status_error(StatusCode::CONFLICT, hook).is_unique_violation());
+        let other = br#"{"errors":[{"status":"400","code":"required","detail":"missing"}]}"#;
+        assert!(!status_error(StatusCode::BAD_REQUEST, other).is_unique_violation());
     }
 
     #[test]

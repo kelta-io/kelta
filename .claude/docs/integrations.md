@@ -535,17 +535,29 @@ unauthenticated caller cannot enumerate which tenants have billing configured.
 
 Idempotency **converges** rather than claims: a module writes through `QueryEngine` with no
 transaction of its own, so a pass is granted once per checkout session and a subscription is
-upserted by its Stripe id — a redelivery converges instead of duplicating. (The removed
+upserted by its Stripe id — a redelivery converges instead of duplicating. Two concurrent
+deliveries of one checkout cannot both mint a pass: `billing_passes.stripeCheckoutSessionId` is a
+unique field, and the module reads the platform's refusal of the second create (`400` `unique`
+from validation, or `409 UNIQUE_VIOLATION` from the constraint when two creates race) as "already
+granted" (only where the
+install created that field — see `kelta-modules/billing/CUTOVER.md` for collections adopted from
+the JAR). Out-of-order subscription events are ignored by Stripe's event `created` time, stored in
+`billing_subscriptions.lastStripeEventAt`, and a row in a terminal status (`canceled`,
+`incomplete_expired`) is never moved out of it, so a retried old `updated` cannot re-activate a
+deleted subscription. A signed event whose `metadata.tenantId` names a different tenant than the
+assertion's is acknowledged with 200, logged at WARN and not applied. (The removed
 compiled-in webhook claimed each event id in `billing_webhook_event` inside the mutation's
 transaction; that table was dropped in V207.) Answers 200 for duplicates and for event types
 the module ignores, so the processor stops retrying them.
 
 | Event | Action |
 |---|---|
-| `checkout.session.completed` (mode=payment) | upsert customer; grant a pass, idempotent on the session id |
+| `checkout.session.completed` (mode=payment) | upsert customer; grant a pass, idempotent on the session id, **only when `payment_status` is `paid` or `no_payment_required`** |
+| `checkout.session.async_payment_succeeded` | the same grant, for a delayed payment method that completed the session unpaid |
+| `checkout.session.async_payment_failed` | logged; no pass |
 | `checkout.session.completed` (mode=subscription) | upsert customer only — the subscription arrives on its own event |
-| `customer.subscription.created` / `.updated` | upsert `billing_subscription`; plan resolved via the price id |
-| `customer.subscription.deleted` | mark canceled — the member drops to the DEFAULT plan on next resolve |
+| `customer.subscription.created` / `.updated` | upsert `billing_subscription`; plan resolved via the price id; ignored when older than the row's last event or when the row is terminal |
+| `customer.subscription.deleted` | mark canceled — the member drops to the DEFAULT plan on next resolve; with no row yet, create it canceled, so a late older event cannot create it active |
 | anything else | ignored |
 
 **Member resolution** for an event, in order: `client_reference_id` → `metadata.userId`

@@ -219,6 +219,16 @@ async fn refuses_a_token_that_lives_too_long() {
 }
 
 #[tokio::test]
+async fn the_default_lifetime_cap_is_the_protocol_60_seconds() {
+    assert_eq!(kelta_module::testing::config().max_lifetime, std::time::Duration::from_secs(60));
+    let iat = now();
+    let exact = with(with(claims("POST", PATH, BODY), "iat", json!(iat)), "exp", json!(iat + 60));
+    assert!(verify_claims(&exact).await.is_ok(), "the platform signs for exactly 60 s");
+    let longer = with(with(claims("POST", PATH, BODY), "iat", json!(iat)), "exp", json!(iat + 61));
+    assert_eq!(verify_claims(&longer).await, Err(VerifyError::LifetimeTooLong));
+}
+
+#[tokio::test]
 async fn refuses_another_issuer() {
     let claims = with(claims("POST", PATH, BODY), "iss", json!("https://evil.example.test/api/modules"));
     assert_eq!(verify_claims(&claims).await, Err(VerifyError::WrongIssuer));

@@ -96,7 +96,11 @@ modules*).
    `KELTA_MODULE_ALLOWED_HOSTS`.
 3. Point a Stripe webhook endpoint at
    `https://<api-host>/api/modules/webhooks/<tenantId>/kelta-billing`. Subscribe it to
-   `checkout.session.completed` and `customer.subscription.created|updated|deleted`.
+   `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   `checkout.session.async_payment_failed` and `customer.subscription.created|updated|deleted`.
+   Without the two `async_payment` events, a pass bought with a delayed payment method (a bank
+   debit, for example) is never granted: the session completes unpaid and the grant waits for
+   `async_payment_succeeded`.
 4. Create `billing_plans` rows. `kind` is `SUBSCRIPTION`, `ONE_TIME` or `DEFAULT`. A `DEFAULT`
    plan is the free baseline and cannot be bought; with more than one active, the first by
    `sortOrder`, then `code`, wins.
@@ -122,6 +126,17 @@ resolved value for `limitKey`: base plan plus live passes. The value is read as 
 - The hook fails open: a rule, entitlement or count it cannot read allows the write and is logged.
   The platform also ignores a hook timeout or failure (`failurePolicy: ignore`).
 
+**Quotas are soft limits.** Do not sell a cap that must never be exceeded:
+
+- The hook has 2 s (`timeout_ms: 2000`). A slow, restarting or unreachable module lets every
+  create through for as long as it lasts.
+- Counting and creating are separate steps with no lock between them. N creates for one member
+  that arrive together all see the same count, so the member can end up to N − 1 records over
+  the cap.
+
+A hard limit needs the platform to enforce it in the create's own transaction, which a module
+cannot do. See `.claude/docs/concerns.md` → *External modules — in-cluster modules*.
+
 ## Differences from the JAR module
 
 | JAR module (`billing-jar`) | This service | Why |
@@ -137,6 +152,28 @@ resolved value for `limitKey`: base plan plus live passes. The value is read as 
 The same in both: entitlements are uncached by default; webhook idempotency converges (a pass is
 granted once per checkout session; a subscription is upserted by its Stripe id); money is never
 computed here.
+
+Stricter than the JAR, in the webhook:
+
+- **A pass needs a collected payment.** `checkout.session.completed` grants it only when
+  `payment_status` is `paid` or `no_payment_required`. A session completed unpaid (a delayed
+  payment method) is granted on `checkout.session.async_payment_succeeded`, and
+  `checkout.session.async_payment_failed` grants nothing. The JAR granted on completion.
+- **One pass per checkout, even under concurrent deliveries.** `stripeCheckoutSessionId` is a
+  unique field; the platform refuses a second create (`400` `unique`, or `409` when two creates
+  race past that check), and the module reads that as already granted. This
+  holds only where the install **created** that field: a collection adopted from the JAR keeps
+  its fields as they are, so `CUTOVER.md` sets the flag after install.
+- **Out-of-order subscription events are ignored.** The row stores the Stripe event's `created`
+  time in `lastStripeEventAt`, and an older event is not applied. A row in `canceled` or
+  `incomplete_expired` is never moved out of it, so a retried old `updated` cannot re-activate a
+  deleted subscription. A `deleted` that arrives before any row exists creates the row canceled,
+  for the same reason. On an adopted collection without `lastStripeEventAt`, only the terminal
+  rule applies until `CUTOVER.md` adds the field.
+- **An event for another tenant is ignored.** Checkout stamps `metadata.tenantId` on the session
+  and the subscription. A signed event whose `tenantId` differs from the assertion's tenant
+  answers `200`, is logged at WARN and changes nothing. That happens when one Stripe account
+  feeds several tenants' endpoints.
 
 ## Security notes
 
@@ -166,6 +203,10 @@ computed here.
 - **Webhook idempotency converges; it does not claim.** A module has no transaction of its own,
   so a partial failure mid-event can leave one write applied and another not. Stripe's retry then
   converges it.
+- **Quotas are soft limits** (see *Per-member quotas*): a slow module or concurrent creates can
+  exceed a cap.
+- **Two subscription events with the same `created` second apply in arrival order.** Stripe's
+  `created` has one-second resolution, so ties are not ordered.
 - **Caches are per replica.** A record event reaches one replica. Run one replica, or accept that
   a rule change reaches the others within `BILLING_RULES_CACHE_SECONDS`.
 - **A flow with no caller cannot act for a member.** Checkout, portal, `me` and

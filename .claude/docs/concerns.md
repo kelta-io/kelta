@@ -668,6 +668,19 @@ homelab cluster (`ci-cd.md` → Rust external modules). What that does not guara
   and narrower than the JAR's in-process access, but still a read grant on all of the tenant's data
   for a module whose job is billing. A rule's `countFilter` field names go to the platform as query
   filters; a bad one fails open.
+- **Billing quotas are soft limits.** The `*` beforeCreate hook has 2 s and
+  `failurePolicy: ignore`, so a slow, restarting or unreachable billing module lets every create
+  through. Counting and creating are separate steps with no lock, so N concurrent creates for one
+  member all see the same count and can land N − 1 over the cap. A hard limit would need the
+  platform to enforce it inside the create's transaction; no module can. Documented to tenants in
+  `kelta-modules/billing/README.md` → Per-member quotas.
+- **Install never changes an existing field.** The provisioner adopts an existing collection and
+  writes nothing under it, and keeps an existing field as it is. A module upgrade or a cutover onto
+  collections another build created therefore gets no new field and no changed flag (unique,
+  required) from its manifest. The billing cutover adds `lastStripeEventAt` and the unique
+  `stripeCheckoutSessionId` by hand (`kelta-modules/billing/CUTOVER.md` step 4b); until then two
+  concurrent deliveries of one checkout can mint two passes, and only the terminal-status rule
+  orders subscription events.
 - **Caches are per replica.** A record event reaches one replica of a module (the Service picks
   one). The billing module's rules cache (60 s) therefore lags on any other replica by up to its
   TTL after a rule change; its entitlements cache is off by default for that reason.

@@ -23,6 +23,10 @@ export this runbook makes **outside the repository**: it holds member ids.
 | Webhook URL | `/api/modules/webhooks/<tenantId>/kelta-billing` | the same | None. |
 | Member routes | `/api/modules/kelta-billing/x/{plans,me,checkout-sessions,portal-sessions}` | the same paths and shapes | None. |
 | Stripe `Idempotency-Key` on flow actions | Random | Derived from the platform's step key | None. |
+| Pass grant | On `checkout.session.completed` | Only once paid (`payment_status` `paid`/`no_payment_required`); a delayed payment grants on `checkout.session.async_payment_succeeded` | Subscribe the webhook endpoint to the two `async_payment` events (step 0). |
+| One pass per checkout session | An existence check | The check plus a unique `stripeCheckoutSessionId` | Check for duplicates (step 0), then set the flag (step 4b): the install does not change adopted fields. |
+| Out-of-order subscription events | Applied in arrival order | Older than the row's `lastStripeEventAt`: ignored; a `canceled`/`incomplete_expired` row is never moved out | Add `lastStripeEventAt` if the install did not (step 4b). |
+| An event whose `metadata.tenantId` names another tenant | Applied | Acknowledged and ignored, logged at WARN | None. |
 
 ## The gap
 
@@ -82,6 +86,28 @@ jq -r '.data[] | .attributes | select(.active == true) | "\(.appliesTo) \(.colle
   returned).
 - Check the plans: exactly one active `DEFAULT` plan, or know which one wins (the first by
   `sortOrder`, then `code`, in both builds).
+- Stripe dashboard → the tenant's webhook endpoint: add `checkout.session.async_payment_succeeded`
+  and `checkout.session.async_payment_failed` to its events. The JAR answers `200` to event types
+  it ignores, so this is safe before the cutover.
+- **Duplicate passes.** Step 4b makes `billing_passes.stripeCheckoutSessionId` unique, which fails
+  while two passes share a session id. List any now:
+
+  ```bash
+  n=1; : > "$SNAP/passes.ndjson"
+  while :; do
+    page=$(kelta api GET "/api/billing_passes?page[size]=200&page[number]=$n&fields[billing_passes]=stripeCheckoutSessionId" $P)
+    echo "$page" | jq -c '.data[] | {id, s: .attributes.stripeCheckoutSessionId}' >> "$SNAP/passes.ndjson"
+    [ "$(echo "$page" | jq '.data | length')" -lt 200 ] && break
+    n=$((n + 1))
+  done
+  jq -rs 'group_by(.s) | map(select(length > 1)) | .[] | "\(.[0].s): \(map(.id) | join(" "))"' "$SNAP/passes.ndjson"
+  # expect no output
+  ```
+
+  Each line is one checkout session that minted more than one pass (a concurrent redelivery under
+  the JAR). Decide with the tenant owner which pass stays. Set each other one's `status` to
+  `EXPIRED` (only `ACTIVE` passes entitle) **and** its `stripeCheckoutSessionId` to
+  `<session id>#dup<n>`, before step 4b. Deleting them also works, but loses the record.
 
 ## Step 1 — Baseline: the JAR's answers
 
@@ -161,6 +187,36 @@ kelta api POST /api/modules/install $P --yes --data "{\"baseUrl\":\"$URL\",\"pla
 # expect "status": "ACTIVE"
 ```
 
+## Step 4b — Add what the adopted collections lack
+
+The install never changes a field that already exists, and it writes no field under an `ADOPT`
+collection. So on a cutover `stripeCheckoutSessionId` stays non-unique, and `lastStripeEventAt`
+exists only if `billing_subscriptions` was `KEEP`. Until this step the module still works: a
+duplicate grant is caught by its existence check (not under a race), and without
+`lastStripeEventAt` only the terminal-status rule orders subscription events.
+
+```bash
+kelta fields list billing_subscriptions $P --output json \
+  | jq -r '.[] | select(.name == "lastStripeEventAt") | .id'
+# no output: add it
+kelta fields add billing_subscriptions $P --name lastStripeEventAt --type DATETIME --display-name 'Last Stripe Event'
+```
+
+Re-run the duplicate-pass check from step 0; it must print nothing. Then:
+
+```bash
+FID=$(kelta fields list billing_passes $P --output json \
+  | jq -r '.[] | select(.name == "stripeCheckoutSessionId") | .id')
+kelta fields update "$FID" $P --data '{"uniqueConstraint": true}'
+kelta fields list billing_passes $P --output json \
+  | jq '.[] | select(.name == "stripeCheckoutSessionId") | .uniqueConstraint'
+# expect true
+```
+
+If the update fails, a duplicate slipped in since the check: resolve it as in step 0 and retry.
+**Remaining race:** between step 4 and this command, two concurrent deliveries of one checkout
+can still mint two passes. Run 4b straight after step 4.
+
 ## Step 5 — Update the flows
 
 Apply the prepared definitions from step 2 (`kelta api PATCH /api/flows/<id> $P --data …`), and
@@ -191,6 +247,8 @@ with a new `updatedAt`).
 - [ ] `kubectl -n kelta-billing logs deploy/kelta-billing --since=30m` shows no `ERROR` lines and
       no secret or token.
 - [ ] `kelta api GET /api/modules $P` shows `kelta-billing` `ACTIVE` with the module's `baseUrl`.
+- [ ] Step 4b is done: `billing_passes.stripeCheckoutSessionId` is unique and
+      `billing_subscriptions.lastStripeEventAt` exists.
 
 Then apply the PORTAL-rule decisions from step 0, and record the cutover in
 [`VERIFICATION.md`](VERIFICATION.md) §4 (date, image tag, tenant placeholder, result).
@@ -211,6 +269,9 @@ rollback swaps the code back.
    the existing collections.
 3. Restore each flow's original `definition` from `$SNAP/flows.json`, and re-create the
    `expire-passes` flow.
+
+   The step 4b changes can stay: the JAR ignores `lastStripeEventAt`, and the unique flag only
+   refuses a second pass for one session, which the JAR's own check already prevents.
 4. Resend the Stripe deliveries that failed while billing was down.
 5. Re-run step 6 against the baseline. The answers must match it again.
 

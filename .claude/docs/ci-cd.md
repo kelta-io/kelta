@@ -190,10 +190,14 @@ which forces every leg to build — so merging a change to this file redeploys e
    (e.g. `workflow_dispatch` with `push_images=false` legitimately skips both the push and the
    post-push verify).
 4. **`smoke-test`** — waits for k8s rollouts; `curl .../actuator/health/liveness` on gateway
-   + worker; then (only when the billing module was rebuilt) waits for `kelta-billing/kelta-billing`
-   to run the pushed tag and reads its manifest **from a worker pod** — the one caller its
-   ingress NetworkPolicy admits; then (only when cli-downloads was rebuilt) downloads and
-   executes the CLI binary.
+   + worker; then (only when cli-downloads was rebuilt) downloads and executes the CLI binary.
+4b. **`verify-kelta-billing`** — its own job (`needs: [changes, deploy]`), only when the deploy
+   succeeded and this run rebuilt the billing module (`rust_modules`): waits for
+   `kelta-billing/kelta-billing` to run the pushed tag and reads its manifest **from a worker
+   pod** — the one caller its ingress NetworkPolicy admits. **Not a smoke-test step, on purpose:**
+   deploying the module installs it on no tenant and the platform does not depend on it, so a
+   failure here fails the run visibly but must never roll the platform back. It is therefore not
+   in `rollback-on-smoke-failure`'s `needs`; `ci/verify-kelta-billing-job.test.ts` guards that.
    **The CLI check keys on two different values and they can disagree:** `CLI_VERSION` is baked
    in as `1.0.<run_number>`, but ArgoCD only rolls when the image *tag* `main-<short-sha>`
    changes. A rebuild at an already-deployed commit (`workflow_dispatch` with

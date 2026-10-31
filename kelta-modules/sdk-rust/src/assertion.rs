@@ -55,7 +55,8 @@ pub struct VerifierConfig {
     pub jwks_url: Option<String>,
     /// Allowed clock skew for `exp` and `iat`. The protocol says 30 s.
     pub leeway: Duration,
-    /// The longest `exp - iat` accepted. The platform signs for 60 s.
+    /// The longest `exp - iat` accepted. The platform signs for exactly 60 s (protocol v1), so
+    /// the default refuses anything longer.
     pub max_lifetime: Duration,
     /// How long a fetched JWKS is used before it is refetched on the next request.
     pub jwks_cache_ttl: Duration,
@@ -64,8 +65,8 @@ pub struct VerifierConfig {
 }
 
 impl VerifierConfig {
-    /// A configuration with the protocol's defaults: 30 s skew, 5 min lifetime cap, a 10 min JWKS
-    /// cache and at most one unknown-`kid` refetch every 10 s.
+    /// A configuration with the protocol's defaults: 30 s skew, a 60 s lifetime cap, a 10 min
+    /// JWKS cache and at most one unknown-`kid` refetch every 10 s.
     pub fn new(issuer: impl Into<String>, module_id: impl Into<String>, base_urls: Vec<String>) -> Self {
         Self {
             issuer: issuer.into(),
@@ -73,7 +74,7 @@ impl VerifierConfig {
             base_urls,
             jwks_url: None,
             leeway: Duration::from_secs(30),
-            max_lifetime: Duration::from_secs(300),
+            max_lifetime: Duration::from_secs(60),
             jwks_cache_ttl: Duration::from_secs(600),
             min_refetch_interval: Duration::from_secs(10),
         }
