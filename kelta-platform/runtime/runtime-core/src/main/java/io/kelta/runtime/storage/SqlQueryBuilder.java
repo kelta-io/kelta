@@ -165,6 +165,14 @@ final class SqlQueryBuilder {
         boolean isArrayColumn = fieldDef != null
             && fieldDef.type() == FieldType.MULTI_PICKLIST;
 
+        // JSON and ARRAY fields are JSONB columns, which have no LIKE operator or LOWER():
+        // Postgres rejects the query ("operator does not exist: jsonb ~~ character varying").
+        // The text-pattern operators match the column's JSON text instead, so a contains on a
+        // JSON list of paths finds the rows whose list mentions the path.
+        boolean isJsonbColumn = fieldDef != null
+            && (fieldDef.type() == FieldType.JSON || fieldDef.type() == FieldType.ARRAY);
+        String textField = isJsonbColumn ? fieldName + "::text" : fieldName;
+
         return switch (operator) {
             case EQ -> {
                 params.add(value);
@@ -208,15 +216,15 @@ final class SqlQueryBuilder {
                     yield "? = ANY(" + fieldName + ")";
                 }
                 params.add("%" + value + "%");
-                yield fieldName + " LIKE ?";
+                yield textField + " LIKE ?";
             }
             case STARTS -> {
                 params.add(value + "%");
-                yield fieldName + " LIKE ?";
+                yield textField + " LIKE ?";
             }
             case ENDS -> {
                 params.add("%" + value);
-                yield fieldName + " LIKE ?";
+                yield textField + " LIKE ?";
             }
             case ICONTAINS -> {
                 if (isArrayColumn) {
@@ -226,19 +234,19 @@ final class SqlQueryBuilder {
                         + ") AS elt WHERE LOWER(elt) = ?)";
                 }
                 params.add("%" + value.toString().toLowerCase() + "%");
-                yield "LOWER(" + fieldName + ") LIKE ?";
+                yield "LOWER(" + textField + ") LIKE ?";
             }
             case ISTARTS -> {
                 params.add(value.toString().toLowerCase() + "%");
-                yield "LOWER(" + fieldName + ") LIKE ?";
+                yield "LOWER(" + textField + ") LIKE ?";
             }
             case IENDS -> {
                 params.add("%" + value.toString().toLowerCase());
-                yield "LOWER(" + fieldName + ") LIKE ?";
+                yield "LOWER(" + textField + ") LIKE ?";
             }
             case IEQ -> {
                 params.add(value.toString().toLowerCase());
-                yield "LOWER(" + fieldName + ") = ?";
+                yield "LOWER(" + textField + ") = ?";
             }
             case IN -> {
                 if (value instanceof Collection<?> coll) {
