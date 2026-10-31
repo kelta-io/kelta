@@ -14,6 +14,7 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use p256::ecdsa::SigningKey;
+use p256::elliptic_curve::Generate;
 use p256::pkcs8::EncodePrivateKey;
 use serde_json::{Map, Value, json};
 
@@ -40,10 +41,10 @@ pub struct PlatformKey {
 impl PlatformKey {
     /// A fresh random key named `kid`.
     pub fn generate(kid: &str) -> Self {
-        let signing = SigningKey::random(&mut rand_core::OsRng);
+        let signing = SigningKey::generate();
         let der = signing.to_pkcs8_der().expect("a P-256 key encodes as PKCS#8");
         let encoding = EncodingKey::from_ec_der(der.as_bytes());
-        let point = signing.verifying_key().to_encoded_point(false);
+        let point = signing.verifying_key().to_sec1_point(false);
         let jwk = json!({
             "kty": "EC", "crv": "P-256", "use": "sig", "alg": "ES256", "kid": kid,
             "x": URL_SAFE_NO_PAD.encode(point.x().expect("uncompressed point")),
