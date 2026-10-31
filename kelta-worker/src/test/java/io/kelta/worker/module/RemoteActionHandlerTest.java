@@ -65,7 +65,7 @@ class RemoteActionHandlerTest {
     void sendsTheActionRequest() throws Exception {
         when(http.invoke(any(), any(), any(), any())).thenReturn(json(200, "{\"success\":true,\"output\":{\"ok\":1}}"));
         ModuleAssertionSigner.Actor runUser = new ModuleAssertionSigner.Actor("user-1", "PORTAL", null);
-        when(registry.flowActor(ExternalModuleFixtures.TENANT, "user-1")).thenReturn(runUser);
+        when(registry.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "user-1")).thenReturn(runUser);
 
         ActionResult result = handler.execute(context());
 
@@ -139,6 +139,7 @@ class RemoteActionHandlerTest {
         ArgumentCaptor<ModuleHttpClient.Call> sent = ArgumentCaptor.captor();
         verify(http).invoke(any(), any(), sent.capture(), any());
         assertThat(sent.getValue().headers()).containsEntry("Idempotency-Key", "job-1:2026-10-30T12:00:00Z");
+        assertThat(sent.getValue().actor()).as("a module schedule has no acting user").isNull();
     }
 
     @Test

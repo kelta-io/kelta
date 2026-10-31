@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -230,24 +231,40 @@ class ExternalModuleRegistryTest {
         when(jdbc.queryForList(eq(sql), eq(String.class), eq("gone-1"), eq(ExternalModuleFixtures.TENANT)))
                 .thenReturn(List.of());
 
-        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, "member-1"))
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "member-1"))
                 .isEqualTo(new ModuleAssertionSigner.Actor("member-1", "PORTAL", null));
-        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, "svc-1")).as("a service user").isNull();
-        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, "gone-1")).as("unknown or inactive").isNull();
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "svc-1")).as("a service user").isNull();
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "gone-1")).as("unknown or inactive").isNull();
     }
 
     @Test
-    @DisplayName("a flow step with no run user has no actor, and a caller who is the run user is used as is")
-    void flowActorWithoutLookup() {
+    @DisplayName("a flow step with no run user has no actor and reads nothing")
+    void flowActorWithoutRunUser() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         ExternalModuleRegistry withDb = new ExternalModuleRegistry(store, actions, hooks, services, invoker, jdbc,
                 null, null, new ObjectMapper());
 
-        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, null)).isNull();
-        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, " ")).isNull();
-        CallerContext caller = new CallerContext("admin-1", CallerContext.UserType.INTERNAL, false, false);
-        assertThat(CallerContext.callAs(caller, () -> withDb.flowActor(ExternalModuleFixtures.TENANT, "admin-1")))
-                .isEqualTo(new ModuleAssertionSigner.Actor("admin-1", "INTERNAL", null));
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, null)).isNull();
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, " ")).isNull();
         verifyNoInteractions(jdbc);
+    }
+
+    @Test
+    @DisplayName("the run user's type comes from platform_user even on a request thread, and a failed read is a module error")
+    void flowActorReadsTheDatabase() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        ExternalModuleRegistry withDb = new ExternalModuleRegistry(store, actions, hooks, services, invoker, jdbc,
+                null, null, new ObjectMapper());
+        when(jdbc.queryForList(anyString(), eq(String.class), eq("svc-2"), eq(ExternalModuleFixtures.TENANT)))
+                .thenReturn(List.of("SERVICE"));
+        when(jdbc.queryForList(anyString(), eq(String.class), eq("down-1"), eq(ExternalModuleFixtures.TENANT)))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("db down"));
+
+        CallerContext header = new CallerContext("svc-2", CallerContext.UserType.INTERNAL, false, false);
+        assertThat(CallerContext.callAs(header,
+                () -> withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "svc-2")))
+                .as("a SERVICE user the gateway header called INTERNAL").isNull();
+        assertThatThrownBy(() -> withDb.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "down-1"))
+                .isInstanceOf(io.kelta.runtime.workflow.ModuleUnavailableException.class);
     }
 }

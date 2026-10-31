@@ -19,6 +19,7 @@ import io.kelta.runtime.workflow.ModuleUnavailableException;
 import io.kelta.worker.service.FieldMaskingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
@@ -276,26 +277,28 @@ public class ExternalModuleRegistry {
     /**
      * The acting user of a flow step: the run's user ({@link ActionContext#userId()}, which
      * {@code FlowActorResolver} resolved to the caller, the record's changer, or the flow's run-as
-     * user or owner), the identity a JAR module's action read. The request caller's own type is used
-     * when the step runs on that caller's request thread; otherwise the user must be an
-     * {@code ACTIVE} {@code INTERNAL} or {@code PORTAL} user of the tenant. {@code null} for a run
-     * with no user, and for a service, inactive or unknown one, so a module never acts for an
-     * identity the platform cannot vouch for.
+     * user or owner), the identity a JAR module's action read. Sent only when it is an
+     * {@code ACTIVE} {@code INTERNAL} or {@code PORTAL} user of the tenant, read from
+     * {@code platform_user} (never from a request header, which maps a missing or {@code SERVICE}
+     * type to {@code INTERNAL}). {@code null} for a run with no user, and for a service, inactive or
+     * unknown one, so a module never acts for an identity the platform cannot vouch for.
+     *
+     * @throws ModuleUnavailableException when the user cannot be read, so the step fails as a
+     *         transient module error (and its Retry applies) instead of calling without an actor
      */
-    ModuleAssertionSigner.Actor flowActor(String tenantId, String runUserId) {
-        if (runUserId == null || runUserId.isBlank()) {
+    ModuleAssertionSigner.Actor flowActor(String tenantId, String moduleId, String runUserId) {
+        if (runUserId == null || runUserId.isBlank() || jdbcTemplate == null) {
             return null;
         }
-        ModuleAssertionSigner.Actor caller = currentActor(null);
-        if (caller != null && runUserId.equals(caller.userId()) && caller.userType() != null) {
-            return caller;
+        List<String> types;
+        try {
+            types = jdbcTemplate.queryForList(
+                    "SELECT user_type FROM platform_user WHERE id = ? AND tenant_id = ? AND status = 'ACTIVE'",
+                    String.class, runUserId, tenantId);
+        } catch (DataAccessException e) {
+            log.warn("Could not read the run's user for a module action (tenant {}): {}", tenantId, e.getMessage());
+            throw ModuleUnavailableException.of(moduleId, "The acting user could not be read");
         }
-        if (jdbcTemplate == null) {
-            return null;
-        }
-        List<String> types = jdbcTemplate.queryForList(
-                "SELECT user_type FROM platform_user WHERE id = ? AND tenant_id = ? AND status = 'ACTIVE'",
-                String.class, runUserId, tenantId);
         String type = types.isEmpty() ? null : types.getFirst();
         return "INTERNAL".equals(type) || "PORTAL".equals(type)
                 ? new ModuleAssertionSigner.Actor(runUserId, type, null)

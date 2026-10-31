@@ -103,7 +103,7 @@ final class RemoteActionHandler implements ActionHandler {
         ModuleHttpClient.Call call = new ModuleHttpClient.Call("POST",
                 ModuleHttpClient.ACTIONS_PATH + URLEncoder.encode(key, StandardCharsets.UTF_8), null, body,
                 "application/json", Map.of(IDEMPOTENCY_KEY_HEADER, idempotencyKey),
-                Duration.ofMillis(declared.timeoutMs()), registry.flowActor(tenantId, context.userId()));
+                Duration.ofMillis(declared.timeoutMs()), registry.flowActor(tenantId, moduleId, context.userId()));
         return invoker.call(endpoint.row(), ExternalModuleInvoker.Kind.ACTION, call, this::readResult);
     }
 
