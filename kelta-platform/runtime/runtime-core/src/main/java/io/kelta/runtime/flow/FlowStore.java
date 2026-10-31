@@ -1,5 +1,7 @@
 package io.kelta.runtime.flow;
 
+import io.kelta.runtime.workflow.ActorSource;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -26,12 +28,13 @@ public interface FlowStore {
      * @param tenantId        the tenant ID
      * @param flowId          the flow being executed
      * @param startedBy       the user ID who started the execution (null for trigger-started)
+     * @param startedBySource how {@code startedBy} was chosen, or null when unknown
      * @param triggerRecordId the record that triggered the execution (null for non-record triggers)
      * @param initialInput    the initial input data
      * @param isTest          whether this is a test execution
      * @return the generated execution ID
      */
-    String createExecution(String tenantId, String flowId, String startedBy,
+    String createExecution(String tenantId, String flowId, String startedBy, ActorSource startedBySource,
                            String triggerRecordId, Map<String, Object> initialInput, boolean isTest);
 
     /**

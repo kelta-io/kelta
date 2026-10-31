@@ -5,6 +5,7 @@ import io.kelta.runtime.module.ModuleStore;
 import io.kelta.runtime.module.TenantModuleData;
 import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionResult;
+import io.kelta.runtime.workflow.ActorSource;
 import io.kelta.runtime.workflow.ModuleTimeoutException;
 import io.kelta.runtime.workflow.ModuleUnavailableException;
 import io.kelta.worker.service.TenantSlugResolver;
@@ -98,6 +99,25 @@ class RemoteActionHandlerAsyncTest {
         assertThat(task.get("token").stringValue()).isEqualTo(TASK.token());
         assertThat(task.get("expiresAt").stringValue()).isEqualTo(EXPIRES.toString());
         // Each attempt brings a new task: a replayed answer to an earlier attempt must not match.
+        assertThat(call.headers()).containsEntry(RemoteActionHandler.IDEMPOTENCY_KEY_HEADER, "exec-1:Ingest:1");
+    }
+
+    @Test
+    @DisplayName("a long-running call carries the run's user and its source as the actor, like a synchronous one")
+    void sendsTheActorWithItsSource() {
+        when(http.invoke(any(), any(), any(), any())).thenReturn(json(202, ""));
+        ModuleAssertionSigner.Actor runAs = new ModuleAssertionSigner.Actor("run-as-1", "INTERNAL", null,
+                ActorSource.RUN_AS);
+        when(registry.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "run-as-1",
+                ActorSource.RUN_AS)).thenReturn(runAs);
+
+        ActionResult result = handler.execute(ActionContext.builder().tenantId(ExternalModuleFixtures.TENANT)
+                .executionLogId("exec-1").workflowRuleId("flow-1").stepName("Ingest").attempt(1).awaitable(true)
+                .userId("run-as-1").actorSource(ActorSource.RUN_AS).build());
+
+        assertThat(result.isAwaiting()).isTrue();
+        ModuleHttpClient.Call call = sent();
+        assertThat(call.actor()).isEqualTo(runAs);
         assertThat(call.headers()).containsEntry(RemoteActionHandler.IDEMPOTENCY_KEY_HEADER, "exec-1:Ingest:1");
     }
 

@@ -23,6 +23,7 @@ class ActionContextTest {
             .previousData(Map.of("name", "Old"))
             .changedFields(List.of("name"))
             .userId("u1")
+            .actorSource(ActorSource.RUN_AS)
             .actionConfigJson("{}")
             .workflowRuleId("w1")
             .executionLogId("e1")
@@ -37,6 +38,7 @@ class ActionContextTest {
         assertEquals("Old", context.previousData().get("name"));
         assertEquals(List.of("name"), context.changedFields());
         assertEquals("u1", context.userId());
+        assertEquals(ActorSource.RUN_AS, context.actorSource());
         assertEquals("{}", context.actionConfigJson());
         assertEquals("w1", context.workflowRuleId());
         assertEquals("e1", context.executionLogId());
@@ -53,5 +55,6 @@ class ActionContextTest {
         assertEquals("t1", context.tenantId());
         assertNull(context.collectionId());
         assertNull(context.recordId());
+        assertNull(context.actorSource());
     }
 }

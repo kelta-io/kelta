@@ -39,6 +39,9 @@ import java.util.UUID;
  *
  * <p>The run's user rides as the signed {@code act} claim ({@link ExternalModuleRegistry#flowActor}),
  * so an action that serves "the calling member" (billing's checkout) works from a flow.
+ * {@code act.source} says how the run's user was chosen ({@link ActionContext#actorSource()}):
+ * {@code initiator}, or a {@code run_as} / {@code owner} fallback a member-only action refuses.
+ * Every call of a step carries it, a long-running one's included, and a resumed run keeps it.
  *
  * <p>Outcomes: {@code success: true} → its {@code output}; {@code success: false} →
  * {@link ActionResult#failure} with {@code <error.code>: <error.message>} (flow error
@@ -189,7 +192,8 @@ final class RemoteActionHandler implements ActionHandler {
         ModuleHttpClient.Call call = new ModuleHttpClient.Call("POST",
                 ModuleHttpClient.ACTIONS_PATH + URLEncoder.encode(key, StandardCharsets.UTF_8), null, body,
                 "application/json", Map.of(IDEMPOTENCY_KEY_HEADER, idempotencyKey),
-                Duration.ofMillis(declared.timeoutMs()), registry.flowActor(tenantId, moduleId, context.userId()));
+                Duration.ofMillis(declared.timeoutMs()),
+                registry.flowActor(tenantId, moduleId, context.userId(), context.actorSource()));
         return invoker.call(endpoint.row(), ExternalModuleInvoker.Kind.ACTION, call, this::readResult);
     }
 

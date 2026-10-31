@@ -12,6 +12,7 @@ import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.KeyUse;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
+import io.kelta.runtime.workflow.ActorSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,7 +52,8 @@ import java.util.regex.Pattern;
  *
  * <p>Claims: {@code iss} ({@value #ISSUER_PROPERTY}), {@code aud} (the module id), {@code sub} (the
  * install id), {@code tenant_id}, {@code tenant_slug}, {@code act} (the acting user, RFC 8693, when
- * there is one), {@code htm}/{@code htu} (method and the exact URL sent, as in DPoP),
+ * there is one: {@code sub}, {@code user_type}, {@code profile_id} on routes, and {@code source} on a
+ * flow step — {@link #claimSource}), {@code htm}/{@code htu} (method and the exact URL sent, as in DPoP),
  * {@code body_sha256} (base64url, unpadded, of the exact body bytes — of the empty string when
  * there is none), {@code iat}, {@code exp = iat + 60 s} and a random {@code jti}. The header names
  * the key in {@code kid}, its RFC 7638 thumbprint.
@@ -82,8 +84,20 @@ public class ModuleAssertionSigner {
     private static final Pattern PEM_BLOCK =
             Pattern.compile("-----BEGIN ([A-Z ]+)-----([^-]+)-----END \\1-----");
 
-    /** The acting user ({@code act} claim), when a person's action caused the call. */
-    public record Actor(String userId, String userType, String profileId) {}
+    /**
+     * The acting user ({@code act} claim).
+     *
+     * @param source how a flow step's actor was chosen ({@code act.source}); {@code null} for the
+     *               caller of a request (a route, a hook, an entitlements lookup), which sends no
+     *               {@code source}: an absent source means the caller
+     */
+    public record Actor(String userId, String userType, String profileId, ActorSource source) {
+
+        /** A request's caller: no {@code source}. */
+        public Actor(String userId, String userType, String profileId) {
+            this(userId, userType, profileId, null);
+        }
+    }
 
     /**
      * One request to sign.
@@ -180,6 +194,9 @@ public class ModuleAssertionSigner {
             if (request.actor().profileId() != null) {
                 act.put("profile_id", request.actor().profileId());
             }
+            if (request.actor().source() != null) {
+                act.put("source", claimSource(request.actor().source()));
+            }
             claims.claim("act", act);
         }
         SigningKey key = keys.getFirst();
@@ -193,6 +210,20 @@ public class ModuleAssertionSigner {
             throw new IllegalStateException("Could not sign a module request: " + e.getMessage(), e);
         }
         return jwt.serialize();
+    }
+
+    /**
+     * The {@code act.source} value of a flow step's actor: {@code initiator} (the user who started
+     * the run, or whose record change triggered it), {@code run_as} (the flow's run-as user) or
+     * {@code owner} (the flow's owner). The last two are fallback identities, not a person who
+     * acted; a module refuses a member-only action for them.
+     */
+    static String claimSource(ActorSource source) {
+        return switch (source) {
+            case INITIATOR -> "initiator";
+            case RUN_AS -> "run_as";
+            case OWNER -> "owner";
+        };
     }
 
     /** Base64url (unpadded) SHA-256 of {@code body}; of the empty string when {@code null}. */

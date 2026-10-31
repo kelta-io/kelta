@@ -17,8 +17,9 @@ pub type Settings = Map<String, Value>;
 
 /// The user whose action caused a call (`Actor`, the RFC 8693 `act` claim).
 ///
-/// Only ever built from the verified assertion. Absent on flow steps, schedules, webhooks and
-/// events, which have no request caller.
+/// Only ever built from the verified assertion. On a route, hook or entitlements lookup it is the
+/// request's caller. On a flow step it is the run's user, and [`source`](Self::source) says how the
+/// platform chose it. Absent on module schedules, webhooks, events and lifecycle calls.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Actor {
     /// The user id.
@@ -29,12 +30,52 @@ pub struct Actor {
     /// The caller's profile; sent on routes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
+    /// How a flow step's actor was chosen (`act.source`). `None` means the request's caller: the
+    /// platform sends no source for a route, hook or entitlements lookup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ActorSource>,
 }
 
 impl Actor {
     /// True when the actor is a portal member (`user_type` is `PORTAL`).
     pub fn is_portal(&self) -> bool {
         self.user_type.as_deref() == Some("PORTAL")
+    }
+
+    /// True when the actor is a flow run's fallback identity rather than a person who acted: the
+    /// flow's run-as user or owner, sent because no one started the run (a schedule, a webhook, a
+    /// record change with no acting user). A source this SDK does not know counts as a fallback,
+    /// so an older module fails closed. A member-only action (one that acts for "the calling
+    /// member") refuses such an actor.
+    pub fn is_fallback(&self) -> bool {
+        self.source.as_ref().is_some_and(ActorSource::is_fallback)
+    }
+}
+
+/// How the platform chose a flow step's actor (`act.source`).
+///
+/// Unknown values are kept as [`Other`](Self::Other), so a newer platform never breaks an older
+/// module; [`is_fallback`](Self::is_fallback) treats them as fallbacks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ActorSource {
+    /// The user who started the run, or whose record change triggered it.
+    Initiator,
+    /// The flow's configured run-as user: no one started the run.
+    RunAs,
+    /// The flow's owner: no one started the run and the flow names no run-as user.
+    Owner,
+    /// A value this SDK does not know, as sent.
+    #[serde(untagged)]
+    Other(String),
+}
+
+impl ActorSource {
+    /// True for every source but [`Initiator`](Self::Initiator): the run-as user, the owner, and
+    /// any value this SDK does not know.
+    pub fn is_fallback(&self) -> bool {
+        !matches!(self, Self::Initiator)
     }
 }
 
@@ -478,6 +519,43 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(lifecycle.event, LifecycleEventKind::Upgraded);
+    }
+
+    #[test]
+    fn an_actor_without_a_source_is_the_caller() {
+        let actor: Actor =
+            serde_json::from_value(json!({ "sub": "u1", "user_type": "PORTAL", "profile_id": "p1" })).unwrap();
+        assert_eq!(actor.source, None);
+        assert!(!actor.is_fallback());
+        assert!(actor.is_portal());
+        assert_eq!(
+            serde_json::to_value(&actor).unwrap(),
+            json!({ "sub": "u1", "user_type": "PORTAL", "profile_id": "p1" })
+        );
+    }
+
+    #[test]
+    fn a_flow_actor_carries_its_source_and_only_an_initiator_is_not_a_fallback() {
+        let read = |source: &str| -> Actor {
+            serde_json::from_value(json!({ "sub": "u1", "user_type": "PORTAL", "source": source })).unwrap()
+        };
+        assert_eq!(read("initiator").source, Some(ActorSource::Initiator));
+        assert_eq!(read("run_as").source, Some(ActorSource::RunAs));
+        assert_eq!(read("owner").source, Some(ActorSource::Owner));
+        assert!(!read("initiator").is_fallback());
+        assert!(read("run_as").is_fallback());
+        assert!(read("owner").is_fallback());
+        for source in ["initiator", "run_as", "owner"] {
+            assert_eq!(serde_json::to_value(read(source)).unwrap()["source"], source);
+        }
+    }
+
+    #[test]
+    fn an_unknown_source_is_kept_and_fails_closed() {
+        let actor: Actor = serde_json::from_value(json!({ "sub": "u1", "source": "delegate" })).unwrap();
+        assert_eq!(actor.source, Some(ActorSource::Other("delegate".into())));
+        assert!(actor.is_fallback());
+        assert_eq!(serde_json::to_value(&actor).unwrap()["source"], "delegate");
     }
 
     #[test]

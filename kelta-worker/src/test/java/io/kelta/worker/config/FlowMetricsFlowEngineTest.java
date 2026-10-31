@@ -51,7 +51,7 @@ class FlowMetricsFlowEngineTest {
 
         FlowEngine engine = new FlowEngine(completingFlowStore(), new ActionHandlerRegistry(),
                 new ObjectMapper(), 1, metrics);
-        engine.startExecution(TENANT_ID, FLOW_ID, DEFINITION, Map.of(), "user-1", null, false);
+        engine.startExecution(TENANT_ID, FLOW_ID, DEFINITION, Map.of(), "user-1", null, null, false);
         engine.shutdown();
 
         var counter = registry.find("kelta_flow_execution_total")
@@ -73,11 +73,11 @@ class FlowMetricsFlowEngineTest {
 
     private static FlowStore completingFlowStore() {
         FlowStore store = mock(FlowStore.class);
-        when(store.createExecution(eq(TENANT_ID), eq(FLOW_ID), anyString(), isNull(), any(), anyBoolean()))
+        when(store.createExecution(eq(TENANT_ID), eq(FLOW_ID), anyString(), isNull(), isNull(), any(), anyBoolean()))
                 .thenReturn(EXECUTION_ID);
         when(store.findStepLogging(TENANT_ID, FLOW_ID)).thenReturn(FlowStepLogging.FULL);
         when(store.loadExecution(EXECUTION_ID)).thenReturn(Optional.of(new FlowExecutionData(
-                EXECUTION_ID, TENANT_ID, FLOW_ID, FlowExecutionData.STATUS_COMPLETED, "user-1", null,
+                EXECUTION_ID, TENANT_ID, FLOW_ID, FlowExecutionData.STATUS_COMPLETED, "user-1", null, null,
                 Map.of(), "Done", null, null, 2, 5, Map.of(), false, null, null)));
         return store;
     }

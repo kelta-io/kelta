@@ -153,7 +153,8 @@ Deviations and gaps from the sandbox run:
   `create-checkout-session` or `create-portal-session` answers `No calling member`, because the
   platform sends no actor on a flow step. The JAR read the flow's user. This is held for an owner
   decision in kelta-io/kelta#2116. Neither production tenant has an active flow that calls a
-  billing action.
+  billing action. *Since then:* #2116 sends the run's user as `act`, and `act.source` marks a
+  run-as or owner fallback, which checkout and portal refuse with `No calling member`.
 - **Not exercised live:**
   - A new checkout paid end to end: the sandbox member already holds the subscription.
   - A one-time pass and its hourly expiry: the sandbox has no `ONE_TIME` plan.

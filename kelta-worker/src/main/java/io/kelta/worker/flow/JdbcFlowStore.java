@@ -4,6 +4,7 @@ import io.kelta.runtime.flow.FlowExecutionData;
 import io.kelta.runtime.flow.FlowStepLogData;
 import io.kelta.runtime.flow.FlowStepLogging;
 import io.kelta.runtime.flow.FlowStore;
+import io.kelta.runtime.workflow.ActorSource;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.core.type.TypeReference;
@@ -81,20 +82,21 @@ public class JdbcFlowStore implements FlowStore {
 
     @Override
     public String createExecution(String tenantId, String flowId, String startedBy,
-                                  String triggerRecordId, Map<String, Object> initialInput,
-                                  boolean isTest) {
+                                  ActorSource startedBySource, String triggerRecordId,
+                                  Map<String, Object> initialInput, boolean isTest) {
         String id = UUID.randomUUID().toString();
         String initialInputJson = toJson(initialInput);
         String stateDataJson = toJson(initialInput != null ? initialInput : Map.of());
 
         jdbcTemplate.update("""
             INSERT INTO flow_execution
-                (id, tenant_id, flow_id, status, started_by, trigger_record_id,
+                (id, tenant_id, flow_id, status, started_by, started_by_source, trigger_record_id,
                  state_data, initial_input, is_test, step_count, started_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, 0, NOW())
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, 0, NOW())
             """,
             id, tenantId, flowId, FlowExecutionData.STATUS_RUNNING,
-            startedBy, triggerRecordId, stateDataJson, initialInputJson, isTest);
+            startedBy, startedBySource == null ? null : startedBySource.name(), triggerRecordId,
+            stateDataJson, initialInputJson, isTest);
 
         return id;
     }
@@ -102,7 +104,7 @@ public class JdbcFlowStore implements FlowStore {
     @Override
     public Optional<FlowExecutionData> loadExecution(String executionId) {
         List<FlowExecutionData> results = jdbcTemplate.query("""
-            SELECT id, tenant_id, flow_id, status, started_by, trigger_record_id,
+            SELECT id, tenant_id, flow_id, status, started_by, started_by_source, trigger_record_id,
                    state_data, current_node_id, error_message, error_code, step_count, duration_ms,
                    initial_input, is_test, started_at, completed_at
             FROM flow_execution
@@ -256,7 +258,7 @@ public class JdbcFlowStore implements FlowStore {
     @Override
     public List<FlowExecutionData> findExecutionsByFlow(String flowId, int limit, int offset) {
         return jdbcTemplate.query("""
-            SELECT id, tenant_id, flow_id, status, started_by, trigger_record_id,
+            SELECT id, tenant_id, flow_id, status, started_by, started_by_source, trigger_record_id,
                    state_data, current_node_id, error_message, error_code, step_count, duration_ms,
                    initial_input, is_test, started_at, completed_at
             FROM flow_execution
@@ -271,7 +273,7 @@ public class JdbcFlowStore implements FlowStore {
     @Override
     public List<FlowExecutionData> findWaitingExecutions() {
         return jdbcTemplate.query("""
-            SELECT id, tenant_id, flow_id, status, started_by, trigger_record_id,
+            SELECT id, tenant_id, flow_id, status, started_by, started_by_source, trigger_record_id,
                    state_data, current_node_id, error_message, error_code, step_count, duration_ms,
                    initial_input, is_test, started_at, completed_at
             FROM flow_execution
@@ -411,6 +413,7 @@ public class JdbcFlowStore implements FlowStore {
             rs.getString("flow_id"),
             rs.getString("status"),
             rs.getString("started_by"),
+            ActorSource.fromName(rs.getString("started_by_source")),
             rs.getString("trigger_record_id"),
             fromJson(rs.getString("state_data")),
             rs.getString("current_node_id"),

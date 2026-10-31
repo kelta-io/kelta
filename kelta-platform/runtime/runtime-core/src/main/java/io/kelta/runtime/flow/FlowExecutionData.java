@@ -1,5 +1,7 @@
 package io.kelta.runtime.flow;
 
+import io.kelta.runtime.workflow.ActorSource;
+
 import java.time.Instant;
 import java.util.Map;
 
@@ -11,6 +13,8 @@ import java.util.Map;
  * @param flowId          the flow being executed
  * @param status          current status (RUNNING, COMPLETED, FAILED, WAITING, CANCELLED)
  * @param startedBy       user ID who started the execution (null for trigger-started)
+ * @param startedBySource how {@code startedBy} was chosen (null when unknown: a run started
+ *                        before it was recorded)
  * @param triggerRecordId record ID that triggered the execution (for RECORD_TRIGGERED flows)
  * @param stateData       current state data (JSON)
  * @param currentNodeId   the state currently being executed
@@ -31,6 +35,7 @@ public record FlowExecutionData(
     String flowId,
     String status,
     String startedBy,
+    ActorSource startedBySource,
     String triggerRecordId,
     Map<String, Object> stateData,
     String currentNodeId,

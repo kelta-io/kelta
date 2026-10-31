@@ -7,6 +7,7 @@ import io.kelta.runtime.flow.InitialStateBuilder;
 import io.kelta.runtime.module.integration.spi.ScriptExecutor;
 import io.kelta.runtime.module.integration.spi.ScriptExecutor.ScriptExecutionRequest;
 import io.kelta.runtime.module.integration.spi.ScriptExecutor.ScriptExecutionResult;
+import io.kelta.runtime.workflow.ActorSource;
 import io.kelta.worker.repository.DataExportRepository;
 import io.kelta.worker.repository.ScheduledJobRepository;
 import org.junit.jupiter.api.*;
@@ -79,7 +80,7 @@ class ScheduledJobExecutorServiceTest {
             when(repository.findFlowById("flow-c")).thenReturn(Optional.of(Map.of(
                     "id", "flow-c", "tenant_id", "t1", "definition", "{\"StartAt\":\"Start\"}",
                     "trigger_config", "{}", "active", true)));
-            when(flowEngine.startExecution(anyString(), anyString(), anyString(), any(), any(), any(), anyBoolean()))
+            when(flowEngine.startExecution(anyString(), anyString(), anyString(), any(), any(), any(), any(), anyBoolean()))
                     .thenReturn("exec-c");
 
             executor.executeAll();
@@ -87,7 +88,7 @@ class ScheduledJobExecutorServiceTest {
             var inOrder = inOrder(repository, flowEngine);
             inOrder.verify(repository).claim(eq("job-c"), eq(slot),
                     argThat(next -> next != null && next.isAfter(Instant.now())));
-            inOrder.verify(flowEngine).startExecution(eq("t1"), eq("flow-c"), anyString(), any(), any(), any(),
+            inOrder.verify(flowEngine).startExecution(eq("t1"), eq("flow-c"), anyString(), any(), any(), any(), any(),
                     eq(false));
             inOrder.verify(repository).updateAfterExecution(eq("job-c"), eq("SUCCESS"), any());
         }
@@ -101,7 +102,7 @@ class ScheduledJobExecutorServiceTest {
             executor.executeAll();
 
             verify(repository, never()).findFlowById(any());
-            verify(flowEngine, never()).startExecution(any(), any(), any(), any(), any(), any(), anyBoolean());
+            verify(flowEngine, never()).startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
             verify(repository, never()).updateAfterExecution(any(), any(), any());
             verify(repository, never()).insertExecutionLog(any(), any(), any(), any(), any(), anyLong());
         }
@@ -115,7 +116,7 @@ class ScheduledJobExecutorServiceTest {
                 mock(org.springframework.beans.factory.ObjectProvider.class);
         lenient().when(provider.getIfAvailable()).thenReturn(email);
         return new ScheduledJobExecutorService(
-                repository, flowEngine, org.mockito.Mockito.mock(FlowActorResolver.class),
+                repository, flowEngine, ownerResolver(),
                 initialStateBuilder, objectMapper,
                 scriptExecutor, reportExecutionService, dataExportService, dataExportRepository,
                 tenantSlugResolver, provider);
@@ -218,12 +219,13 @@ class ScheduledJobExecutorServiceTest {
             when(repository.findFlowById("flow-1")).thenReturn(Optional.of(Map.of(
                     "id", "flow-1", "tenant_id", "t1", "definition", "{\"StartAt\":\"Start\"}",
                     "trigger_config", "{}", "active", true)));
-            when(flowEngine.startExecution(anyString(), anyString(), anyString(), any(), any(), any(), anyBoolean()))
+            when(flowEngine.startExecution(anyString(), anyString(), anyString(), any(), any(), any(), any(), anyBoolean()))
                     .thenReturn("exec-1");
 
             executor.executeAll();
 
-            verify(flowEngine).startExecution(eq("t1"), eq("flow-1"), anyString(), any(), isNull(), isNull(), eq(false));
+            verify(flowEngine).startExecution(eq("t1"), eq("flow-1"), anyString(), any(), eq("owner-1"),
+                    eq(ActorSource.OWNER), isNull(), eq(false));
             verify(repository).updateAfterExecution(eq("job-1"), eq("SUCCESS"), any());
             verify(repository).insertExecutionLog(eq("job-1"), eq("SUCCESS"), isNull(), any(), any(), anyLong());
         }
@@ -242,7 +244,7 @@ class ScheduledJobExecutorServiceTest {
 
             // Capture the slug visible to TenantContext at the moment startExecution is invoked.
             java.util.concurrent.atomic.AtomicReference<String> seenSlug = new java.util.concurrent.atomic.AtomicReference<>();
-            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), anyBoolean()))
+            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean()))
                     .thenAnswer(invocation -> {
                         seenSlug.set(TenantContext.getSlug());
                         return "exec-1";
@@ -265,7 +267,7 @@ class ScheduledJobExecutorServiceTest {
 
             executor.executeAll();
 
-            verify(flowEngine, never()).startExecution(any(), any(), any(), any(), any(), any(), anyBoolean());
+            verify(flowEngine, never()).startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
             verify(repository).updateAfterExecution(eq("job-2"), eq("FAILED"), any());
             verify(repository).insertExecutionLog(eq("job-2"), eq("FAILED"), contains("not found"), any(), any(), anyLong());
         }
@@ -282,7 +284,7 @@ class ScheduledJobExecutorServiceTest {
 
             executor.executeAll();
 
-            verify(flowEngine, never()).startExecution(any(), any(), any(), any(), any(), any(), anyBoolean());
+            verify(flowEngine, never()).startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
             verify(repository).updateAfterExecution(eq("job-3"), eq("FAILED"), any());
         }
 
@@ -299,7 +301,7 @@ class ScheduledJobExecutorServiceTest {
             when(repository.findFlowById("missing")).thenReturn(Optional.empty());
             when(repository.findFlowById("flow-ok")).thenReturn(Optional.of(Map.of(
                     "id", "flow-ok", "active", true, "definition", "{}", "trigger_config", "{}")));
-            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), anyBoolean())).thenReturn("exec-2");
+            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean())).thenReturn("exec-2");
 
             executor.executeAll();
 
@@ -596,7 +598,7 @@ class ScheduledJobExecutorServiceTest {
             when(repository.findDueJobs()).thenReturn(List.of(flowJob, scriptJob, reportJob));
             when(repository.findFlowById("flow-1")).thenReturn(Optional.of(Map.of(
                     "id", "flow-1", "active", true, "definition", "{}", "trigger_config", "{}")));
-            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), anyBoolean())).thenReturn("exec-1");
+            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean())).thenReturn("exec-1");
             when(repository.findScriptById("script-1")).thenReturn(Optional.of(Map.of(
                     "id", "script-1", "name", "test", "active", true,
                     "source_code", "1+1;", "language", "javascript")));
@@ -642,7 +644,7 @@ class ScheduledJobExecutorServiceTest {
 
             executor.executeAll();
 
-            verify(flowEngine, never()).startExecution(any(), any(), any(), any(), any(), any(), anyBoolean());
+            verify(flowEngine, never()).startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
             verify(scriptExecutor, never()).execute(any());
             verify(repository, never()).updateAfterExecution(any(), any(), any());
         }
@@ -656,7 +658,7 @@ class ScheduledJobExecutorServiceTest {
             when(repository.findDueJobs()).thenReturn(List.of(job));
             when(repository.findFlowById("flow-err")).thenReturn(Optional.of(Map.of(
                     "id", "flow-err", "active", true, "definition", "{}", "trigger_config", "{}")));
-            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), anyBoolean()))
+            when(flowEngine.startExecution(any(), any(), any(), any(), any(), any(), any(), anyBoolean()))
                     .thenThrow(new RuntimeException("Boom"));
 
             executor.executeAll();
@@ -691,5 +693,15 @@ class ScheduledJobExecutorServiceTest {
             assertThat(next1).isAfter(Instant.now().minusSeconds(1));
             assertThat(next2).isAfter(Instant.now().minusSeconds(1));
         }
+    }
+
+    /** A resolver that answers every flow with {@code owner-1} as its {@link ActorSource#OWNER} actor. */
+    private static FlowActorResolver ownerResolver() {
+        FlowActorResolver resolver = org.mockito.Mockito.mock(FlowActorResolver.class);
+        org.mockito.Mockito.lenient().when(resolver.resolve(
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new FlowActorResolver.Resolved("owner-1", ActorSource.OWNER));
+        return resolver;
     }
 }

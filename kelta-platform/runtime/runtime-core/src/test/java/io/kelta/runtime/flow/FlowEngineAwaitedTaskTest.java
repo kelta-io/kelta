@@ -6,6 +6,7 @@ import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionHandler;
 import io.kelta.runtime.workflow.ActionHandlerRegistry;
 import io.kelta.runtime.workflow.ActionResult;
+import io.kelta.runtime.workflow.ActorSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -161,7 +162,8 @@ class FlowEngineAwaitedTaskTest {
 
     private String start(String json) throws Exception {
         flowStore.registerFlow(TENANT, "flow-1", "Ingest", json);
-        String executionId = engine.startExecution(TENANT, "flow-1", json, Map.of("k", "v"), "u1", null, false);
+        String executionId = engine.startExecution(TENANT, "flow-1", json, Map.of("k", "v"), "u1", ActorSource.INITIATOR, null,
+                false);
         awaitStatus(executionId, FlowExecutionData.STATUS_WAITING);
         return executionId;
     }
@@ -381,7 +383,8 @@ class FlowEngineAwaitedTaskTest {
             return parked;
         };
         flowStore.registerFlow(TENANT, "flow-1", "Ingest", flow(""));
-        String executionId = engine.startExecution(TENANT, "flow-1", flow(""), Map.of(), "u1", null, false);
+        String executionId = engine.startExecution(TENANT, "flow-1", flow(""), Map.of(), "u1", ActorSource.INITIATOR, null,
+                false);
 
         FlowExecutionData done = awaitStatus(executionId, FlowExecutionData.STATUS_COMPLETED);
         assertEquals(FlowExecutionData.STATUS_COMPLETED, done.status());

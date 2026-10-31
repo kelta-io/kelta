@@ -126,6 +126,7 @@ public class TaskStateExecutor implements StateExecutor {
                 ActionContext actionContext = ActionContext.builder()
                     .tenantId(context.tenantId())
                     .userId(context.userId())
+                    .actorSource(context.actorSource())
                     .workflowRuleId(context.flowId())
                     .executionLogId(context.executionId())
                     .actionConfigJson(configJson)

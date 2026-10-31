@@ -4,6 +4,7 @@ import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionHandler;
 import io.kelta.runtime.workflow.ActionHandlerRegistry;
 import io.kelta.runtime.workflow.ActionResult;
+import io.kelta.runtime.workflow.ActorSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -292,10 +293,10 @@ class FlowEngineStepLoggingTest {
 
         @Override
         public String createExecution(String tenantId, String flowId, String startedBy,
-                                      String triggerRecordId, Map<String, Object> initialInput,
-                                      boolean isTest) {
-            lastExecutionId = super.createExecution(tenantId, flowId, startedBy, triggerRecordId,
-                initialInput, isTest);
+                                      ActorSource startedBySource, String triggerRecordId,
+                                      Map<String, Object> initialInput, boolean isTest) {
+            lastExecutionId = super.createExecution(tenantId, flowId, startedBy, startedBySource,
+                triggerRecordId, initialInput, isTest);
             return lastExecutionId;
         }
 

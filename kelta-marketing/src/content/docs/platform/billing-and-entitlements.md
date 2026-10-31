@@ -45,9 +45,10 @@ The module serves the member endpoints under its authenticated route prefix:
 
 The same operations exist as flow actions (`kelta-billing:create-checkout-session`,
 `kelta-billing:create-portal-session`, `kelta-billing:resolve-entitlements`, `kelta-billing:list-plans`,
-`kelta-billing:me`), and a *Billing plans* page-builder widget ships in the module's UI bundle. Every action
-except `list-plans` acts on the calling member, so it fails on a scheduled or asynchronous flow run, which has
-none.
+`kelta-billing:me`), and a *Billing plans* page-builder widget ships
+in the module's UI bundle. From a flow, checkout and the billing portal act only for the member who started the run
+(or whose record change triggered it). A run started by a schedule, a webhook or another trigger runs as the flow's
+run-as user or owner, and those two actions refuse it with `No calling member`.
 
 ## Entitlements
 

@@ -23,6 +23,12 @@ import java.util.Map;
  * engine afterwards. Schedules, before-save paths and Task states inside a Parallel, Map or
  * InvokeFlow branch see {@code false} and must answer synchronously.
  *
+ * <p>{@code actorSource} says how a flow run's {@code userId} was chosen: the person who started
+ * the run, or the flow's run-as user or owner it fell back to ({@link ActorSource}). {@code null}
+ * outside a flow and for a run that did not record it. A handler that acts <em>for</em> the user,
+ * rather than only stamping them as the author of its writes, must not treat a fallback identity
+ * as a person who acted.
+ *
  * @since 1.0.0
  */
 public record ActionContext(
@@ -34,6 +40,7 @@ public record ActionContext(
     Map<String, Object> previousData,
     List<String> changedFields,
     String userId,
+    ActorSource actorSource,
     String actionConfigJson,
     String workflowRuleId,
     String executionLogId,
@@ -61,6 +68,7 @@ public record ActionContext(
         private Map<String, Object> previousData;
         private List<String> changedFields;
         private String userId;
+        private ActorSource actorSource;
         private String actionConfigJson;
         private String workflowRuleId;
         private String executionLogId;
@@ -79,6 +87,7 @@ public record ActionContext(
         public Builder previousData(Map<String, Object> previousData) { this.previousData = previousData; return this; }
         public Builder changedFields(List<String> changedFields) { this.changedFields = changedFields; return this; }
         public Builder userId(String userId) { this.userId = userId; return this; }
+        public Builder actorSource(ActorSource actorSource) { this.actorSource = actorSource; return this; }
         public Builder actionConfigJson(String actionConfigJson) { this.actionConfigJson = actionConfigJson; return this; }
         public Builder workflowRuleId(String workflowRuleId) { this.workflowRuleId = workflowRuleId; return this; }
         public Builder executionLogId(String executionLogId) { this.executionLogId = executionLogId; return this; }
@@ -92,7 +101,7 @@ public record ActionContext(
         public ActionContext build() {
             return new ActionContext(
                 tenantId, collectionId, collectionName, recordId,
-                data, previousData, changedFields, userId,
+                data, previousData, changedFields, userId, actorSource,
                 actionConfigJson, workflowRuleId, executionLogId, resolvedData,
                 triggerDepth, stateData, stepName, attempt, awaitable
             );

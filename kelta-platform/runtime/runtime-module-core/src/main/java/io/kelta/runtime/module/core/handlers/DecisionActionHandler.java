@@ -122,6 +122,7 @@ public class DecisionActionHandler implements ActionHandler {
                     .previousData(context.previousData())
                     .changedFields(context.changedFields())
                     .userId(context.userId())
+                    .actorSource(context.actorSource())
                     .actionConfigJson(nestedConfigJson)
                     .workflowRuleId(context.workflowRuleId())
                     .executionLogId(context.executionLogId())

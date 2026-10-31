@@ -274,9 +274,10 @@ public class ScheduledJobExecutorService {
                 ? s : objectMapper.writeValueAsString(flow.get("definition"));
 
         // Execute flow (async — returns immediately)
+        FlowActorResolver.Resolved actor = flowActorResolver.resolve(tenantId, flowReferenceId, null);
         String flowExecutionId = flowEngine.startExecution(
                 tenantId, flowReferenceId, definitionJson, initialState,
-                flowActorResolver.resolve(tenantId, flowReferenceId, null), null, false);
+                actor.userId(), actor.source(), null, false);
 
         Instant completedAt = Instant.now();
         long durationMs = completedAt.toEpochMilli() - startedAt.toEpochMilli();

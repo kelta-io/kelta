@@ -13,6 +13,7 @@ import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionHandlerRegistry;
 import io.kelta.runtime.workflow.ActionResult;
+import io.kelta.runtime.workflow.ActorSource;
 import io.kelta.runtime.workflow.BeforeSaveHook;
 import io.kelta.runtime.workflow.BeforeSaveHookRegistry;
 import io.kelta.runtime.workflow.ModuleUnavailableException;
@@ -271,7 +272,7 @@ public class ExternalModuleRegistry {
 
     /**
      * The acting user for a call, from the request's {@link CallerContext}; {@code null} on a flow or
-     * scheduled path, where no person is acting.
+     * scheduled path, where no person is acting. A caller carries no {@code act.source}.
      */
     static ModuleAssertionSigner.Actor currentActor(String profileId) {
         return CallerContext.current()
@@ -284,17 +285,22 @@ public class ExternalModuleRegistry {
     /**
      * The acting user of a flow step: the run's user ({@link ActionContext#userId()}, which
      * {@code FlowActorResolver} resolved to the caller, the record's changer, or the flow's run-as
-     * user or owner). Sent only when it is an
-     * {@code ACTIVE} {@code INTERNAL} or {@code PORTAL} user of the tenant, read from
-     * {@code platform_user} (never from a request header, which maps a missing or {@code SERVICE}
-     * type to {@code INTERNAL}). {@code null} for a run with no user, and for a service, inactive or
-     * unknown one, so a module never acts for an identity the platform cannot vouch for.
+     * user or owner), with how it was chosen ({@link ActionContext#actorSource()}) as
+     * {@code act.source}. A run-as or owner fallback is sent too, marked, so a module can refuse a
+     * member-only action for it.
+     *
+     * <p>Sent only when it is an {@code ACTIVE} {@code INTERNAL} or {@code PORTAL} user of the
+     * tenant, read from {@code platform_user} (never from a request header, which maps a missing or
+     * {@code SERVICE} type to {@code INTERNAL}). {@code null} for a run with no user, for a service,
+     * inactive or unknown one, and for a run whose source is unknown (started before it was
+     * recorded): a source-less {@code act} would read as the request's caller, so a module never
+     * acts for an identity the platform cannot vouch for.
      *
      * @throws ModuleUnavailableException when the user cannot be read, so the step fails as a
      *         transient module error (and its Retry applies) instead of calling without an actor
      */
-    ModuleAssertionSigner.Actor flowActor(String tenantId, String moduleId, String runUserId) {
-        if (runUserId == null || runUserId.isBlank() || jdbcTemplate == null) {
+    ModuleAssertionSigner.Actor flowActor(String tenantId, String moduleId, String runUserId, ActorSource source) {
+        if (runUserId == null || runUserId.isBlank() || source == null || jdbcTemplate == null) {
             return null;
         }
         List<String> types;
@@ -308,7 +314,7 @@ public class ExternalModuleRegistry {
         }
         String type = types.isEmpty() ? null : types.getFirst();
         return "INTERNAL".equals(type) || "PORTAL".equals(type)
-                ? new ModuleAssertionSigner.Actor(runUserId, type, null)
+                ? new ModuleAssertionSigner.Actor(runUserId, type, null, source)
                 : null;
     }
 

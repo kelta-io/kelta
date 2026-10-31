@@ -214,7 +214,7 @@ compact token:
 | `aud` | the module `id` |
 | `sub` | the module install id (`tenant_module.id`) |
 | `tenant_id`, `tenant_slug` | the tenant being served |
-| `act` | the acting user, when there is one: `{ "sub": userId, "user_type": "INTERNAL"\|"PORTAL", "profile_id": … }` (RFC 8693 actor claim). On a flow action it is the run's user (the caller, the record's changer, or the flow's run-as user or owner), sent only when that is an active `INTERNAL` or `PORTAL` user. Absent for module schedules, webhooks and events |
+| `act` | the acting user, when there is one: `{ "sub": userId, "user_type": "INTERNAL"\|"PORTAL", "profile_id": …, "source": … }` (RFC 8693 actor claim). On a route, hook or entitlements lookup it is the request's caller and carries no `source`. On a flow action it is the run's user, sent only when that is an active `INTERNAL` or `PORTAL` user, and `source` says how `FlowActorResolver` chose it: `initiator` (the caller, or the record's changer), `run_as` (the flow's run-as user) or `owner` (the flow's owner). `run_as` and `owner` are fallbacks for a run no one started: a member-only action refuses them as it refuses no actor (the SDK's `Actor::is_fallback()`, which also counts an unknown value). The source is recorded with the execution (`flow_execution.started_by_source`, V225), so a resumed or retried run keeps it, and a `TRIGGER_FLOW` hop inherits it; a run that did not record one sends no `act`. Absent for module schedules, webhooks and events |
 | `htm`, `htu` | HTTP method and full target URL (as in DPoP, RFC 9449) |
 | `body_sha256` | base64url SHA-256 of the exact request body bytes (of the empty string for GET) |
 | `iat`, `exp` | `exp = iat + 60 s` |

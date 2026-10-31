@@ -2,6 +2,7 @@ package io.kelta.worker.controller;
 
 import io.kelta.runtime.flow.FlowEngine;
 import io.kelta.runtime.flow.InitialStateBuilder;
+import io.kelta.runtime.workflow.ActorSource;
 import io.kelta.worker.repository.FlowRepository;
 import io.kelta.worker.service.FlowActorResolver;
 import io.kelta.worker.service.FlowWebhookPolicy;
@@ -60,8 +61,9 @@ class FlowWebhookControllerTest {
         TenantSlugResolver slugResolver = mock(TenantSlugResolver.class);
         when(slugResolver.resolveSlug("tenant-1")).thenReturn(Optional.of("acme"));
         FlowActorResolver actorResolver = mock(FlowActorResolver.class);
-        when(actorResolver.resolve(eq("tenant-1"), eq(FLOW_ID), isNull())).thenReturn("user-1");
-        when(flowEngine.startExecution(anyString(), anyString(), anyString(), any(), any(), any(), anyBoolean()))
+        when(actorResolver.resolve(eq("tenant-1"), eq(FLOW_ID), isNull()))
+                .thenReturn(new FlowActorResolver.Resolved("user-1", ActorSource.RUN_AS));
+        when(flowEngine.startExecution(anyString(), anyString(), anyString(), any(), any(), any(), any(), anyBoolean()))
                 .thenReturn("exec-1");
 
         FlowWebhookController controller = new FlowWebhookController(flowEngine, flowRepository,
@@ -83,7 +85,7 @@ class FlowWebhookControllerTest {
     private Map<String, Object> startedState() {
         ArgumentCaptor<Map<String, Object>> state = ArgumentCaptor.forClass(Map.class);
         verify(flowEngine).startExecution(eq("tenant-1"), eq(FLOW_ID), anyString(), state.capture(),
-                eq("user-1"), isNull(), eq(false));
+                eq("user-1"), eq(ActorSource.RUN_AS), isNull(), eq(false));
         return state.getValue();
     }
 
@@ -98,7 +100,8 @@ class FlowWebhookControllerTest {
     }
 
     private void verifyNoRun() {
-        verify(flowEngine, never()).startExecution(anyString(), anyString(), anyString(), any(), any(), any(), anyBoolean());
+        verify(flowEngine, never()).startExecution(anyString(), anyString(), anyString(), any(), any(), any(), any(),
+                anyBoolean());
     }
 
     // --- no triggerConfig.webhook: the original contract --------------------------------------

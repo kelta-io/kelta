@@ -1,5 +1,7 @@
 package io.kelta.runtime.flow;
 
+import io.kelta.runtime.workflow.ActorSource;
+
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -29,6 +31,7 @@ public class FlowExecutionContext {
     private int stepCount;
     private int failedCount;
     private int triggerDepth;
+    private ActorSource actorSource;
     private boolean cancelled;
     private boolean completed;
     private boolean waiting;
@@ -214,6 +217,19 @@ public class FlowExecutionContext {
 
     public void setTriggerDepth(int triggerDepth) {
         this.triggerDepth = triggerDepth;
+    }
+
+    /**
+     * How {@link #userId()} was chosen: the person who started the run, or the flow's run-as user or
+     * owner it fell back to. {@code null} when unknown (a run started before it was recorded).
+     * Recorded with the execution, so a resumed run keeps it; sub-flow branches copy the parent's.
+     */
+    public ActorSource actorSource() {
+        return actorSource;
+    }
+
+    public void setActorSource(ActorSource actorSource) {
+        this.actorSource = actorSource;
     }
 
     public void addFailedCount(int n) {

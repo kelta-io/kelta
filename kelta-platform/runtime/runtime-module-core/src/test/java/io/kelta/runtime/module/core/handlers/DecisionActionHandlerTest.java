@@ -5,6 +5,7 @@ import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionHandler;
 import io.kelta.runtime.workflow.ActionHandlerRegistry;
 import io.kelta.runtime.workflow.ActionResult;
+import io.kelta.runtime.workflow.ActorSource;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -46,12 +47,14 @@ class DecisionActionHandlerTest {
     }
 
     @Test
-    @DisplayName("Should execute true branch when condition is true")
+    @DisplayName("Should execute true branch when condition is true, as the run's user and actor source")
     void shouldExecuteTrueBranch() {
+        List<ActionContext> nested = new java.util.ArrayList<>();
         // Register a handler for nested FIELD_UPDATE action
         handlerRegistry.register(new ActionHandler() {
             @Override public String getActionTypeKey() { return "FIELD_UPDATE"; }
             @Override public ActionResult execute(ActionContext context) {
+                nested.add(context);
                 return ActionResult.success(Map.of("updated", true));
             }
         });
@@ -73,6 +76,8 @@ class DecisionActionHandlerTest {
         assertEquals(true, result.outputData().get("conditionResult"));
         assertEquals("true", result.outputData().get("branch"));
         assertEquals(1, result.outputData().get("actionsExecuted"));
+        assertEquals("user-1", nested.getFirst().userId());
+        assertEquals(ActorSource.RUN_AS, nested.getFirst().actorSource());
     }
 
     @Test
@@ -280,7 +285,7 @@ class DecisionActionHandlerTest {
     private ActionContext makeContext(String config) {
         return ActionContext.builder()
             .tenantId("t1").collectionId("c1").collectionName("orders").recordId("r1")
-            .userId("user-1").data(Map.of("status", "High"))
+            .userId("user-1").actorSource(ActorSource.RUN_AS).data(Map.of("status", "High"))
             .actionConfigJson(config).workflowRuleId("wf1").executionLogId("log1").build();
     }
 }

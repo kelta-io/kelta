@@ -5,6 +5,7 @@ import com.nimbusds.jose.crypto.ECDSAVerifier;
 import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jwt.SignedJWT;
+import io.kelta.runtime.workflow.ActorSource;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -83,7 +84,8 @@ public class ModuleAssertionSignerTest {
         assertThat(claims.getJSONObjectClaim("act"))
                 .containsEntry("sub", "user-1")
                 .containsEntry("user_type", "INTERNAL")
-                .containsEntry("profile_id", "profile-1");
+                .containsEntry("profile_id", "profile-1")
+                .as("a request's caller carries no source").doesNotContainKey("source");
         assertThat(claims.getIssueTime().toInstant()).isEqualTo(NOW);
         assertThat(claims.getExpirationTime().toInstant()).isEqualTo(NOW.plusSeconds(60));
         assertThat(claims.getJWTID()).isNotBlank();
@@ -103,6 +105,27 @@ public class ModuleAssertionSignerTest {
         assertThat(ModuleAssertionSigner.bodySha256(null))
                 .isEqualTo("47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU")
                 .isEqualTo(ModuleAssertionSigner.bodySha256(new byte[0]));
+    }
+
+    @Test
+    @DisplayName("a flow step's actor carries act.source: initiator, run_as or owner")
+    void flowActorSource() throws Exception {
+        ModuleAssertionSigner signer = signer(KEY_PEM);
+        Map<ActorSource, String> expected = Map.of(
+                ActorSource.INITIATOR, "initiator", ActorSource.RUN_AS, "run_as", ActorSource.OWNER, "owner");
+        assertThat(expected).as("every source has a claim value").hasSize(ActorSource.values().length);
+
+        for (Map.Entry<ActorSource, String> source : expected.entrySet()) {
+            var request = new ModuleAssertionSigner.Assertion("acme-billing", "install-1", "tenant-1", "acme",
+                    new ModuleAssertionSigner.Actor("user-2", "PORTAL", null, source.getKey()),
+                    "POST", "https://billing.example.test/kelta/v1/actions/checkout", null);
+
+            Map<String, Object> act = SignedJWT.parse(signer.sign(request)).getJWTClaimsSet()
+                    .getJSONObjectClaim("act");
+
+            assertThat(act).containsExactlyInAnyOrderEntriesOf(
+                    Map.of("sub", "user-2", "user_type", "PORTAL", "source", source.getValue()));
+        }
     }
 
     @Test

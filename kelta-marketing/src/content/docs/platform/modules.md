@@ -116,6 +116,12 @@ A module is called only while its install is `ACTIVE` or `DEGRADED`:
   with the error code `ModuleTimeoutException`. Any other failure, or a disabled module, gives
   `ModuleUnavailableException`. A `Catch` can match either code. Work that takes longer than one call is a
   [long-running action](#long-running-actions).
+
+  The signed assertion's `act` names the run's user, with `act.source` saying how the platform chose it:
+  `initiator` (the user who started the run, or whose record change triggered it), `run_as` (the flow's
+  run-as user) or `owner` (the flow's owner). The last two are fallbacks for a run no one started, so an
+  action that acts for the calling member should refuse them. A route's or hook's `act` is the caller
+  and has no `source`.
 - **Before-save hooks.** `POST /kelta/v1/hooks` answers `{ allowed, fieldUpdates, errors, conflict }`:
   - `errors` reject the write with `400`;
   - `conflict` rejects it with `409`;

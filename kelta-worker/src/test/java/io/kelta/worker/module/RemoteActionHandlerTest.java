@@ -4,6 +4,7 @@ import io.kelta.runtime.module.ModuleStore;
 import io.kelta.runtime.module.TenantModuleData;
 import io.kelta.runtime.workflow.ActionContext;
 import io.kelta.runtime.workflow.ActionResult;
+import io.kelta.runtime.workflow.ActorSource;
 import io.kelta.runtime.workflow.ModuleTimeoutException;
 import io.kelta.runtime.workflow.ModuleUnavailableException;
 import io.kelta.worker.service.TenantSlugResolver;
@@ -54,7 +55,8 @@ class RemoteActionHandlerTest {
 
     private ActionContext context() {
         return ActionContext.builder().tenantId(ExternalModuleFixtures.TENANT).executionLogId("exec-1")
-                .userId("user-1").workflowRuleId("flow-1").stepName("Charge").attempt(2).triggerDepth(1)
+                .userId("user-1").actorSource(ActorSource.INITIATOR).workflowRuleId("flow-1").stepName("Charge")
+                .attempt(2).triggerDepth(1)
                 .actionConfigJson("{\"amount\":10}")
                 .resolvedData(Map.of("input", Map.of("orderId", "o-1")))
                 .build();
@@ -64,8 +66,10 @@ class RemoteActionHandlerTest {
     @DisplayName("POSTs /kelta/v1/actions/{key} with the step's input, config, execution and Idempotency-Key")
     void sendsTheActionRequest() throws Exception {
         when(http.invoke(any(), any(), any(), any())).thenReturn(json(200, "{\"success\":true,\"output\":{\"ok\":1}}"));
-        ModuleAssertionSigner.Actor runUser = new ModuleAssertionSigner.Actor("user-1", "PORTAL", null);
-        when(registry.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "user-1")).thenReturn(runUser);
+        ModuleAssertionSigner.Actor runUser =
+                new ModuleAssertionSigner.Actor("user-1", "PORTAL", null, ActorSource.INITIATOR);
+        when(registry.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "user-1",
+                ActorSource.INITIATOR)).thenReturn(runUser);
 
         ActionResult result = handler.execute(context());
 
@@ -78,7 +82,7 @@ class RemoteActionHandlerTest {
         assertThat(call.path()).isEqualTo("/kelta/v1/actions/ping");
         assertThat(call.timeout()).as("the manifest's timeoutMs").isEqualTo(Duration.ofMillis(1500));
         assertThat(call.headers()).containsEntry("Idempotency-Key", "exec-1:Charge");
-        assertThat(call.actor()).as("the run's user acts").isEqualTo(runUser);
+        assertThat(call.actor()).as("the run's user acts, with its source").isEqualTo(runUser);
 
         JsonNode body = mapper.readTree(call.body());
         assertThat(body.get("tenantId").stringValue()).isEqualTo(ExternalModuleFixtures.TENANT);
@@ -89,6 +93,25 @@ class RemoteActionHandlerTest {
         assertThat(execution.get("flowId").stringValue()).isEqualTo("flow-1");
         assertThat(execution.get("stepName").stringValue()).isEqualTo("Charge");
         assertThat(execution.get("attempt").asInt()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("a run-as or owner fallback is sent as the actor with that source, for the module to refuse")
+    void fallbackActorCarriesItsSource() {
+        when(http.invoke(any(), any(), any(), any())).thenReturn(json(200, "{\"success\":true}"));
+        ModuleAssertionSigner.Actor owner = new ModuleAssertionSigner.Actor("owner-1", "INTERNAL", null,
+                ActorSource.OWNER);
+        when(registry.flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "owner-1",
+                ActorSource.OWNER)).thenReturn(owner);
+
+        handler.execute(ActionContext.builder().tenantId(ExternalModuleFixtures.TENANT).executionLogId("exec-2")
+                .userId("owner-1").actorSource(ActorSource.OWNER).stepName("Charge").build());
+
+        ArgumentCaptor<ModuleHttpClient.Call> sent = ArgumentCaptor.captor();
+        verify(http).invoke(any(), any(), sent.capture(), any());
+        assertThat(sent.getValue().actor()).isEqualTo(owner);
+        verify(registry).flowActor(ExternalModuleFixtures.TENANT, ExternalModuleFixtures.MODULE, "owner-1",
+                ActorSource.OWNER);
     }
 
     @Test

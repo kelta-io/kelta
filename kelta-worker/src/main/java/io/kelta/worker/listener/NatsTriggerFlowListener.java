@@ -117,9 +117,9 @@ public class NatsTriggerFlowListener {
                     log.info("Starting flow execution: flowId={}, executionId={}, trigger=NATS_MESSAGE topic={}",
                             config.flowId(), executionId, topic);
 
-                    String actor = flowActorResolver.resolve(tenantId, config.flowId(), null);
+                    FlowActorResolver.Resolved actor = flowActorResolver.resolve(tenantId, config.flowId(), null);
                     flowEngine.startExecution(tenantId, config.flowId(), config.definitionJson(),
-                            initialState, actor, null, false);
+                            initialState, actor.userId(), actor.source(), null, false);
                 } catch (Exception e) {
                     log.error("Error starting NATS-triggered flow {}: {}", config.flowId(), e.getMessage(), e);
                 }

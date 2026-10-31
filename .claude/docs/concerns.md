@@ -720,11 +720,17 @@ homelab cluster (`ci-cd.md` → Rust external modules). What that does not guara
   namespace, reopens it. The residual risk is any other path to the worker: a pod in a namespace
   without such a policy, or a node-level process. Closing it for good needs the worker to verify
   the gateway's identity (mTLS or a signed identity header) rather than trusting the network.
-- **A flow action may have no member.** The platform sends `act` only when a caller context is
-  bound (an HTTP request), not on a scheduled or async flow. `kelta-billing:create-checkout-session`,
-  `create-portal-session`, `me` and `resolve-entitlements` then fail with "No calling member"; the
-  module never takes the member from the input, which any flow author controls. Routes always carry
-  `act`.
+- **A flow action may have no member.** A flow step's `act` is the run's user
+  (`FlowActorResolver`: initiator, else the flow's run-as user, else its owner), with `act.source`
+  saying which. A run no one started (a schedule, a webhook, a record change with no acting user)
+  therefore sends a fallback identity, marked `run_as` or `owner`, and
+  `kelta-billing:create-checkout-session` and `create-portal-session` refuse it with "No calling
+  member"; `me` and `resolve-entitlements` read that user's own billing. A run with no user, or one
+  started before V225 recorded its source, sends no `act`. The module never takes the member from
+  the input, which any flow author controls. Routes always carry `act`, with no `source`. Every
+  module that acts for "the calling member" must check `Actor::is_fallback()` the same way: the
+  platform cannot tell it which actions are member-only. *JAR:* read `ActionContext.userId()`, with
+  no source.
 - **A record-triggered run inherits a flow's fallback actor as its initiator.** A flow step's
   write publishes its record event as the run's actor (`ActingUser`), and `FlowActorResolver`
   takes any UUID on the event as the initiator. So a run no one started — a schedule, a webhook, a

@@ -771,8 +771,12 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   module are filtered for its principal by `ModulePrincipalAccess` (§3.4: server-only and `HIDDEN`
   fields removed, `MASKED` masked, an unreadable collection sent as `{}`), and a hook's
   `fieldUpdates` to a field the principal cannot write is a module failure, so its
-  `failurePolicy` decides. The `act` claim comes from `CallerContext` only, so flow steps and
-  schedules carry none. **Proxies:** `ModuleHttpController` hands an external install's
+  `failurePolicy` decides. The `act` claim of a route, hook or entitlements call comes from
+  `CallerContext` and carries no `source`. A flow step's comes from
+  `ExternalModuleRegistry.flowActor`: the run's user (`ActionContext.userId`), only an `ACTIVE`
+  `INTERNAL`/`PORTAL` user read from `platform_user`, with `act.source` =
+  `ActionContext.actorSource` (`initiator` / `run_as` / `owner`); a run whose source is unknown
+  sends none. Module schedules carry none. **Proxies:** `ModuleHttpController` hands an external install's
   `/api/modules/{id}/x/**` to `ExternalModuleProxy.route` — an undeclared path or method (default
   `GET`) or a non-callable install is `404`, a route `permission` the caller's profile lacks is
   `403`, a module `5xx` or timeout is `502 ModuleUnreachable`, an open breaker or an unreachable

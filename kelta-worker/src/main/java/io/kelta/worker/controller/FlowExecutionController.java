@@ -167,9 +167,9 @@ public class FlowExecutionController {
                     inputPayload, tenantId, userId, flowId, executionId);
         }
 
+        FlowActorResolver.Resolved actor = flowActorResolver.resolve(tenantId, flowId, userId);
         String resultExecutionId = flowEngine.startExecution(
-                tenantId, flowId, definitionJson, initialState,
-                flowActorResolver.resolve(tenantId, flowId, userId), null, isTest);
+                tenantId, flowId, definitionJson, initialState, actor.userId(), actor.source(), null, isTest);
 
         Map<String, Object> attrs = new LinkedHashMap<>();
         attrs.put("flowId", flowId);
@@ -335,10 +335,11 @@ public class FlowExecutionController {
             initialState = exec.initialInput() != null ? exec.initialInput() : Map.of();
         }
 
+        FlowActorResolver.Resolved actor = flowActorResolver.resolveRetry(
+                exec.tenantId(), exec.flowId(), exec.startedBy(), exec.startedBySource());
         String newExecutionId = flowEngine.startExecution(
                 exec.tenantId(), exec.flowId(), definitionJson, initialState,
-                flowActorResolver.resolve(exec.tenantId(), exec.flowId(), exec.startedBy()),
-                exec.triggerRecordId(), exec.isTest());
+                actor.userId(), actor.source(), exec.triggerRecordId(), exec.isTest());
 
         Map<String, Object> attrs = new LinkedHashMap<>();
         attrs.put("originalExecutionId", executionId);

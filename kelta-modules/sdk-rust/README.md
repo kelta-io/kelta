@@ -24,6 +24,14 @@ License: **MIT** (the same as the `@kelta/*` SDK packages in `kelta-web`).
 `Call` is what a handler gets. The tenant (`tenant_id`, `tenant_slug`), the install
 (`install_id`) and the acting user (`actor`) all come from the **verified** assertion claims.
 
+The actor of a route, hook or entitlements lookup is the request's caller and carries no
+`source`. On a flow step it is the run's user, and `Actor::source` says how the platform chose
+it: `Initiator` (the user who started the run, or whose record change triggered it), `RunAs` (the
+flow's run-as user) or `Owner` (the flow's owner). The last two are fallbacks for a run no one
+started. `Actor::is_fallback()` is true for them, and for a source this SDK does not know. An
+action that acts for "the calling member" (a checkout, a billing portal) should refuse a
+fallback actor, as it refuses a call with no actor.
+
 Headers that a third party forwards through the platform, such as a webhook provider's
 signature headers, arrive as `UntrustedHeaders`. The sender controls them, including
 `X-User-Id`, `X-Tenant-ID` and anything else that looks like identity. **No API in this crate
