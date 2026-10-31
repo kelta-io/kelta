@@ -209,13 +209,13 @@ Authorization: Bearer <Kelta-Access-Token>
 An action that takes minutes or hours, such as a data import, declares how long it may take:
 
 ```json
-"actions": [ { "key": "ingest", "name": "Ingest", "timeoutMs": 10000, "maxDurationSeconds": 7200 } ]
+{ "actions": [ { "key": "ingest", "name": "Ingest", "timeoutMs": 10000, "maxDurationSeconds": 7200 } ] }
 ```
 
 The install review shows the duration. When a flow step calls the action, the request carries a task:
 
 ```json
-"task": { "token": "kmt_…", "expiresAt": "2026-11-01T12:00:00Z" }
+{ "task": { "token": "kmt_…", "expiresAt": "2026-11-01T12:00:00Z" } }
 ```
 
 1. Answer `202 Accepted` within `timeoutMs` to take the work on. The flow step waits; the run shows as
