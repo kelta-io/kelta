@@ -5,6 +5,7 @@ import io.kelta.runtime.event.ModuleChangeType;
 import io.kelta.runtime.module.TenantModuleData;
 import io.kelta.worker.interceptor.PermissionGatedController;
 import io.kelta.worker.module.ExternalModulePlan;
+import io.kelta.worker.module.ExternalModuleRegistry;
 import io.kelta.worker.module.ExternalModuleService;
 import io.kelta.worker.module.ModuleConfigEventPublisher;
 import io.kelta.worker.module.ModuleHttpClient;
@@ -20,6 +21,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -78,6 +80,7 @@ public class ModuleController implements PermissionGatedController {
     /** Null when module support is switched off; external-module endpoints then answer 404. */
     private final ExternalModuleService externalModules;
     private final ModuleUninstaller uninstaller;
+    private ExternalModuleRegistry externalRegistry;
 
     public ModuleController(RuntimeModuleManager runtimeModuleManager,
                              ModuleConfigEventPublisher eventPublisher,
@@ -95,6 +98,12 @@ public class ModuleController implements PermissionGatedController {
         this.bootstrapRepository = bootstrapRepository;
         this.externalModules = externalModules.getIfAvailable();
         this.uninstaller = uninstaller.getIfAvailable();
+    }
+
+    /** External-module endpoint registry (part 9d), for live health; setter-injected, absent when off. */
+    @Autowired(required = false)
+    public void setExternalModuleRegistry(ExternalModuleRegistry externalRegistry) {
+        this.externalRegistry = externalRegistry;
     }
 
     /**
@@ -635,6 +644,11 @@ public class ModuleController implements PermissionGatedController {
         health.put("routesRegisteredOnThisPod",
             moduleRouteRegistry == null ? null : moduleRouteRegistry.routeCount(tenantId, moduleId));
         health.putAll(runtimeModuleManager.loadDiagnostics(module.get().id()));
+        if (module.get().isExternal() && externalRegistry != null) {
+            // Nothing of an external module loads on a pod: what matters is whether it answers
+            // (GET /kelta/v1/health, live) and this pod's circuit breaker for it.
+            health.putAll(externalRegistry.health(module.get()));
+        }
         return ResponseEntity.ok(health);
     }
 

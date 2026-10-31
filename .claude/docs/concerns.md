@@ -556,9 +556,38 @@ it does not check:
   reported under `failed` with its provenance row kept, and there is no endpoint to retry it — the
   admin removes it by hand. `?force` on `DELETE /api/modules/{id}` never reaches collection deletes;
   only `purgeData` does (`CollectionDeletionGuardHook.FORCE`).
-- **Nothing invokes an external module yet** (9d). Its action rows exist (keyed `<moduleId>:<key>`),
-  but a flow step naming one fails as an unknown handler, and its webhook route answers as for a
-  module without a webhook handler.
+
+### External modules — invocation (part 9d, accepted)
+
+`architecture.md` → External module invocation. What calling a module out of process costs, and
+what it does not guard against:
+
+- **A remote hook inside a transaction holds a pooled connection.** The query engine opens no
+  transaction itself, but `AtomicOperationsController` and `PackageImportService` run writes in
+  one, and a `RemoteBeforeSaveHook` there keeps that connection (`DB_POOL_MAX`, default 10) for up
+  to its `timeoutMs`. That is why hook timeouts cap at 5 s. A few slow modules behind concurrent
+  atomic requests can still exhaust the pool for the whole pod.
+- **A wildcard hook (`collection: "*"`) is one HTTP round trip on every write** to every collection
+  of the tenant for as long as the install is callable. The plan shows the hook; nothing prices it.
+- **A hook must not call back into the same write.** A module that reads or writes the record
+  being saved, with its own token, from inside its hook can wait on a row lock the hooked
+  transaction holds, until the hook times out and `failurePolicy` decides.
+- **The breaker is per pod.** With N worker pods a dead module takes up to 5 × N failed calls
+  before every pod stops calling it, and each pod probes it again after 30 s. The `DEGRADED` /
+  `ACTIVE` status writes are compare-and-set, so pods do not fight over them, but a pod whose own
+  breaker is closed keeps calling a module another pod marked `DEGRADED`.
+- **Disabling a module drops its hooks.** A disabled (or `FAILED`) install's hooks and
+  entitlements port are unregistered, so its vetoes stop applying and entitlements resolve
+  `EMPTY` — deliberate (disable stops all invocations), but a module enforcing a policy is not a
+  safety net once disabled.
+- **Scheduled jobs can fire twice.** `ScheduledJobRepository.findDueJobs` takes
+  `FOR UPDATE SKIP LOCKED` without a transaction (pre-existing, every job type), so the lock ends
+  with the statement and two pods polling together can both run a due job. Module calls carry
+  `Idempotency-Key: <jobId>:<fireTime>` so a module can drop the duplicate; it must.
+- **Route bodies are text.** The route proxy receives the request body as a UTF-8 string (the JAR
+  path's signature), so a binary or non-UTF-8 body is re-encoded on the way to the module. Module
+  answers are always served as `application/json` with `nosniff` and `no-store`, never as the
+  module's own content type.
 
 ### Outbound requests to tenant-supplied URLs
 

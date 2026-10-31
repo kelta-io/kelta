@@ -8,6 +8,7 @@ import io.kelta.runtime.module.TenantModuleData;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;
@@ -31,12 +32,20 @@ public class ModuleEventListener {
     private final ModuleStore moduleStore;
     private final ObjectMapper objectMapper;
 
+    /** Part 9d's endpoint registry; setter-injected so the constructor stays as it is. */
+    private ExternalModuleRegistry externalModules;
+
     public ModuleEventListener(RuntimeModuleManager runtimeModuleManager,
                                 ModuleStore moduleStore,
                                 ObjectMapper objectMapper) {
         this.runtimeModuleManager = runtimeModuleManager;
         this.moduleStore = moduleStore;
         this.objectMapper = objectMapper;
+    }
+
+    @Autowired(required = false)
+    public void setExternalModuleRegistry(ExternalModuleRegistry externalModules) {
+        this.externalModules = externalModules;
     }
 
     public void handleModuleChanged(String message) {
@@ -84,9 +93,14 @@ public class ModuleEventListener {
                     // pod but one, while /api/modules still reported ACTIVE.
                     case DISABLED, UNINSTALLED ->
                         runtimeModuleManager.unloadModule(tenantId, moduleId);
-                    // Only external modules upgrade in place, and nothing of theirs is loaded on
-                    // a pod yet (part 9d's endpoint registry refreshes from the row instead).
+                    // Only external modules upgrade in place; the endpoint registry below is all
+                    // there is of one on a pod.
                     case UPGRADED -> log.debug("Module '{}' upgraded for tenant {}", moduleId, tenantId);
+                }
+                // An external module: re-read its row, whatever the change, and re-register its
+                // handlers, hooks and service port from it (a JAR module's row is ignored there).
+                if (externalModules != null) {
+                    externalModules.refresh(tenantId, moduleId);
                 }
             });
         } catch (Exception e) {

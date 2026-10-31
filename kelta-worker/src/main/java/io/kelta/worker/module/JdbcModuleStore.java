@@ -223,6 +223,23 @@ public class JdbcModuleStore implements ModuleStore {
         return modules.stream().map(this::withActions).toList();
     }
 
+    @Override
+    public List<TenantModuleData> findAllExternal() {
+        List<TenantModuleData> modules = jdbcTemplate.query(
+            "SELECT * FROM tenant_module WHERE base_url IS NOT NULL ORDER BY tenant_id, module_id",
+            this::mapModule);
+        return modules.stream().map(this::withActions).toList();
+    }
+
+    @Override
+    public boolean compareAndSetStatus(String id, String expected, String status, String error) {
+        return jdbcTemplate.update(
+            "UPDATE tenant_module SET status = ?, last_error = ?, "
+                + "last_error_at = CASE WHEN ?::text IS NULL THEN last_error_at ELSE NOW() END, "
+                + "updated_at = NOW() WHERE id = ? AND status = ?",
+            status, error, error, id, expected) > 0;
+    }
+
     private TenantModuleData withActions(TenantModuleData module) {
         List<TenantModuleData.TenantModuleActionData> actions = jdbcTemplate.query(
             "SELECT * FROM tenant_module_action WHERE tenant_module_id = ? ORDER BY action_key",

@@ -174,4 +174,24 @@ public interface ModuleStore {
      * @return all active modules
      */
     List<TenantModuleData> findAllActive();
+
+    /**
+     * Lists every external module install across all tenants, whatever its status, with its
+     * actions — what each pod's endpoint registry reconciles against. Read with no tenant bound
+     * (the RLS bypass), like {@link #findAllActive()}.
+     */
+    default List<TenantModuleData> findAllExternal() {
+        return List.of();
+    }
+
+    /**
+     * Writes {@code status} and {@code error} only while the row still holds {@code expected}, so
+     * a pod's circuit breaker (ACTIVE ⇄ DEGRADED) can never overwrite an admin's disable or an
+     * uninstall in flight.
+     *
+     * @return true when the row was changed
+     */
+    default boolean compareAndSetStatus(String id, String expected, String status, String error) {
+        return false;
+    }
 }

@@ -680,6 +680,50 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   through `ModuleHostGuard` (`KELTA_MODULE_ALLOWED_HOSTS`), never `OutboundUrlGuard`'s private-CIDR
   list: https unless allow-listed, re-checked per request, redirects never followed.
   Spec: `specs/module-platform/9-external-modules.md` §3.2, §3.5, §3.10.
+- **External module invocation** (part 9d). Each pod keeps an endpoint registry
+  (`ExternalModuleRegistry`) built only from `tenant_module` rows with a `base_url`. It is
+  refreshed on `kelta.config.module.changed` (`ModuleEventListener`), locally on the writing pod
+  after every status change (`ExternalModuleService.refreshLocally`, read-after-write), and
+  reconciled every 60 s from `ModuleStore.findAllExternal()` with no tenant bound
+  (`ExternalModuleReconcileScheduler`, `kelta.modules.external.reconcile-enabled` /
+  `reconcile-interval-ms`). The reconcile also probes `GET /kelta/v1/health` for installs that are
+  `DEGRADED` or whose breaker is open. Registrations follow the row: a `RemoteActionHandler` per
+  action row whatever the status (it refuses at call time), but `RemoteBeforeSaveHook`s and the
+  `RemoteEntitlementProvider` port only while the install is `ACTIVE` or `DEGRADED` — a disabled
+  module blocks no write. A row re-registers only when its fingerprint (version, manifest hash,
+  callable, service user, action keys) changes; an upgrade registers the new hooks before it
+  removes the old ones, and a tenant whose entitlements port is already held (a JAR module) keeps
+  that provider. **One call path:** `ExternalModuleInvoker` checks the status, mints the
+  principal's token, asks the per-pod, per-install `ModuleCircuitBreaker` (open after 5
+  consecutive failures, one half-open trial after 30 s), then calls `ModuleHttpClient.invoke`
+  (assertion, `Kelta-Access-Token`, `traceparent`, through `ModuleHostGuard`). Opening the breaker
+  writes `DEGRADED` and the first success writes `ACTIVE` — compare-and-set, on a virtual thread
+  under the tenant, so a rolled-back write transaction cannot undo it. Deadlines: an action's
+  manifest `timeoutMs`, a hook's `timeoutMs` (100–5000, default 2000), entitlements 2 s, routes
+  30 s, webhooks 10 s, health 2 s (`OutboundHttpClient.Request.deadline`). A timeout throws
+  `ModuleTimeoutException`, any other failure `ModuleUnavailableException` (its superclass); those
+  simple names are the flow error codes, and `GlobalExceptionHandler` answers either with `503`
+  (`ModuleTimeout` / `ModuleUnavailable`, generic detail, `meta.moduleId`). Records sent to a
+  module are filtered for its principal by `ModulePrincipalAccess` (§3.4: server-only and `HIDDEN`
+  fields removed, `MASKED` masked, an unreadable collection sent as `{}`), and a hook's
+  `fieldUpdates` to a field the principal cannot write is a module failure, so its
+  `failurePolicy` decides. The `act` claim comes from `CallerContext` only, so flow steps and
+  schedules carry none. **Proxies:** `ModuleHttpController` hands an external install's
+  `/api/modules/{id}/x/**` to `ExternalModuleProxy.route` — an undeclared path or method (default
+  `GET`) or a non-callable install is `404`, a route `permission` the caller's profile lacks is
+  `403`, a module `5xx` or timeout is `502 ModuleUnreachable`, an open breaker or an unreachable
+  module is the global `503`, and anything else passes back as `application/json` with `nosniff`
+  and `no-store`. `ModuleWebhookController` forwards the raw bytes and the lower-cased header
+  allowlist to `/kelta/v1/webhooks` and returns only the module's status (`503` when it cannot
+  be called, `404` when there is nothing to forward to). **Schedules:** `ModuleScheduleSync`
+  keeps one `scheduled_job` row per manifest schedule (`job_type = 'MODULE_ACTION'`,
+  `job_reference_id` = the install id, name `module:<moduleId>:<action>@<cron>`, `config
+  {moduleId, action}`, UTC) — synced on install and upgrade, deleted with their
+  `job_execution_log` rows on uninstall. `ScheduledJobExecutorService` runs one through the
+  registry with `Idempotency-Key: <jobId>:<fireTime>`, and records `SKIPPED` when the install is
+  not callable. Metrics: `kelta_worker_module_calls` (timer; `module`, `kind`, `outcome`) and
+  `kelta_worker_module_breaker_transitions` (`module`, `transition`). JAR modules keep their own
+  path unchanged. Spec: `specs/module-platform/9-external-modules.md` §3.6, §3.7.
 - **Owner-scoped collections** (member-data-ownership slice 2, V206). A collection may declare
   `ownerField` (`createdBy` or a LOOKUP→`users`), `ownerScope` (`NONE|PORTAL|ALL`) and
   `ownerScopeReads` (default true) — `collection.owner_field/owner_scope/owner_scope_reads`, on

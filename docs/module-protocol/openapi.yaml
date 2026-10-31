@@ -222,8 +222,10 @@ paths:
       description: |
         Pass-through proxy. The platform forwards the caller's method, query string, body and
         `Content-Type`; the caller (when authenticated) is in the assertion's `act` claim. Your
-        status code and JSON body go back to the caller unchanged, up to 1 MiB. A 5xx or timeout
-        becomes `502` for the caller.
+        status code and JSON body go back to the caller unchanged, up to 1 MiB, always served as
+        `application/json` with `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`.
+        A 5xx or timeout (30 s) becomes `502` for the caller; when the platform cannot reach you or
+        your circuit breaker is open, the caller gets `503`.
       responses:
         default:
           description: Any status and JSON body; passed back to the caller.
@@ -368,7 +370,9 @@ components:
         jti:
           type: string
     Actor:
-      description: The user whose action caused this call (RFC 8693 `act` claim).
+      description: |
+        The user whose action caused this call (RFC 8693 `act` claim). Absent on flow steps and
+        schedules, which have no request caller; `profile_id` is sent on routes.
       type: object
       required: [sub, user_type]
       properties:
@@ -399,11 +403,15 @@ components:
         input:
           type: object
           additionalProperties: true
-          description: The step's resolved input parameters.
+          description: |
+            The step's resolved data: its `input` object when it has one (a manually or HTTP-started
+            flow double-wraps its input), otherwise the whole resolved data.
         config:
           type: object
           additionalProperties: true
-          description: The step's static configuration, validated against the action's `configSchema`.
+          description: |
+            The step's static configuration, `{}` when it has none. The platform does not yet
+            validate it against the action's `configSchema`.
         collection:
           type: [string, 'null']
           description: The triggering record's collection, when the flow has one.
@@ -754,7 +762,10 @@ components:
                 description: An action key declared in `actions`.
               cron:
                 type: string
-                description: Spring 6-field cron expression, evaluated in the tenant's timezone.
+                description: |
+                  Spring 6-field cron expression, evaluated in UTC. A schedule fires with no `act`
+                  claim and `Idempotency-Key: <jobId>:<fireTime>`; it can fire twice, so dedupe on
+                  the key. Changing the cron replaces the job.
         webhook:
           type: object
           properties:

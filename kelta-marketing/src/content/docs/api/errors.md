@@ -75,6 +75,7 @@ Several problems in one request produce several entries (one per field).
 | `USER_ANONYMIZED` | 409 | a `users` update that moves an anonymized user to another status or gives them an email, or sets `status: ANONYMIZED` outside [anonymize](/docs/security/users-and-groups/#anonymizing-a-user); `meta.userId` |
 | `ENVIRONMENT_NAME_CONFLICT`, `EMPTY_SANDBOX_REFRESH` | 409 | a sandbox environment name already in use, or a refresh with nothing to copy |
 | `PlanChanged` | 409 | an [external-module](/docs/platform/modules/#external-modules-installed-by-url) install, upgrade or uninstall whose `planHash` no longer matches; nothing is written and `meta.plan` holds the fresh plan |
+| `ModuleConflict` | 409 | an external module's before-save hook answered with a `conflict` and no code of its own; `meta.moduleId` names it |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | the `Content-Type` is not one the endpoint accepts |
 | `TARGET_NOT_SYNTHETIC` | 422 | [`POST /api/admin/availability/synthetic-events`](/docs/platform/messaging/#synthetic-events) names a real, polled watch target |
 | `UNSUPPORTED_MANIFEST_VERSION`, `INVALID_MANIFEST`, `PLATFORM_TOO_OLD`, `DOWNGRADE`, `SAME_VERSION_DIFFERENT_MANIFEST`, `INSTALLED_AS_JAR`, `BASE_URL_MISMATCH`, `SIGNING_NOT_CONFIGURED`, `METADATA_INVALID`, `UNKNOWN_COLLECTION`, `UNKNOWN_FIELD`, `UNKNOWN_PERMISSION`, `CAPABILITY_WITHOUT_GRANT` | 422 | an [external-module](/docs/platform/modules/#external-modules-installed-by-url) install or upgrade whose plan is blocked, one entry per blocker: an unusable manifest, a platform older than its `minPlatformVersion`, a version that does not go up, a module id already installed as a JAR or from another URL, no signing key configured, metadata that does not apply, a permission naming an unknown collection, field or system permission, or a hook or event on a collection the module cannot read |
@@ -86,8 +87,10 @@ Several problems in one request produce several entries (one per field).
 | `AI_PROVIDER_ERROR`, `TOKEN_BUDGET_EXCEEDED` | — | in an AI chat response's `error.code` (or a streamed `error` event): the model provider failed, or the tool loop hit its token budget |
 | `INTERNAL_ERROR` | 500 | unexpected; `meta.requestId` is what to report |
 | `STORAGE_ERROR`, `JSONAPI_PARSE_ERROR`, `APPLY_FAILED` | 500 | the database, the gateway's response parsing, or applying an AI proposal failed; `meta.requestId` is what to report |
-| `ModuleUnreachable` | 502 | an external module's manifest or `lifecycle` endpoint could not be reached or answered with an error |
+| `ModuleUnreachable` | 502 | an external module's manifest or `lifecycle` endpoint could not be reached or answered with an error, or one of its routes (`/api/modules/{id}/x/…`) answered `5xx` or did not answer in time |
 | `TENANT_CONCURRENCY_LIMIT` | 503 | too many concurrent requests for the tenant; retry after `Retry-After` |
+| `ModuleUnavailable` | 503 | a request needed an external module that is disabled, unreachable or behind an open circuit breaker (a before-save hook with `failurePolicy: fail`, a route); `meta.moduleId` names it; retry later |
+| `ModuleTimeout` | 503 | as `ModuleUnavailable`, but the module did not answer within its timeout |
 
 Hook-raised validation errors use `VALIDATION_FAILED` unless the hook defines a more specific code.
 

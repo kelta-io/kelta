@@ -727,6 +727,45 @@ response client and the OIDC/OAuth2 user services (set on `oauth2Login` in
 up by type — keep exactly one). The authorization endpoint is a browser redirect, not a server
 fetch, and is not checked.
 
+## External modules — the module protocol (part 9d)
+
+An external module is an HTTP service the worker calls; the contract is
+`docs/module-protocol/openapi.yaml`, the design `specs/module-platform/9-external-modules.md`
+§3.6–§3.7, and the call path `architecture.md` → External module invocation. Every call carries
+the ES256 platform assertion (`Authorization: Bearer`, `htm`/`htu`/`body_sha256` bound to the
+exact request, 60 s `exp`), the principal's `Kelta-Access-Token`, and `traceparent` when a span is
+current. A module must verify the assertion against `GET /api/modules/.well-known/jwks.json`
+before acting.
+
+| Call | When | Request → answer | On failure |
+|---|---|---|---|
+| `POST /kelta/v1/actions/{key}` | a flow Task whose `Resource` is `<moduleId>:<key>`, or a manifest schedule | `{tenantId, input, config, collection, recordId, record, previousRecord, changedFields, execution{executionId, flowId, stepName, attempt, triggerDepth}}` + `Idempotency-Key` → `{success, output}` or `{success: false, error{code, message}}` | flow error code `ModuleTimeoutException` / `ModuleUnavailableException` (a `Catch` can match either); `success: false` fails the step with `<code>: <message>` |
+| `POST /kelta/v1/hooks` | before create/update/delete on a hooked collection | `{tenantId, collection, operation, recordId, record, previousRecord, changedFields}` → `{allowed, fieldUpdates, errors[], conflict}` | `failurePolicy`: `fail` → the write is `503`, `ignore` → the write proceeds unchecked |
+| `POST /kelta/v1/services/entitlements/resolve` | `EntitlementService` lookups (watch quota, alert channels) | `{userId}` → `{planCode, subscriptionStatus, values}`, cached per member for `cacheTtlSeconds` | `MemberEntitlements.EMPTY` (restrictive), never cached |
+| `{METHOD} /kelta/v1/routes/{path}` | a caller of `/api/modules/{id}/x/{path}` | the caller's method, query, body and `Content-Type` → any status + JSON | `5xx`/timeout → `502 ModuleUnreachable`; unreachable/breaker open → `503` |
+| `POST /kelta/v1/webhooks` | a sender POSTing `/api/modules/webhooks/{tenantId}/{moduleId}` | raw bytes + allowlisted headers (`x-`, `stripe-`, `signature`, `digest`, `user-agent`, lower-cased; `Content-Type` as sent) → a status the sender sees | `503` so the sender retries |
+| `GET /kelta/v1/health` | `GET /api/modules/{id}/health`, and the 60 s reconcile for a `DEGRADED`/breaker-open install | → `{status, …}` | reported `unreachable` |
+
+What a module receives and must handle:
+
+- **`input`** is the step's resolved data — its `input` object when it has one (a manual or
+  HTTP-started flow double-wraps, so `$.input` is the caller's input), else the whole resolved
+  data. **`config`** is the step's action config (`{}` when none).
+- **No `act` claim on flows and schedules** — there is no request caller there. Routes, and
+  hooks on request paths, carry the caller as `act {sub, user_type}` (routes add `profile_id`).
+- **Records are the principal's view** (spec §3.4): server-only and `HIDDEN` fields absent,
+  `MASKED` fields masked, an unreadable collection `{}`. A hook may only set a declared `VISIBLE`
+  field that is neither server-only nor system-maintained, on a collection its principal may
+  create in (create) or edit (update); any other `fieldUpdates` key — the audit fields (`id`,
+  `createdBy`, …) included — fails the hook.
+- **Deduplicate on `Idempotency-Key`.** Flow steps send `<executionId>:<stepName>` (stable across
+  retries of one step), schedules `<jobId>:<fireTime>` — and a scheduled job can fire twice
+  (`concerns.md` → External modules — invocation).
+- **Schedules run in UTC.** A schedule's cron is a 6-field Spring expression evaluated in UTC; a
+  changed cron is a new job.
+- **Verify the webhook sender yourself.** The platform does not authenticate webhook senders; it
+  forwards the bytes the sender signed and returns your status, with no body.
+
 ## OIDC federation providers (`oidc-providers`)
 
 A tenant's external identity providers are rows of the `oidc-providers` system collection

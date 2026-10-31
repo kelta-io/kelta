@@ -9,6 +9,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -40,7 +41,7 @@ class ModuleWebhookControllerTest {
                 .thenReturn(Optional.of(ActionResult.success()));
 
         ResponseEntity<Void> response =
-                controller.receive("t1", "m1", Map.of(), "{}");
+                controller.receive("t1", "m1", Map.of(), bytes("{}"));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
@@ -51,7 +52,7 @@ class ModuleWebhookControllerTest {
         when(manager.dispatchWebhook(anyString(), anyString(), any(), any()))
                 .thenReturn(Optional.empty());
 
-        assertThat(controller.receive("t1", "m1", Map.of(), "{}").getStatusCode())
+        assertThat(controller.receive("t1", "m1", Map.of(), bytes("{}")).getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
     }
 
@@ -62,7 +63,7 @@ class ModuleWebhookControllerTest {
                 .thenReturn(Optional.of(ActionResult.failure("bad signature")));
 
         // A failed signature is not a fault to retry.
-        assertThat(controller.receive("t1", "m1", Map.of(), "{}").getStatusCode())
+        assertThat(controller.receive("t1", "m1", Map.of(), bytes("{}")).getStatusCode())
                 .isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
@@ -72,7 +73,7 @@ class ModuleWebhookControllerTest {
         when(manager.dispatchWebhook(anyString(), anyString(), any(), any()))
                 .thenThrow(new IllegalStateException("boom"));
 
-        assertThat(controller.receive("t1", "m1", Map.of(), "{}").getStatusCode())
+        assertThat(controller.receive("t1", "m1", Map.of(), bytes("{}")).getStatusCode())
                 .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
@@ -83,7 +84,7 @@ class ModuleWebhookControllerTest {
                 .thenReturn(Optional.of(ActionResult.success()));
 
         String body = "{\"id\":\"evt_1\",\"nested\":{\"a\": 1}}";
-        controller.receive("t1", "m1", Map.of(), body);
+        controller.receive("t1", "m1", Map.of(), bytes(body));
 
         // Re-serializing would change the bytes an HMAC covers.
         verify(manager).dispatchWebhook(eq("t1"), eq("m1"), eq(body), any());
@@ -102,7 +103,7 @@ class ModuleWebhookControllerTest {
         headers.put("Host", "internal.worker.svc");
         headers.put("Authorization", "Bearer platform-internal");
 
-        controller.receive("t1", "m1", headers, "{}");
+        controller.receive("t1", "m1", headers, bytes("{}"));
 
         ArgumentCaptor<Map<String, String>> forwarded = ArgumentCaptor.captor();
         verify(manager).dispatchWebhook(anyString(), anyString(), any(), forwarded.capture());
@@ -114,5 +115,9 @@ class ModuleWebhookControllerTest {
                 .containsEntry("content-type", "application/json");
         // Infrastructure detail a module has no business reading.
         assertThat(forwarded.getValue()).doesNotContainKeys("host", "authorization");
+    }
+
+    private static byte[] bytes(String body) {
+        return body.getBytes(StandardCharsets.UTF_8);
     }
 }

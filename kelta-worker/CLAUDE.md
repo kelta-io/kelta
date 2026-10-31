@@ -142,6 +142,8 @@ A presence-gated hook (secret/integration configured) uses `@ConditionalOnProper
 | Write-only secret input (not a field) encrypted into a server-only field; plaintext removed before anything else sees it; blank keeps the stored value; refuse, never drop, when encryption is unconfigured | `listener/OidcProviderSecretHook.java` |
 | Fetching a tenant-supplied URL (runtime-core `OutboundHttpClient` + the `OutboundUrlGuard` bean from `config/OutboundConfig`: non-public addresses refused unless allow-listed, redirects re-validated per hop, overall deadline, size cap, tree-model JSON) | `listener/OidcDiscoveryHook.java`, `service/api/ApiSpecService.java` (`fetchSpec`), `service/storage/RestClientExecutor.java`, `service/push/WebPushProvider.java` |
 | Transient vs permanent failure (fail closed on the pod, never persist a terminal status for an infrastructure error, per-pod `@Scheduled` retry with capped backoff, runtime-checked enable flag) | `module/ModuleLoadFailureClassifier.java`, `module/ModuleLoadRetryScheduler.java` |
+| Calling an external service per tenant install (one call path: status gate → token → per-pod circuit breaker → signed HTTP; timeout vs unavailable exceptions; compare-and-set status writes off the caller's transaction; metrics) | `module/ExternalModuleInvoker.java`, `module/ModuleCircuitBreaker.java` |
+| Per-pod registry rebuilt from DB rows (NATS refresh + local read-after-write refresh + periodic reconcile with no tenant bound; re-register only on a fingerprint change; register new before removing old) | `module/ExternalModuleRegistry.java`, `module/ExternalModuleReconcileScheduler.java` |
 
 ## Running Tests
 

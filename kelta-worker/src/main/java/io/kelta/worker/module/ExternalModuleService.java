@@ -39,8 +39,10 @@ import java.util.regex.Pattern;
  * {@link #enable} retries from the stored (approved) manifest without re-fetching it.
  *
  * <p>Every outcome publishes {@code kelta.config.module.changed.<tenantId>.<moduleId>}
- * (Critical Rule 1). No pod loads anything for an external module; part 9d's endpoint registry
- * refreshes from the row on that event.
+ * (Critical Rule 1). No pod loads anything for an external module: each pod's
+ * {@link ExternalModuleRegistry} refreshes from the row on that event, and this pod's also at once.
+ * Manifest schedules become {@code MODULE_ACTION} jobs ({@link ModuleScheduleSync}) as an install
+ * step, before {@code lifecycle installed}.
  */
 public class ExternalModuleService {
 
@@ -67,6 +69,10 @@ public class ExternalModuleService {
     private final UserIdResolver userIdResolver;
     private final ModuleManifestParser parser;
 
+    /** Part 9d's endpoint registry and schedule rows; setter-injected, null in tests that need neither. */
+    private ExternalModuleRegistry registry;
+    private ModuleScheduleSync schedules;
+
     public ExternalModuleService(ExternalModulePlanner planner, ModuleStore moduleStore,
                                  ModuleProvenanceStore provenanceStore, ModuleMetadataProvisioner provisioner,
                                  ModuleServicePrincipalService principals, ModuleAccessTokenService tokens,
@@ -84,6 +90,16 @@ public class ExternalModuleService {
         this.tenantSlugResolver = Objects.requireNonNull(tenantSlugResolver);
         this.userIdResolver = Objects.requireNonNull(userIdResolver);
         this.parser = new ModuleManifestParser(objectMapper);
+    }
+
+    /**
+     * Wires invocation (part 9d): this pod's endpoint registry is refreshed after every change
+     * (read-after-write; every other pod refreshes from the {@code module.changed} event), and
+     * manifest schedules are kept as {@code MODULE_ACTION} jobs.
+     */
+    public void setInvocation(ExternalModuleRegistry registry, ModuleScheduleSync schedules) {
+        this.registry = registry;
+        this.schedules = schedules;
     }
 
     /** {@code POST /api/modules/plan}. */
@@ -156,6 +172,7 @@ public class ExternalModuleService {
         if (TenantModuleData.STATUS_DISABLED.equals(row.status())) {
             moduleStore.updateStatusWithError(row.id(), TenantModuleData.STATUS_ACTIVE, null);
             TenantModuleData active = reload(row);
+            refreshLocally(active);
             notifyBestEffort(active, ModuleHttpClient.LifecycleEvent.of(EVENT_ENABLED, active));
             eventPublisher.publishEvent(active, ModuleChangeType.ENABLED);
             return active;
@@ -171,6 +188,7 @@ public class ExternalModuleService {
         TenantModuleData row = external(tenantId, moduleId);
         moduleStore.updateStatus(row.id(), TenantModuleData.STATUS_DISABLED);
         TenantModuleData disabled = reload(row);
+        refreshLocally(disabled);
         notifyBestEffort(disabled, ModuleHttpClient.LifecycleEvent.of(EVENT_DISABLED, disabled));
         eventPublisher.publishEvent(disabled, ModuleChangeType.DISABLED);
         return disabled;
@@ -194,7 +212,11 @@ public class ExternalModuleService {
             }
         }
         tokens.evict(row.connectedAppId());
+        if (schedules != null) {
+            schedules.delete(row);
+        }
         moduleStore.deleteModule(row.id());
+        refreshLocally(row);
         eventPublisher.publishEvent(row, ModuleChangeType.UNINSTALLED);
         log.info("Uninstalled external module '{}' from tenant {}", row.moduleId(), row.tenantId());
     }
@@ -235,6 +257,13 @@ public class ExternalModuleService {
         }
 
         moduleStore.replaceActions(row.id(), actions(row.id(), manifest));
+        if (schedules != null) {
+            try {
+                schedules.sync(row, manifest);
+            } catch (RuntimeException e) {
+                return fail(row, changeType, "schedules: " + e.getMessage());
+            }
+        }
 
         TenantModuleData current = reload(row);
         try {
@@ -246,6 +275,7 @@ public class ExternalModuleService {
 
         moduleStore.updateStatusWithError(row.id(), TenantModuleData.STATUS_ACTIVE, null);
         TenantModuleData active = reload(row);
+        refreshLocally(active);
         eventPublisher.publishEvent(active, changeType);
         log.info("External module '{}' v{} is ACTIVE for tenant {}", active.moduleId(), active.version(), tenantId);
         return active;
@@ -255,6 +285,7 @@ public class ExternalModuleService {
         log.error("External module '{}' is FAILED for tenant {}: {}", row.moduleId(), row.tenantId(), error);
         moduleStore.updateStatusWithError(row.id(), TenantModuleData.STATUS_FAILED, error);
         TenantModuleData failed = reload(row);
+        refreshLocally(failed);
         eventPublisher.publishEvent(failed, changeType);
         return failed;
     }
@@ -347,6 +378,16 @@ public class ExternalModuleService {
             throw new IllegalStateException("Module '" + moduleId + "' is a JAR module");
         }
         return row;
+    }
+
+    /**
+     * Read-after-write on this pod (Critical Rule 1's exception): the caller's next request may
+     * land here before the NATS event does. Always followed by the broadcast.
+     */
+    private void refreshLocally(TenantModuleData row) {
+        if (registry != null) {
+            registry.refresh(row.tenantId(), row.moduleId());
+        }
     }
 
     private TenantModuleData reload(TenantModuleData row) {
