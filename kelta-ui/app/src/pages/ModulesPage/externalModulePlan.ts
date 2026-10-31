@@ -9,7 +9,7 @@
 import type { ApiClient } from '../../services/apiClient'
 import { ApiError } from '../../services/apiClient'
 
-export interface PlanBlocker {
+interface PlanBlocker {
   code: string
   message: string
 }
@@ -33,7 +33,7 @@ export interface PlanDiff {
   removed: string[]
 }
 
-export interface PermissionDiff extends PlanDiff {
+interface PermissionDiff extends PlanDiff {
   /** The upgrade asks for access the admin has not approved yet. */
   widened: boolean
 }
@@ -44,7 +44,7 @@ export interface MetadataPlanItem {
   action: string
 }
 
-export interface UiBundlePlan {
+interface UiBundlePlan {
   bundlePath: string | null
   /** The hash the manifest declares. */
   sha256: string | null
