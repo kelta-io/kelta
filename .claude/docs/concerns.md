@@ -129,6 +129,10 @@ inbound routing by `email_from_address`, and kelta-auth slug→id lookups (`Tena
   outside GHSA-j95f-988m-3j2f's revised `< 3.30.5` range). Any new high/critical production
   advisory now fails CI. **The baseline is debt, not an allowlist** — fix rather than re-add, and
   refresh this note if an entry ever lands (the `ci.yml` comment above the job still says 33).
+  Transitive fixes ride npm `overrides`: `protobufjs` in `kelta-ui/app` (#1472) and
+  `follow-redirects` `^1.16.2` in both packages (GHSA-mrwp-f3q8-3g9p, 2026-10-30 — `axios`
+  1.21.0 still accepts the vulnerable `^1.16.0`). Drop each once its parent's range excludes
+  the vulnerable versions.
 - **FIXED — Java dependencies were unscanned.** OWASP dependency-check never ran (blocked on an
   `NVD_API_KEY` the NVD API rejects). `dependency-audit-java` now scans each service's shipped
   classpath — a Maven-resolved CycloneDX SBOM — and the OpenTelemetry Java agent version pinned in

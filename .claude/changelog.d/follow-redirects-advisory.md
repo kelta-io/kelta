@@ -1,0 +1,1 @@
+- 2026-10-30 fix(deps): override follow-redirects to ^1.16.2 in kelta-web and kelta-ui/app, clearing the new high advisory GHSA-mrwp-f3q8-3g9p that failed the npm dependency audit on every PR (follow-redirects-advisory)
