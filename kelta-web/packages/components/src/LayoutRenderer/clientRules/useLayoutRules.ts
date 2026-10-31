@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import type { LayoutRule, CollectionValidationRule } from '@kelta/sdk';
 import { RuleEngine } from './RuleEngine';
 import type { BeforeSaveResult, FormBinding, RuleEngineDiagnostic } from './types';
@@ -58,14 +58,19 @@ export function useLayoutRules(opts: UseLayoutRulesOptions): UseLayoutRulesResul
   const enabled = opts.enabled !== false && (hasRules || hasValidations);
 
   const valuesRef = useRef(values);
-  valuesRef.current = values;
-
   const setFieldValueRef = useRef(setFieldValue);
-  setFieldValueRef.current = setFieldValue;
   const setFieldErrorRef = useRef(setFieldError);
-  setFieldErrorRef.current = setFieldError;
   const clearFieldErrorRef = useRef(clearFieldError);
-  clearFieldErrorRef.current = clearFieldError;
+
+  // Mirror the latest props into the refs after every commit. A layout effect
+  // runs before every passive effect (including the onLoad effect below), so the
+  // engine never reads values or callbacks from a previous render.
+  useLayoutEffect(() => {
+    valuesRef.current = values;
+    setFieldValueRef.current = setFieldValue;
+    setFieldErrorRef.current = setFieldError;
+    clearFieldErrorRef.current = clearFieldError;
+  });
 
   const engine = useMemo(() => {
     if (!enabled) return null;
