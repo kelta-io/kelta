@@ -91,7 +91,7 @@
       "derivedRoles" : [ "profile_editor-profile" ],
       "condition" : {
         "match" : {
-          "expr" : "R.attr.collectionId == \"accounts\" && R.attr.status == \"locked\""
+          "expr" : "R.attr.collectionId == \"accounts\" && (R.attr.status == \"locked\")"
         }
       }
     }, {
@@ -100,7 +100,34 @@
       "derivedRoles" : [ "profile_editor-profile" ],
       "condition" : {
         "match" : {
-          "expr" : "R.attr.collectionId == \"bookings\" && R.attr.createdBy == P.attr.userId"
+          "expr" : "R.attr.collectionId == \"bookings\" && (R.attr.createdBy == P.attr.userId)"
+        }
+      }
+    }, {
+      "actions" : [ "delete" ],
+      "effect" : "EFFECT_ALLOW",
+      "derivedRoles" : [ "profile_editor-profile" ],
+      "condition" : {
+        "match" : {
+          "expr" : "R.attr.collectionId == \"bookings\" && (R.attr.status == \"draft\" || R.attr.priority == \"low\")"
+        }
+      }
+    }, {
+      "actions" : [ "read" ],
+      "effect" : "EFFECT_ALLOW",
+      "derivedRoles" : [ "profile_editor-profile" ],
+      "condition" : {
+        "match" : {
+          "expr" : "R.attr.collectionId == \"contacts\" && (R.attr.title == \"Say \\\"hi\\\" \\\\ bye\")"
+        }
+      }
+    }, {
+      "actions" : [ "edit" ],
+      "effect" : "EFFECT_DENY",
+      "derivedRoles" : [ "profile_editor-profile" ],
+      "condition" : {
+        "match" : {
+          "expr" : "R.attr.collectionId == \"accounts\" && (R.attr.region in [\"US\", \"EU\"])"
         }
       }
     } ]

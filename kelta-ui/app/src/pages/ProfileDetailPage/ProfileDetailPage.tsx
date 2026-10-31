@@ -812,12 +812,7 @@ export function ProfileDetailPage({
       {isEditable && (
         <section data-testid="custom-rules-section">
           <h2 className="mb-4 text-lg font-semibold text-foreground">Custom authorization rules</h2>
-          <CustomPolicyEditor
-            profileId={id!}
-            tenantId=""
-            readOnly={profile.isSystem}
-            testId="custom-rules"
-          />
+          <CustomPolicyEditor profileId={id!} readOnly={profile.isSystem} testId="custom-rules" />
         </section>
       )}
 

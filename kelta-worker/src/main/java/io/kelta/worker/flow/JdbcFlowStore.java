@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 
@@ -298,15 +299,20 @@ public class JdbcFlowStore implements FlowStore {
         return id;
     }
 
+    /**
+     * Due rows, and claims older than the lease that no resume consumed (V223 {@code claimed_at};
+     * a row claimed before that column existed has none and is never taken over).
+     */
     @Override
-    public List<String> claimPendingResumes(String claimedBy, int limit) {
+    public List<String> claimPendingResumes(String claimedBy, int limit, Duration claimLease) {
         // Use UPDATE ... RETURNING with optimistic locking
         return jdbcTemplate.queryForList("""
             UPDATE flow_pending_resume
-            SET claimed_by = ?
+            SET claimed_by = ?, claimed_at = NOW()
             WHERE id IN (
                 SELECT id FROM flow_pending_resume
-                WHERE claimed_by IS NULL AND resume_at <= NOW()
+                WHERE (claimed_by IS NULL AND resume_at <= NOW())
+                   OR (claimed_by IS NOT NULL AND claimed_at < NOW() - (? * INTERVAL '1 second'))
                 ORDER BY resume_at ASC
                 LIMIT ?
                 FOR UPDATE SKIP LOCKED
@@ -314,26 +320,61 @@ public class JdbcFlowStore implements FlowStore {
             RETURNING execution_id
             """,
             String.class,
-            claimedBy, limit);
+            claimedBy, claimLease.toSeconds(), limit);
     }
 
+    /**
+     * Tenant-scoped: an event name is the tenant's own (a Wait's {@code EventName}, an awaited
+     * Task's resume key), and {@code flow_pending_resume} has no RLS policy, so the filter is here.
+     * The claim is atomic across pods; the time poller can win the same row once it is due.
+     */
     @Override
-    public Optional<String> claimPendingResumeByEvent(String resumeEvent, String claimedBy) {
+    public Optional<String> claimPendingResumeByEvent(String tenantId, String resumeEvent, String claimedBy) {
         List<String> results = jdbcTemplate.queryForList("""
             UPDATE flow_pending_resume
-            SET claimed_by = ?
+            SET claimed_by = ?, claimed_at = NOW()
             WHERE id = (
                 SELECT id FROM flow_pending_resume
-                WHERE claimed_by IS NULL AND resume_event = ?
+                WHERE claimed_by IS NULL AND tenant_id = ? AND resume_event = ?
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
             )
             RETURNING execution_id
             """,
             String.class,
-            claimedBy, resumeEvent);
+            claimedBy, tenantId, resumeEvent);
 
         return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
+    }
+
+    /**
+     * One {@code DELETE ... RETURNING}: of two resumes racing for the row, only the one holding
+     * the current claim gets it. Tenant-filtered, as {@code flow_pending_resume} has no RLS.
+     */
+    @Override
+    public Optional<ConsumedResume> consumePendingResume(String tenantId, String executionId, String claimedBy) {
+        List<Map<String, Object>> rows = claimedBy == null
+            ? jdbcTemplate.queryForList("""
+                DELETE FROM flow_pending_resume
+                WHERE execution_id = ? AND tenant_id = ?
+                RETURNING resume_event
+                """, executionId, tenantId)
+            : jdbcTemplate.queryForList("""
+                DELETE FROM flow_pending_resume
+                WHERE execution_id = ? AND tenant_id = ? AND claimed_by = ?
+                RETURNING resume_event
+                """, executionId, tenantId, claimedBy);
+        return rows.stream().findFirst().map(row -> new ConsumedResume((String) row.get("resume_event")));
+    }
+
+    @Override
+    public void releasePendingResume(String executionId, String claimedBy) {
+        jdbcTemplate.update("""
+            UPDATE flow_pending_resume
+            SET claimed_by = NULL, claimed_at = NULL, resume_at = LEAST(COALESCE(resume_at, NOW()), NOW())
+            WHERE execution_id = ? AND claimed_by = ?
+            """,
+            executionId, claimedBy);
     }
 
     @Override

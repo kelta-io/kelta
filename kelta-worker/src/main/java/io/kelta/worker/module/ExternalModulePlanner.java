@@ -375,7 +375,13 @@ public class ExternalModulePlanner {
         }
         List<Map<String, Object>> actions = new ArrayList<>();
         for (ExternalModuleManifest.Action action : manifest.actions()) {
-            actions.add(entry("key", action.key(), "name", action.name(), "timeoutMs", action.timeoutMs()));
+            Map<String, Object> declared = entry("key", action.key(), "name", action.name(),
+                    "timeoutMs", action.timeoutMs());
+            if (action.asynchronous()) {
+                // Long-running (part 9h): the admin sees how long a step may wait on it.
+                declared.put("maxDurationSeconds", action.maxDurationSeconds());
+            }
+            actions.add(declared);
         }
         List<Map<String, Object>> hooks = new ArrayList<>();
         for (ExternalModuleManifest.Hook hook : manifest.hooks()) {

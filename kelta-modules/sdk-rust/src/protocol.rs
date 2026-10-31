@@ -3,6 +3,8 @@
 //! Field names are the contract's (camelCase). Optional fields are `Option` and default when
 //! absent, so a platform that adds a field never breaks a module built against an older SDK.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -59,8 +61,31 @@ pub struct ActionRequest {
     pub changed_fields: Vec<String>,
     #[serde(default)]
     pub execution: Option<Execution>,
+    /// Present only for a long-running action (`maxDurationSeconds`) on a step that can wait:
+    /// answer [`ActionResponse::accepted`] and complete it later with
+    /// `PlatformClient::complete_task`.
+    #[serde(default)]
+    pub task: Option<ActionTask>,
     #[serde(default)]
     pub settings: Option<Settings>,
+}
+
+/// `ActionTask`: the task of a long-running action's call.
+///
+/// `Debug` never prints the token.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionTask {
+    /// Single use, and a secret: keep it only until the task is complete, never log it.
+    pub token: String,
+    /// When the step stops waiting and fails with `ModuleTimeoutException` (RFC 3339).
+    pub expires_at: String,
+}
+
+impl fmt::Debug for ActionTask {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ActionTask").field("expires_at", &self.expires_at).finish_non_exhaustive()
+    }
 }
 
 /// `ActionRequest.execution`.
@@ -95,17 +120,37 @@ pub struct ActionResponse {
     pub output: Option<Map<String, Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<ModuleError>,
+    /// Set by [`ActionResponse::accepted`]; never on the wire.
+    #[serde(skip)]
+    accepted: bool,
 }
 
 impl ActionResponse {
     /// Success with an output object (at most 1000 top-level keys).
     pub fn success(output: Map<String, Value>) -> Self {
-        Self { success: true, output: Some(output), error: None }
+        Self { success: true, output: Some(output), error: None, accepted: false }
     }
 
     /// A business failure.
     pub fn failure(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { success: false, output: None, error: Some(ModuleError { code: code.into(), message: message.into() }) }
+        Self {
+            success: false,
+            output: None,
+            error: Some(ModuleError { code: code.into(), message: message.into() }),
+            accepted: false,
+        }
+    }
+
+    /// `202 Accepted`: the module took on the request's `task` and completes it later with
+    /// `PlatformClient::complete_task`. Only for a request that carries `task`; the router answers
+    /// `500` otherwise.
+    pub fn accepted() -> Self {
+        Self { success: true, output: None, error: None, accepted: true }
+    }
+
+    /// True for [`ActionResponse::accepted`].
+    pub fn is_accepted(&self) -> bool {
+        self.accepted
     }
 }
 
@@ -267,6 +312,28 @@ pub struct Health {
     pub details: Option<Map<String, Value>>,
 }
 
+/// `TaskHeartbeat`: what `POST /api/modules/self/tasks/heartbeat` returns.
+///
+/// `Debug` never prints the access token.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskHeartbeat {
+    /// A service-principal token valid at least 10 more minutes; use it for the rest of the work.
+    pub access_token: String,
+    pub access_token_expires_at: String,
+    /// The task's expiry, unchanged by the heartbeat.
+    pub task_expires_at: String,
+}
+
+impl fmt::Debug for TaskHeartbeat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TaskHeartbeat")
+            .field("access_token_expires_at", &self.access_token_expires_at)
+            .field("task_expires_at", &self.task_expires_at)
+            .finish_non_exhaustive()
+    }
+}
+
 /// `ModuleCredential`: what `GET /api/modules/self/credentials/{name}` returns.
 ///
 /// `Debug` never prints `secrets`.
@@ -351,6 +418,34 @@ mod tests {
         assert_eq!(request.tenant_id, "t1");
         assert_eq!(request.input["greeting"], "hi");
         assert_eq!(request.execution.unwrap().step_name.as_deref(), Some("Ping"));
+        assert!(request.task.is_none());
+    }
+
+    #[test]
+    fn a_long_running_call_carries_its_task_and_debug_hides_the_token() {
+        let request: ActionRequest = serde_json::from_value(json!({
+            "tenantId": "t1",
+            "input": {},
+            "task": { "token": "kmt_secret", "expiresAt": "2026-11-01T12:00:00Z" }
+        }))
+        .unwrap();
+        let task = request.task.unwrap();
+        assert_eq!(task.token, "kmt_secret");
+        assert_eq!(task.expires_at, "2026-11-01T12:00:00Z");
+        assert!(!format!("{task:?}").contains("kmt_secret"));
+
+        let accepted = ActionResponse::accepted();
+        assert!(accepted.is_accepted());
+        assert!(!ActionResponse::success(Map::new()).is_accepted());
+        assert_eq!(serde_json::to_value(&accepted).unwrap(), json!({ "success": true }));
+
+        let heartbeat: TaskHeartbeat = serde_json::from_value(json!({
+            "accessToken": "fresh", "accessTokenExpiresAt": "2026-11-01T12:15:00Z",
+            "taskExpiresAt": "2026-11-01T14:00:00Z"
+        }))
+        .unwrap();
+        assert_eq!(heartbeat.access_token, "fresh");
+        assert!(!format!("{heartbeat:?}").contains("fresh"));
     }
 
     #[test]

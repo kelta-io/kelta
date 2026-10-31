@@ -63,10 +63,11 @@ public class FlowLogRetentionRepository {
             """;
 
     /**
-     * Cascades to {@code flow_step_log} and {@code flow_pending_resume} via their
-     * {@code ON DELETE CASCADE} foreign keys — those are the only two tables
-     * referencing {@code flow_execution}, both verified cascading, so no orphan
-     * rows are left behind and no delete can fail on a dependent constraint.
+     * Cascades to {@code flow_step_log}, {@code flow_pending_resume} and
+     * {@code module_async_task} (V223) via their {@code ON DELETE CASCADE} foreign
+     * keys — those are the only tables referencing {@code flow_execution}, all
+     * cascading, so no orphan rows are left behind and no delete can fail on a
+     * dependent constraint.
      * {@code FOR UPDATE OF e} locks only the execution rows, never the flow.
      */
     private static final String DELETE_EXECUTIONS = """

@@ -43,7 +43,7 @@ public class CerbosPolicySyncService {
     private static final String SUBJECT_PREFIX = "kelta.cerbos.policies.changed.";
 
     /** The caller's {@code platform_user.id} UUID on every Cerbos principal (gateway and worker). */
-    static final String PRINCIPAL_USER_ID = "P.attr.userId";
+    static final String PRINCIPAL_USER_ID = CustomRuleCel.PRINCIPAL_USER_ID;
     private static final Set<String> SYSTEM_UUID_FIELDS = Set.of("createdBy", "updatedBy");
     private static final Pattern LEGACY_PRINCIPAL_ID = Pattern.compile("(?<![\\w.])P\\.id(?![\\w.])");
     private static final Pattern ATTR_THEN_PRINCIPAL_ID = Pattern.compile(
@@ -299,61 +299,60 @@ public class CerbosPolicySyncService {
         return perms;
     }
 
+    /**
+     * Loads the tenant's custom rules. A failure propagates, so {@link #syncTenant} pushes
+     * nothing and Cerbos keeps the previous policies: pushing a record policy without the
+     * tenant's rules would drop its deny rules.
+     */
     private List<CerbosPolicyGenerator.CustomRule> loadCustomRulesForTenant(String tenantId) {
-        try {
-            String sql = "SELECT id, profile_id, collection_id, action, effect, condition_json, enabled " +
-                    "FROM profile_custom_rules WHERE tenant_id = ?";
-            List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, tenantId);
+        String sql = "SELECT id, profile_id, collection_id, action, effect, condition_json, enabled " +
+                "FROM profile_custom_rules WHERE tenant_id = ?";
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, tenantId);
 
-            List<CerbosPolicyGenerator.CustomRule> rules = new ArrayList<>();
-            Map<String, Set<String>> uuidFieldsByCollection = new HashMap<>();
-            for (Map<String, Object> row : rows) {
-                String conditionJson = row.get("condition_json") != null
-                        ? row.get("condition_json").toString() : null;
-                String celExpression = extractCelExpression(conditionJson);
-                String collectionId = (String) row.get("collection_id");
-                if (celExpression != null && collectionId != null
-                        && LEGACY_PRINCIPAL_ID.matcher(celExpression).find()) {
-                    celExpression = rewriteLegacyPrincipalId(celExpression,
-                            uuidFieldsByCollection.computeIfAbsent(collectionId, this::loadUuidFieldNames));
-                }
-
-                rules.add(new CerbosPolicyGenerator.CustomRule(
-                        (String) row.get("id"),
-                        (String) row.get("profile_id"),
-                        collectionId,
-                        (String) row.get("action"),
-                        (String) row.get("effect"),
-                        celExpression,
-                        toBoolean(row.get("enabled"))
-                ));
+        List<CerbosPolicyGenerator.CustomRule> rules = new ArrayList<>();
+        Map<String, Set<String>> uuidFieldsByCollection = new HashMap<>();
+        for (Map<String, Object> row : rows) {
+            String conditionJson = row.get("condition_json") != null
+                    ? row.get("condition_json").toString() : null;
+            String celExpression = extractCelExpression((String) row.get("id"), conditionJson);
+            String collectionId = (String) row.get("collection_id");
+            if (celExpression != null && collectionId != null
+                    && LEGACY_PRINCIPAL_ID.matcher(celExpression).find()) {
+                celExpression = rewriteLegacyPrincipalId(celExpression,
+                        uuidFieldsByCollection.computeIfAbsent(collectionId, this::loadUuidFieldNames));
             }
-            return rules;
-        } catch (Exception e) {
-            // Table may not exist yet during migration
-            log.debug("Could not load custom rules (table may not exist yet): {}", e.getMessage());
-            return Collections.emptyList();
+
+            rules.add(new CerbosPolicyGenerator.CustomRule(
+                    (String) row.get("id"),
+                    (String) row.get("profile_id"),
+                    collectionId,
+                    (String) row.get("action"),
+                    (String) row.get("effect"),
+                    celExpression,
+                    toBoolean(row.get("enabled"))
+            ));
         }
+        return rules;
     }
 
-    @SuppressWarnings("unchecked")
-    private String extractCelExpression(String conditionJson) {
+    /**
+     * The CEL of a stored condition, compiled the same way {@code CustomRuleController} checks it
+     * at save ({@link CustomRuleCel}): {@code {expression}} is raw CEL, {@code {field, operator,
+     * value}} a visual condition. {@code null} when it is missing or cannot be compiled — the
+     * generator then leaves an allow rule out and applies a deny rule to its whole collection.
+     */
+    private String extractCelExpression(String ruleId, String conditionJson) {
         if (conditionJson == null || conditionJson.isBlank()) return null;
         try {
-            Map<String, Object> condition = objectMapper.readValue(conditionJson, Map.class);
-            // CEL type: {expression: "..."}
+            Map<?, ?> condition = objectMapper.readValue(conditionJson, Map.class);
             if (condition.containsKey("expression")) {
-                return (String) condition.get("expression");
+                return CustomRuleCel.compile(CustomRuleCel.TYPE_CEL, condition);
             }
-            // Visual type: {field, operator, value} — convert to CEL
-            String field = (String) condition.get("field");
-            String operator = (String) condition.get("operator");
-            Object value = condition.get("value");
-            if (field != null && operator != null) {
-                return convertVisualToCel(field, operator, value);
-            }
+            return CustomRuleCel.compile(CustomRuleCel.TYPE_VISUAL, condition);
+        } catch (CustomRuleCel.InvalidConditionException e) {
+            log.warn("Custom rule {} has an unusable condition at {}: {}", ruleId, e.pointer(), e.getMessage());
         } catch (Exception e) {
-            log.warn("Failed to parse condition JSON: {}", e.getMessage());
+            log.warn("Failed to parse condition JSON of custom rule {}: {}", ruleId, e.getMessage());
         }
         return null;
     }
@@ -404,31 +403,6 @@ public class CerbosPolicySyncService {
         }
         m.appendTail(out);
         return out.toString();
-    }
-
-    static String convertVisualToCel(String field, String operator, Object value) {
-        String attrRef = "R.attr." + field;
-        return switch (operator) {
-            case "equals" -> {
-                if ("$CURRENT_USER".equals(value)) yield attrRef + " == " + PRINCIPAL_USER_ID;
-                yield attrRef + " == \"" + value + "\"";
-            }
-            case "not_equals" -> attrRef + " != \"" + value + "\"";
-            case "in" -> {
-                if (value instanceof List<?> list) {
-                    String items = list.stream()
-                            .map(v -> "\"" + v + "\"")
-                            .reduce((a, b) -> a + ", " + b)
-                            .orElse("");
-                    yield attrRef + " in [" + items + "]";
-                }
-                yield attrRef + " in " + value;
-            }
-            case "greater_than" -> "double(" + attrRef + ") > " + value;
-            case "less_than" -> "double(" + attrRef + ") < " + value;
-            case "contains" -> attrRef + ".contains(\"" + value + "\")";
-            default -> attrRef + " == \"" + value + "\"";
-        };
     }
 
     private void publishPolicyChangedEvent(String tenantId) {

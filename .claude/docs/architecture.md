@@ -417,6 +417,22 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
     pinned against a real PDP by `CerbosGeneratedPolicyIT` (harness) via the golden files in
     `kelta-worker/src/test/resources/cerbos/golden/` — change the generator, regenerate the
     goldens (the unit test prints the JSON on drift), and the IT re-checks the allow/deny matrix.
+  - **Custom rules** (`profile_custom_rules`, admin API `CustomRuleController`) compile to one
+    record-policy rule each on the profile's derived role, with the condition
+    `R.attr.collectionId == "<name>" && (<cel>)` — the parentheses keep a top-level `||` or
+    ternary inside the collection. Stored `allow`/`deny` (or `EFFECT_ALLOW`/`EFFECT_DENY`, any
+    case) map to the Cerbos effect; any other stored value compiles as a deny. **A matching deny
+    wins over every allow**: all of a tenant's record rules (CRUD matrix, VIEW_ALL/MODIFY_ALL,
+    custom rules) live in the one tenant-scoped policy, where Cerbos resolves allow + deny on an
+    action to deny; the unscoped ancestor has no rules. Conditions go through `CustomRuleCel`
+    both at save and at sync: visual values become escaped CEL string literals, `in` takes a list
+    or comma-separated text, numeric comparisons take a number, field names must be identifiers,
+    and raw CEL must parse (cel-java, already on the classpath through protovalidate) on its own
+    and inside parentheses. The API answers `400 VALIDATION_FAILED` with a `source.pointer` into
+    the body for anything else. At sync, a stored rule whose condition no longer compiles is left
+    out if it allows and applied to its whole collection if it denies; a rule for a profile the
+    tenant does not have is left out (its derived role would make Cerbos reject the policy). If the
+    rules cannot be loaded, the sync pushes nothing and Cerbos keeps the previous policies.
 - **Endpoints nested under a collection's own path** (`/api/{collection}/<literal>/...`) need no
   gateway static route: `RouteRegistry.findByPath` resolves the caller's collection route and the
   gateway runs that collection's Cerbos object check for the HTTP verb (POST→`create`,
@@ -767,6 +783,30 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   `SelfScopedController` with a body that has no `data` member, so the record advices leave it alone,
   and `SensitiveBodyRedactor` never captures a `credentials` path as span data. Spec:
   `9-external-modules.md` §3.3.
+- **External module task completion** (part 9h). `POST /api/modules/self/tasks/complete` and
+  `POST /api/modules/self/tasks/heartbeat` (`ModuleTaskController`, literal four-segment mappings,
+  unconditional; no gateway change — they ride `static-modules`, which checks only `API_ACCESS`).
+  The task token is the body's `token`, never a path segment: paths are recorded (span attributes
+  and names, the gateway's refusal audit log, ingress logs), and a recorded body has `token` and
+  any `kmt_…` value redacted (`SensitiveBodyRedactor`). **Authorization is the worker's**, the credential read's rule shared as
+  `ModuleSelfPrincipal`: the gateway-stamped `X-Connected-App-Id` names an external install of the
+  tenant, the caller is its `service_user_id`, app and user are active (`403 NOT_MODULE_PRINCIPAL`);
+  the install is `ACTIVE`/`DEGRADED` (`403 MODULE_NOT_ACTIVE`). A completion's body must be a valid
+  `ActionResponse` within a synchronous answer's limits (`400 INVALID_TASK_RESULT`, before the token
+  is touched); then one conditional update moves the task `PENDING → COMPLETED` only for this
+  tenant, this install, unexpired (`ModuleAsyncTaskStore.complete`), else `404 TASK_NOT_FOUND` —
+  the same answer for a missing, unknown, foreign, used or expired token. A heartbeat answers a fresh
+  principal token (`503 TOKEN_UNAVAILABLE` when kelta-auth refuses). Every answer is `no-store`; no
+  answer or log line carries the token. **Resume path:** the completion calls
+  `FlowEngine.resumeAwaitedTask`, which claims the parked step's `flow_pending_resume` row by its
+  resume key (`claimPendingResumeByEvent`, tenant-scoped, `SKIP LOCKED`) and re-runs the Task with
+  the outcome `ModuleAsyncTaskStore.settle` reads — all in Postgres, so any pod may take the
+  callback. Expiry is the existing resume poller: the row's `resume_at` is the task's expiry. Each
+  claim has its own identifier and `claimed_at`; the resume first consumes the row it holds
+  (`consumePendingResume`) and does nothing if it no longer holds it, a resume that fails before it
+  is queued releases its claim, and the poller takes over a claim older than
+  `kelta.flow.resume.claim-lease-seconds` (default 300). Cancelling an execution expires its
+  pending tasks (`AwaitedTaskOutcomes.abandon`). Spec: `9-external-modules.md` §3.6.2.
 - **Owner-scoped collections** (member-data-ownership slice 2, V206). A collection may declare
   `ownerField` (`createdBy` or a LOOKUP→`users`), `ownerScope` (`NONE|PORTAL|ALL`) and
   `ownerScopeReads` (default true) — `collection.owner_field/owner_scope/owner_scope_reads`, on

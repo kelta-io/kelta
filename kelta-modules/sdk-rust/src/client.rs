@@ -11,7 +11,7 @@ use std::time::Duration;
 use reqwest::{Method, StatusCode};
 use serde_json::{Map, Value, json};
 
-use crate::protocol::ModuleCredential;
+use crate::protocol::{ActionResponse, ModuleCredential, TaskHeartbeat};
 
 /// The longest the client waits for the platform on one call.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -291,6 +291,23 @@ impl PlatformClient {
         serde_json::from_value(body).map_err(|e| ClientError::Decode(format!("not a credential: {e}")))
     }
 
+    /// `POST /api/modules/self/tasks/complete`: completes a long-running action's task (the
+    /// request's `task.token`, sent in the body) with its result, and the flow step resumes with
+    /// it. A token works once; `404 TASK_NOT_FOUND` when it is unknown, used or expired. A `404`
+    /// to a retry of a completion whose first answer was lost may mean the first one landed.
+    pub async fn complete_task(&self, token: &str, result: &ActionResponse) -> Result<(), ClientError> {
+        self.send(Method::POST, "/api/modules/self/tasks/complete", Some(completion_body(token, result)?)).await?;
+        Ok(())
+    }
+
+    /// `POST /api/modules/self/tasks/heartbeat`: while a task runs, a fresh access token (the one
+    /// a call brings lasts 15 minutes). Build a new client with it.
+    pub async fn heartbeat_task(&self, token: &str) -> Result<TaskHeartbeat, ClientError> {
+        let body =
+            self.send(Method::POST, "/api/modules/self/tasks/heartbeat", Some(json!({ "token": token }))).await?;
+        serde_json::from_value(body).map_err(|e| ClientError::Decode(format!("not a task heartbeat: {e}")))
+    }
+
     async fn send(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value, ClientError> {
         let mut request = self
             .http
@@ -314,6 +331,17 @@ impl PlatformClient {
         }
         serde_json::from_slice(&bytes).map_err(|e| ClientError::Decode(e.to_string()))
     }
+}
+
+/// The completion body: the `ActionResponse` and the task's token. The token rides the body, never
+/// the path, because request paths are recorded in logs and traces.
+fn completion_body(token: &str, result: &ActionResponse) -> Result<Value, ClientError> {
+    let mut body = serde_json::to_value(result).map_err(|e| ClientError::Decode(e.to_string()))?;
+    let Some(object) = body.as_object_mut() else {
+        return Err(ClientError::Decode("an ActionResponse is a JSON object".into()));
+    };
+    object.insert("token".into(), Value::String(token.to_owned()));
+    Ok(body)
 }
 
 /// What module code needs from the platform: tenant records over JSON:API and its declared
@@ -431,6 +459,16 @@ fn encode_segment(segment: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completion_body_carries_the_token() {
+        let body = completion_body("kmt_abc", &ActionResponse::success(Map::new())).unwrap();
+        assert_eq!(body["token"], "kmt_abc");
+        assert_eq!(body["success"], true);
+        let failure = completion_body("kmt_abc", &ActionResponse::failure("GONE", "export gone")).unwrap();
+        assert_eq!(failure["token"], "kmt_abc");
+        assert_eq!(failure["error"]["code"], "GONE");
+    }
 
     #[test]
     fn query_strings_use_bracket_syntax() {

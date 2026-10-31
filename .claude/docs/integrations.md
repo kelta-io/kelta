@@ -70,6 +70,23 @@ to `P.attr.userId` **only** when `<f>` is `createdBy`/`updatedBy` or a LOOKUP/MA
 REFERENCE field of the rule's collection; a comparison with any other field (e.g.
 `R.attr.ownerEmail == P.id`) is left alone. The stored `profile_custom_rules` rows are not changed.
 
+### Cerbos custom rules
+
+A profile custom rule (`/api/admin/profiles/{profileId}/custom-rules`, `MANAGE_USERS`) is stored
+with effect `allow` or `deny` (lower-case; the API refuses anything else) and a condition that is
+either visual (`{field, operator, value}`, operators `equals`, `not_equals`, `in`, `contains`,
+`greater_than`, `less_than`) or raw CEL (`{expression}`). `CustomRuleCel` compiles both, at save and
+at sync, so the API refuses at save (`400 VALIDATION_FAILED`, `source.pointer` such as
+`/condition/value`) what would not compile: an unknown operator, a field name that is not an
+identifier, an `in` with no items (a list, or comma-separated text as the admin UI sends it), a
+non-numeric value for a comparison, or CEL that cel-java cannot parse. Visual values always reach
+the policy as escaped CEL string literals. A matching deny beats every allow of the same tenant,
+including object permissions and `VIEW_ALL_DATA`/`MODIFY_ALL_DATA`, in the record check. That check
+runs on the records a response returns (`CerbosRecordAuthorizationAdvice`): on `create`, `edit` and
+`delete` it runs after the write, so a custom deny filters the response but does not stop the write
+(there is no pre-write record check; see `architecture.md`). Policy shape, collection guard and
+sync-time handling: `architecture.md` → Custom rules.
+
 ### Attachment lifecycle (S3)
 
 Files attach to any record via the `attachments` system collection (backed by `file_attachment`, `S3StorageService`). The full lifecycle:
@@ -361,9 +378,31 @@ scope, so `resumeExecution` resolves the slug itself (`FlowStore.findTenantSlug`
 binds `runWithTenant(id, slug, …)` — an ID-only scope makes `PhysicalTableStorageAdapter`
 fall back to `public`, where tenant collections don't exist (#1577). A missing tenant
 fails the execution with `Cannot resume: tenant … no longer exists`. Event-based waits resume through
-`claimPendingResumeByEvent` when an event source calls it. Waits inside Parallel/Map
+`claimPendingResumeByEvent(tenantId, event, claimedBy)` when an event source calls it — tenant-scoped,
+because `flow_pending_resume` has no RLS. **Claim lease:** every claim (poller cycle or event)
+has its own identifier and stamps `claimed_at`; the resume first consumes the row it holds
+(`FlowStore.consumePendingResume`, a `DELETE … WHERE claimed_by = ?`) and is a no-op if it no
+longer holds it; a resume that fails before it is queued releases its claim and makes the row due
+now; and the poller takes over any claim older than `kelta.flow.resume.claim-lease-seconds`
+(`KELTA_FLOW_RESUME_CLAIM_LEASE_SECONDS`, default 300) — its pod died or its queued resume was
+dropped at shutdown. A takeover racing a slow resume runs the step once. Waits inside Parallel/Map
 branch sub-definitions are **not** resumable (their state ids aren't in the top-level
 definition) — the resume fails the execution with a clear error instead of hanging.
+
+**Awaited Tasks** (external modules part 9h) reuse the same machinery. A handler may return
+`ActionResult.awaiting(resumeKey, expiresAt)` when its `ActionContext.awaitable()` is true (a
+top-level Task; false in Parallel/Map branches and invoked sub-flows, where an awaiting answer
+fails `States.AwaitNotSupported`). The engine parks WAITING **on the Task** with a pending row
+carrying both `resume_event = resumeKey` and `resume_at = expiresAt`. Whoever finishes the work
+records the outcome and calls `FlowEngine.resumeAwaitedTask(tenantId, resumeKey)`, which claims the
+row by event; at `expiresAt` the poller claims it instead. Either way `resumeExecution` re-runs the
+Task with the outcome the `AwaitedTaskOutcomes` bean settles for the key (the worker's is
+`ModuleAsyncTaskStore`): success applies `ResultPath`/`OutputPath`; a failure (the module's
+`ActionFailed`, or `ModuleTimeoutException` at expiry) takes the Task's `Retry` — a new handler
+call, the attempt count continuing — and then its `Catch`. A key no source knows resumes as
+`States.Timeout` with no retry. The park writes its row, then checks `delivered()`; the completer
+records, then claims: an outcome that arrives before the park still resumes exactly once.
+Cancelling the execution calls `AwaitedTaskOutcomes.abandon`, which expires its open tasks.
 
 ### Manual / MCP / HTTP invocation — the double-wrap rule
 
@@ -823,6 +862,18 @@ What a module receives and must handle:
   its `Kelta-Access-Token`, per request: `{name, type, secrets, metadata}`, `no-store`, audited as
   the module (`MODULE:<moduleId>[:<purpose>]`). Not while the install is `INSTALLING`, so not
   during `lifecycle installed` (`architecture.md` → External module credential read).
+- **Long-running actions answer `202`** (part 9h). An action declaring `maxDurationSeconds`
+  (1–604800, capped by `KELTA_MODULES_EXTERNAL_ASYNC_ACTION_MAX_DURATION_SECONDS`, default one
+  day) gets `task: {token, expiresAt}` in its request when the step can wait. Answer `202` and the
+  flow step parks `WAITING`; send the `ActionResponse` plus `token` to
+  `POST /api/modules/self/tasks/complete` with the principal token (`202`) and the step resumes with
+  it. The token goes in the body, never the URL. A `200` finishes the step at once. Renew the
+  15-minute access token while working with `POST /api/modules/self/tasks/heartbeat` (`{token}`).
+  A task not completed by `expiresAt` fails the step with `ModuleTimeoutException`; cancelling the
+  execution expires it. The call's `Idempotency-Key` is `<executionId>:<stepName>:<attempt>`, as
+  each attempt brings a new task. A `404` to a retried completion may mean the first one landed. Only top-level Task steps wait: in a `Parallel`/`Map` branch,
+  an invoked sub-flow or a manifest schedule there is no `task`, and a `202` is
+  `ModuleUnavailableException` (`architecture.md` → External module task completion).
 
 ## OIDC federation providers (`oidc-providers`)
 

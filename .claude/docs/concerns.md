@@ -347,8 +347,8 @@ request logs and audit, register custom domains, and push a notification to ever
 Residuals: the permission is read from the caller's **profile** system permissions
 (`BootstrapRepository.findProfileSystemPermissions`), as every older admin controller already
 did — a grant held only through a permission set does not open these endpoints.
-`CustomRuleController` still takes the rule's `tenantId` from the body when present (unchanged
-here; review separately).
+`CustomRuleController` works only in the request's bound tenant and ignores a body `tenantId`
+(custom-rule-policy-generation).
 
 ### Authorization gaps still open
 
@@ -652,6 +652,51 @@ pinning do not guarantee:
   can read one on its first action, hook or event after install.
 - **Names only.** The resolver looks a UUID up as a credential id first, so UUID-shaped names are
   refused even when declared. A credential named like a UUID cannot be granted to a module.
+
+### External modules — long-running actions (part 9h, accepted)
+
+`architecture.md` → External module task completion; `integrations.md` → Wait states (Awaited
+Tasks). What the task-token design does not guarantee:
+
+- **The task token is redacted from recorded bodies, not encrypted in transit beyond TLS.** It
+  rides the request body (`POST /api/modules/self/tasks/complete` / `heartbeat`), never the path,
+  so access logs and span names do not carry it; `SensitiveBodyRedactor` replaces the `token`
+  member and any `kmt_…` value before a body becomes span data. The module receives it in the
+  action request body, which the platform does not record. It is stored only as a hash, works once,
+  expires, and is useless without the same install's principal token.
+- **A lost completion answer looks like a dead token.** A module whose completion `202` was lost
+  and that retries gets `404 TASK_NOT_FOUND`, exactly as for an unknown token: the platform keeps
+  no outcome to replay and does not say which. Modules must treat a `404` after a completion
+  attempt as possibly delivered (spec §3.6.2 step 7).
+- **A stuck resume claim waits out its lease.** A completion (or the poller) claims the
+  `flow_pending_resume` row before it resumes. If the claiming pod dies, or its queued resume is
+  dropped at shutdown, the poller takes the claim over once it is older than
+  `kelta.flow.resume.claim-lease-seconds` (300 s default) — so such a step resumes up to that late.
+  A lease shorter than a resume's wait in the engine's queue cannot run a step twice (only the
+  current claim consumes the row) but makes the slow resume a no-op. Rows claimed before V223 have
+  no `claimed_at` and stay as they were.
+- **A hard kill mid-resume strands the execution in `WAITING`.** The resume consumes (deletes) its
+  `flow_pending_resume` row first, then loads the execution and definition and only then marks it
+  `RUNNING`. A pod killed in that window (SIGKILL, OOM, node loss — a graceful shutdown interrupts
+  the thread and ends `FAILED`) leaves the execution `WAITING` with no row, so neither the poller
+  nor the lease recovers it. Same class as a pod dying mid-flow (left `RUNNING`); the fix is one
+  transaction for consume + mark-running, or a reaper for `WAITING` executions with no pending row.
+  Separately, `JdbcFlowStore.releasePendingResume` matches on the execution id and the random
+  per-claim id without a `tenant_id` filter (not exploitable — the claim id is unguessable — but
+  unlike every other pending-resume statement).
+- **Only top-level Task steps can wait.** `Parallel`/`Map` branch states and invoked sub-flows run
+  in memory and are not persisted, so they cannot park; a long-running action there gets no task
+  and its `202` fails the step (`ModuleUnavailableException`).
+- **Expiry is the poller's interval late.** A task past `expiresAt` fails on the next resume poll
+  (`kelta.flow.resume.poll-interval-ms`, 10 s default), and a completion racing it wins only if it
+  commits first: both move the task out of `PENDING` with one conditional update, so exactly one
+  takes effect.
+- **The flow's `TaskState.timeoutSeconds` does not cap the wait.** As for synchronous calls, the
+  field is parsed but not enforced; the wait is bounded by the manifest's `maxDurationSeconds` and
+  the platform cap (`KELTA_MODULES_EXTERNAL_ASYNC_ACTION_MAX_DURATION_SECONDS`, one day default).
+- **A heartbeat hands out a fresh principal token for as long as the task lives.** That is its
+  purpose: the 15-minute token cannot outlive an hours-long task. A disabled install, a deactivated
+  principal or an expired task gets none.
 
 ### External modules — in-cluster modules and the Rust billing module (part 9f, accepted)
 
@@ -1325,6 +1370,7 @@ One line each; full write-ups are in git history.
 
 **Security**
 - 2026-10-31 (write-path-tenant-scope) — the record write path kept a body `tenantId` that differed from the request's tenant (`RecordTenantScope.injectTenantId` is `putIfAbsent` and a no-op on user collections), and `DefaultQueryEngine.extractTenantId` preferred that value over the bound `TenantContext`, so before/after-save hooks (tenant-installed module hooks included) and the record-changed event could be selected by the payload; only RLS stopped the row. The write path now refuses a body `tenantId` that differs from the request's tenant (router create/PUT/PATCH incl. sub-resources, `/api/operations` add and update, and the engine itself; `400 systemMaintained` on `tenantId`), and hooks always run for the bound tenant. Separately, `collections.systemCollection` was writable by API callers and exempted a create from `ReservedCollectionNameHook`; `CollectionLifecycleHook` now refuses `systemCollection: true` on create and any change of it on update (`400 systemMaintained`), and the reserved-name check trusts only the stored row's flag. `DefaultQueryEngineWriteTenantTest`, `DynamicCollectionRouterSystemCollectionTest`, `AtomicOperationExecutorTest`, router goldens `*_foreign_tenant`, `CollectionLifecycleHookTest`, `ReservedCollectionNameHookTest`, harness `WriteTenantScopeScenarioTest`.
+- 2026-10-31 (custom-rule-policy-generation) — profile custom rules: a stored `deny` compiles to `EFFECT_DENY`, the rule's CEL sits in parentheses under its collection guard, visual values are escaped CEL literals and `in` becomes a list; `CustomRuleController` validates effect, action, operator, value shape and CEL syntax at save (`400 VALIDATION_FAILED`) and writes only into the bound tenant (`architecture.md` → Custom rules). `CustomRuleCelTest`, `CustomRuleControllerTest`, `CerbosPolicyGeneratorTest`, `CerbosGeneratedPolicyIT`.
 - 2026-10-26 (PLT-826) — validation-rule reloads failed open: a DB error while loading a collection's rules registered an empty set (validation off until the next reload), deleting a rule broadcast nothing (other pods kept enforcing it), and a system collection first loaded inside one tenant's request registered only that tenant's rules (the rest went unvalidated until an unbound reload). Now a failed load keeps the previous rules (`ValidationRuleRegistry.markLoadFailed`/`markSystemCollectionLoadFailed`) and a collection whose rules never loaded refuses writes with 503 (`RulesUnavailableException`) until a load succeeds; `ValidationRuleRefreshHook` captures the rule's `collection_id` in `beforeDelete` and publishes the same `collection.changed` event on delete; `CollectionLifecycleManager` initialize (and a refresh of a never-fully-loaded system collection) reads every tenant's rules, off the bound `ScopedValue` scope on a fresh virtual thread so RLS selects `admin_bypass`, while a tenant-bound refresh still replaces only that tenant's set; a tenant-owned collection loaded while another tenant is bound reads its owner's rules the same way instead of skipping the load. `CollectionLifecycleManagerValidationRuleLoadFailureTest`, `ValidationRuleRefreshHookTest`, `ValidationRuleRegistryTest`. Still open: a delete whose `beforeDelete` lookup fails is logged and not broadcast (other pods keep the rule until the collection's next refresh).
 - 2026-10-25 (KLT-790) — deleting a collection unregistered it from each pod's `ConcurrentCollectionRegistry` by bare name, whose fallback removes the first entry with that name in any tenant: deleting tenant A's `orders` could drop tenant B's, so B's `/api/orders` 404'd on that pod until restart (the likely cause of the PR #2011 `ChildResourceScopingScenarioTest` failure: `/orders` never answered 200 in its 20 s wait). `CollectionLifecycleManager.teardownCollection` now unregisters the definition's `registryKey()`. `CollectionLifecycleManagerTeardownTest`. `ValidationRuleRegistry` was keyed by bare name too; resolved by kelta#2046 (keyed by tenant).
 - 2026-10-12 (password-change-sign-out) — changing a password in kelta-auth (`/auth/password/change`, email-link `/auth/password/reset`, forced `/change-password`) now ends the user's other HTTP sessions and revokes their OAuth2 authorizations (refresh tokens), scoped by tenant + user id (`UserSessionRevoker`); `/auth/password/change` resolves the signed-in user by tenant + id instead of by email. `PasswordChangeSignOutFlowTest`, `SharedHttpSessionIntegrationTest`.

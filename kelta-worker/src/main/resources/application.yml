@@ -100,6 +100,10 @@ kelta:
       # one delay per retry, comma-separated (5s, 2m, 1h). After the last retry the event is
       # written to module_event_dead_letter and acknowledged. The protocol documents the default.
       event-backoff: ${KELTA_MODULES_EXTERNAL_EVENT_BACKOFF:5s,30s,2m,10m,1h}
+      # Long-running module actions (part 9h): the longest a task may stay open, in seconds,
+      # whatever the action's manifest maxDurationSeconds says (that is at most 7 days). The flow
+      # step parked on it fails with ModuleTimeoutException when it passes. Default one day.
+      async-action-max-duration-seconds: ${KELTA_MODULES_EXTERNAL_ASYNC_ACTION_MAX_DURATION_SECONDS:86400}
   # The running Kelta release (e.g. 0.1.0), compared against a module's minPlatformVersion at
   # install and upgrade. Blank = unknown: the check is skipped with a WARN, never failed.
   platform:
@@ -192,6 +196,13 @@ kelta:
     admin-username: ${SUPERSET_ADMIN_USERNAME:admin}
     admin-password: ${SUPERSET_ADMIN_PASSWORD:}
   flow:
+    resume:
+      # The Wait / awaited-Task resume poller (FlowResumePollerConfig). A pending-resume row
+      # that a resume claimed but never consumed (its pod died, its queued resume was dropped
+      # at shutdown, or it failed) is taken over by the poller after this many seconds, at least
+      # 1. Keep it longer than a resume waits in the flow engine's queue; a takeover racing a
+      # slow resume runs the step once either way, as only the current claim consumes the row.
+      claim-lease-seconds: ${KELTA_FLOW_RESUME_CLAIM_LEASE_SECONDS:300}
     # Retention for flow/job execution history. Nothing else deletes these tables,
     # so without this they grow without bound.
     # DESTRUCTIVE — dry-run is the DEFAULT: the sweep only logs what it WOULD
