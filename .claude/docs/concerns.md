@@ -1053,11 +1053,19 @@ the rolling update replaces it, and that image reads every JAR column on every m
   `jar_size_bytes`, `module_class` and `s3_key` by name after `SELECT *` on every `tenant_module`
   read, lists them in its install `INSERT`, and reads `last_loaded_at`/`load_attempts` for the module
   list and health; its signing-key endpoints read `tenant_module_signing_key`. All of that keeps
-  working, so old and new pods both serve during the rollout, and rolling back to the previous image
-  stays possible. The previous image writes `base_url NULL` only on its JAR installs
+  working, so old and new pods both serve during the rollout. The previous image writes
+  `base_url NULL` only on its JAR installs
   (`POST /api/modules/install` without a `baseUrl`, `POST /api/modules/install-jar`), and those now
   fail on the constraint: on purpose, since a JAR row created mid-rollout would be orphaned. It
   writes `QUARANTINED`/`STUB` only from its JAR loader, which returns early for external rows.
+- **Rolling back to the previous image works, pods and migrate Job alike.** Its pods serve
+  because V225 drops nothing. Its PreSync migrate Job has no V225 file, so Flyway sees the applied
+  V225 as FUTURE and fails validation (`APPLIED_VERSIONED_MIGRATION_NOT_RESOLVED`) unless `*:future`
+  is ignored. Before this release the shipped `spring.flyway.ignore-migration-patterns` was
+  `"*:missing"` alone, which replaces Flyway's `*:future` default. An image from before it migrates
+  only because the migrate Job sets `SPRING_FLYWAY_IGNOREMIGRATIONPATTERNS="*:missing,*:future"`
+  (homelab-argo#517). From this release on, `application.yml` lists `*:future` itself, pinned by
+  `FlywayMigrationPatternsTest`.
 - **This release neither reads nor writes the JAR columns.** They, their
   `idx_tenant_module_signature_key` index and the `tenant_module_signing_key` table are dead
   until the contract migration. They are nullable or defaulted, so the new `INSERT` omits them.

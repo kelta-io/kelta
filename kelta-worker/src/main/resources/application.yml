@@ -37,7 +37,12 @@ spring:
     # tolerate those "missing" entries so validate() passes. A one-time
     # `flyway repair` realigns the V1 checksum on those DBs — see
     # db/migration/README.md. Fresh installs just run V1__baseline.
-    ignore-migration-patterns: "*:missing"
+    # "*:future" is Flyway's own default, which setting this property replaces,
+    # so it is listed again. It lets an older image's migrate Job (an ArgoCD
+    # rollback) validate against a database a newer release already migrated;
+    # without it the PreSync Job fails with APPLIED_VERSIONED_MIGRATION_NOT_RESOLVED
+    # and the rollback halts. Pinned by FlywayMigrationPatternsTest.
+    ignore-migration-patterns: "*:missing,*:future"
   data:
     redis:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
