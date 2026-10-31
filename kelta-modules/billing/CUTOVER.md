@@ -5,8 +5,9 @@ Rust external service (`kelta-modules/billing`). Same module id, same five colle
 The data does not move: the JAR's uninstall keeps every collection, and the Rust install adopts
 them.
 
-> **Status: not executed on any production tenant.** Run it only when the owner says so. Rehearse
-> it first on a sandbox tenant with Stripe **test-mode** keys ([`VERIFICATION.md`](VERIFICATION.md) §4).
+> **Status: executed 2026-10-31** on a sandbox tenant (the rehearsal) and then on both production
+> tenants that ran the JAR build; results in [`VERIFICATION.md`](VERIFICATION.md) §4. Run it only
+> when the owner says so. Rehearse it first on a sandbox tenant with Stripe **test-mode** keys.
 
 **Steps marked 🔑 handle secrets or signing keys. Do not delegate them to an agent.** Keep every
 export this runbook makes **outside the repository**: it holds member ids.
@@ -55,6 +56,13 @@ quiet time.
 - [ ] 🔑 **Rollback is ready:** the JAR is built and signed, and the signature verified, per
       [`../billing-jar/VERIFICATION.md`](../billing-jar/VERIFICATION.md) steps 1–2. Rollback then
       takes minutes instead of a build.
+
+      No re-signing is needed when the tenant's installed JAR is kept: the platform stores it in
+      the object store at `tenant_module.s3_key`, with its signature in
+      `tenant_module.jar_signature`. Download both **before step 3**, because the uninstall deletes
+      the stored JAR. Check that the file's SHA-256 equals `tenant_module.jar_checksum`, and verify
+      the signature against the tenant's registered public key
+      (`openssl pkeyutl -verify -pubin -rawin`). That exact pair reinstalls through `install-jar`.
 
 Set the CLI profile once:
 
@@ -147,7 +155,8 @@ the **calling** member. So the comparison has three parts:
    both builds implement (`src/entitlements.rs`; the JAR's `EntitlementResolver`).
 
 Also record one behaviour the platform derives from entitlements, for a test member at a known
-watch limit: `POST /api/watches` past the limit → `422` with the plan-limit message.
+watch limit: a create past the limit → `400` `VALIDATION_FAILED` with the rule's `message` (the
+platform's mapping of a hook refusal, the same for both builds).
 
 ## Step 2 — Prepare the flow changes (no writes yet)
 
@@ -178,6 +187,8 @@ Review the plan before approving:
 - `mode` is `INSTALL`, with no blockers. `INSTALLED_AS_JAR` means step 3 did not finish.
 - Each of the five collections is `ADOPT` or `KEEP` (`KEEP` when the JAR install's provenance rows
   survive), never `CREATE`. A `CREATE` means the collection is missing: stop and investigate.
+  Under `KEEP` the install also creates the fields the JAR lacked, so a `FIELD` `CREATE` for
+  `billing_subscriptions.lastStripeEventAt` is expected.
 - The grants are the `stripe` credential, read/create/edit on the five collections, and
   `VIEW_ALL_DATA`, and nothing else.
 
@@ -238,7 +249,7 @@ with a new `updatedAt`).
 
 - [ ] For each member from step 1 part 2: `me` and `plans` equal the baseline
       (`diff "$SNAP/before-me-<member>.json" <(… | jq -S .)` prints nothing).
-- [ ] The watch-limit check from step 1 gives the same `422`.
+- [ ] The quota check from step 1 gives the same `400` and message.
 - [ ] Stripe dashboard → the webhook endpoint: resend each delivery that failed during the gap,
       and the latest successful one. Each answers `200`. (A redelivery converges; it does not
       duplicate.)
