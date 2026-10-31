@@ -54,7 +54,7 @@ class RemoteActionHandlerTest {
 
     private ActionContext context() {
         return ActionContext.builder().tenantId(ExternalModuleFixtures.TENANT).executionLogId("exec-1")
-                .workflowRuleId("flow-1").stepName("Charge").attempt(2).triggerDepth(1)
+                .userId("user-1").workflowRuleId("flow-1").stepName("Charge").attempt(2).triggerDepth(1)
                 .actionConfigJson("{\"amount\":10}")
                 .resolvedData(Map.of("input", Map.of("orderId", "o-1")))
                 .build();
@@ -64,6 +64,8 @@ class RemoteActionHandlerTest {
     @DisplayName("POSTs /kelta/v1/actions/{key} with the step's input, config, execution and Idempotency-Key")
     void sendsTheActionRequest() throws Exception {
         when(http.invoke(any(), any(), any(), any())).thenReturn(json(200, "{\"success\":true,\"output\":{\"ok\":1}}"));
+        ModuleAssertionSigner.Actor runUser = new ModuleAssertionSigner.Actor("user-1", "PORTAL", null);
+        when(registry.flowActor(ExternalModuleFixtures.TENANT, "user-1")).thenReturn(runUser);
 
         ActionResult result = handler.execute(context());
 
@@ -76,7 +78,7 @@ class RemoteActionHandlerTest {
         assertThat(call.path()).isEqualTo("/kelta/v1/actions/ping");
         assertThat(call.timeout()).as("the manifest's timeoutMs").isEqualTo(Duration.ofMillis(1500));
         assertThat(call.headers()).containsEntry("Idempotency-Key", "exec-1:Charge");
-        assertThat(call.actor()).as("no person acts on a flow path").isNull();
+        assertThat(call.actor()).as("the run's user acts, as a JAR action's context.userId()").isEqualTo(runUser);
 
         JsonNode body = mapper.readTree(call.body());
         assertThat(body.get("tenantId").stringValue()).isEqualTo(ExternalModuleFixtures.TENANT);

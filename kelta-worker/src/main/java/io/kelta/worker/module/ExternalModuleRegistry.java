@@ -273,6 +273,35 @@ public class ExternalModuleRegistry {
                 .orElse(null);
     }
 
+    /**
+     * The acting user of a flow step: the run's user ({@link ActionContext#userId()}, which
+     * {@code FlowActorResolver} resolved to the caller, the record's changer, or the flow's run-as
+     * user or owner), the identity a JAR module's action read. The request caller's own type is used
+     * when the step runs on that caller's request thread; otherwise the user must be an
+     * {@code ACTIVE} {@code INTERNAL} or {@code PORTAL} user of the tenant. {@code null} for a run
+     * with no user, and for a service, inactive or unknown one, so a module never acts for an
+     * identity the platform cannot vouch for.
+     */
+    ModuleAssertionSigner.Actor flowActor(String tenantId, String runUserId) {
+        if (runUserId == null || runUserId.isBlank()) {
+            return null;
+        }
+        ModuleAssertionSigner.Actor caller = currentActor(null);
+        if (caller != null && runUserId.equals(caller.userId()) && caller.userType() != null) {
+            return caller;
+        }
+        if (jdbcTemplate == null) {
+            return null;
+        }
+        List<String> types = jdbcTemplate.queryForList(
+                "SELECT user_type FROM platform_user WHERE id = ? AND tenant_id = ? AND status = 'ACTIVE'",
+                String.class, runUserId, tenantId);
+        String type = types.isEmpty() ? null : types.getFirst();
+        return "INTERNAL".equals(type) || "PORTAL".equals(type)
+                ? new ModuleAssertionSigner.Actor(runUserId, type, null)
+                : null;
+    }
+
     /** A protocol response body as a JSON object; anything else is an invalid response. */
     static JsonNode readObject(ObjectMapper objectMapper, OutboundHttpClient.Response response) {
         JsonNode json;

@@ -1,5 +1,6 @@
 package io.kelta.worker.module;
 
+import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.module.ModuleStore;
 import io.kelta.runtime.module.TenantModuleData;
 import io.kelta.runtime.module.service.EntitlementProvider;
@@ -10,6 +11,7 @@ import io.kelta.runtime.workflow.BeforeSaveHookRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
@@ -19,8 +21,10 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -210,5 +214,40 @@ class ExternalModuleRegistryTest {
 
         verify(store, times(1)).findAllExternal();
         assertThat(registry.eventSubscribers(ExternalModuleFixtures.TENANT, "orders", "created")).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("a flow step's actor is the run's user when it is an active INTERNAL or PORTAL user, else none")
+    void flowActor() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        ExternalModuleRegistry withDb = new ExternalModuleRegistry(store, actions, hooks, services, invoker, jdbc,
+                null, null, new ObjectMapper());
+        String sql = "SELECT user_type FROM platform_user WHERE id = ? AND tenant_id = ? AND status = 'ACTIVE'";
+        when(jdbc.queryForList(eq(sql), eq(String.class), eq("member-1"), eq(ExternalModuleFixtures.TENANT)))
+                .thenReturn(List.of("PORTAL"));
+        when(jdbc.queryForList(eq(sql), eq(String.class), eq("svc-1"), eq(ExternalModuleFixtures.TENANT)))
+                .thenReturn(List.of("SERVICE"));
+        when(jdbc.queryForList(eq(sql), eq(String.class), eq("gone-1"), eq(ExternalModuleFixtures.TENANT)))
+                .thenReturn(List.of());
+
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, "member-1"))
+                .isEqualTo(new ModuleAssertionSigner.Actor("member-1", "PORTAL", null));
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, "svc-1")).as("a service user").isNull();
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, "gone-1")).as("unknown or inactive").isNull();
+    }
+
+    @Test
+    @DisplayName("a flow step with no run user has no actor, and a caller who is the run user is used as is")
+    void flowActorWithoutLookup() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        ExternalModuleRegistry withDb = new ExternalModuleRegistry(store, actions, hooks, services, invoker, jdbc,
+                null, null, new ObjectMapper());
+
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, null)).isNull();
+        assertThat(withDb.flowActor(ExternalModuleFixtures.TENANT, " ")).isNull();
+        CallerContext caller = new CallerContext("admin-1", CallerContext.UserType.INTERNAL, false, false);
+        assertThat(CallerContext.callAs(caller, () -> withDb.flowActor(ExternalModuleFixtures.TENANT, "admin-1")))
+                .isEqualTo(new ModuleAssertionSigner.Actor("admin-1", "INTERNAL", null));
+        verifyNoInteractions(jdbc);
     }
 }

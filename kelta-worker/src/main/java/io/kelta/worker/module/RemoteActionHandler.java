@@ -35,6 +35,10 @@ import java.util.UUID;
  * enforces the manifest's {@code timeoutMs} as the HTTP deadline (the flow's
  * {@code TaskState.timeoutSeconds} is not enforced by the engine).
  *
+ * <p>The run's user rides as the signed {@code act} claim ({@link ExternalModuleRegistry#flowActor}),
+ * so an action that serves "the calling member" (billing's checkout) works from a flow as it did
+ * in a JAR module.
+ *
  * <p>Outcomes: {@code success: true} → its {@code output}; {@code success: false} →
  * {@link ActionResult#failure} with {@code <error.code>: <error.message>} (flow error
  * {@code ActionFailed}); a timeout → {@code ModuleTimeoutException}; disabled, breaker open,
@@ -99,7 +103,7 @@ final class RemoteActionHandler implements ActionHandler {
         ModuleHttpClient.Call call = new ModuleHttpClient.Call("POST",
                 ModuleHttpClient.ACTIONS_PATH + URLEncoder.encode(key, StandardCharsets.UTF_8), null, body,
                 "application/json", Map.of(IDEMPOTENCY_KEY_HEADER, idempotencyKey),
-                Duration.ofMillis(declared.timeoutMs()), ExternalModuleRegistry.currentActor(null));
+                Duration.ofMillis(declared.timeoutMs()), registry.flowActor(tenantId, context.userId()));
         return invoker.call(endpoint.row(), ExternalModuleInvoker.Kind.ACTION, call, this::readResult);
     }
 

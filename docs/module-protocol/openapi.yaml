@@ -522,8 +522,10 @@ components:
           type: string
     Actor:
       description: |
-        The user whose action caused this call (RFC 8693 `act` claim). Absent on flow steps and
-        schedules, which have no request caller; `profile_id` is sent on routes.
+        The user whose action caused this call (RFC 8693 `act` claim). On a flow action it is the
+        run's user (the caller, the record's changer, or the flow's run-as user or owner), sent only
+        when that is an active INTERNAL or PORTAL user. Absent on module schedules, webhooks and
+        events; `profile_id` is sent on routes.
       type: object
       required: [sub, user_type]
       properties:
