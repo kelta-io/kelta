@@ -664,6 +664,15 @@ Tasks). What the task-token design does not guarantee:
   A lease shorter than a resume's wait in the engine's queue cannot run a step twice (only the
   current claim consumes the row) but makes the slow resume a no-op. Rows claimed before V223 have
   no `claimed_at` and stay as they were.
+- **A hard kill mid-resume strands the execution in `WAITING`.** The resume consumes (deletes) its
+  `flow_pending_resume` row first, then loads the execution and definition and only then marks it
+  `RUNNING`. A pod killed in that window (SIGKILL, OOM, node loss — a graceful shutdown interrupts
+  the thread and ends `FAILED`) leaves the execution `WAITING` with no row, so neither the poller
+  nor the lease recovers it. Same class as a pod dying mid-flow (left `RUNNING`); the fix is one
+  transaction for consume + mark-running, or a reaper for `WAITING` executions with no pending row.
+  Separately, `JdbcFlowStore.releasePendingResume` matches on the execution id and the random
+  per-claim id without a `tenant_id` filter (not exploitable — the claim id is unguessable — but
+  unlike every other pending-resume statement).
 - **Only top-level Task steps can wait.** `Parallel`/`Map` branch states and invoked sub-flows run
   in memory and are not persisted, so they cannot park; a long-running action there gets no task
   and its `202` fails the step (`ModuleUnavailableException`).
