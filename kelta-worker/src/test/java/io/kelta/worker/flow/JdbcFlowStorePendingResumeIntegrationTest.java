@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.junit.jupiter.Container;
@@ -25,6 +26,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The {@code flow_pending_resume} claim SQL of {@link JdbcFlowStore} against a real Postgres with
@@ -114,6 +116,16 @@ class JdbcFlowStorePendingResumeIntegrationTest {
         assertThat(store.loadExecution(unknown).orElseThrow().startedBySource()).isNull();
         assertThat(store.findExecutionsByFlow(flowId(TENANT_A), 10, 0))
                 .extracting(FlowExecutionData::startedBySource).containsExactlyInAnyOrder(ActorSource.OWNER, null);
+
+        // The column admits only the ActorSource names (and NULL).
+        assertThatThrownBy(() -> jdbc.update(
+                "UPDATE flow_execution SET started_by_source = 'DELEGATE' WHERE id = ?", id))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("chk_flow_execution_started_by_source");
+        for (ActorSource source : ActorSource.values()) {
+            jdbc.update("UPDATE flow_execution SET started_by_source = ? WHERE id = ?", source.name(), id);
+            assertThat(store.loadExecution(id).orElseThrow().startedBySource()).isEqualTo(source);
+        }
     }
 
     @Test

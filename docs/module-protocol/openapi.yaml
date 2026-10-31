@@ -703,11 +703,11 @@ components:
             more may be added, and a module must treat a value it does not know as a fallback.
 
             - `initiator`: the user the run's trigger names. For a manual or API run that is the
-              caller. For a record-triggered run it is the record's **creator** (`createdBy`, else
-              `updatedBy`), not necessarily the user who made the change, and a flow's own record
-              write can set `createdBy`, so treat it as "the record's author", not "the editor"
-              (see `.claude/docs/concerns.md`). A retry re-runs as the original run's user and
-              source, whoever asked for the retry.
+              caller. For a record-triggered run it is the user whose write produced the event
+              (the acting user). When a flow's own write produced it, that is the upstream run's
+              user, which may itself be a `run_as` or `owner` fallback: the record event carries no
+              source, so the fallback arrives as `initiator` (see `.claude/docs/concerns.md`). A
+              retry re-runs as the original run's user and source, whoever asked for the retry.
             - `run_as`: the flow's run-as user.
             - `owner`: the flow's owner.
 

@@ -11,9 +11,11 @@ package io.kelta.runtime.workflow;
  * tell them apart: an external module receives the source as {@code act.source} and refuses a
  * member-only action for a fallback identity.
  *
- * <p>For a record-triggered run, {@link #INITIATOR} is the record's creator ({@code createdBy}, else
- * {@code updatedBy}), not necessarily the user who changed it, and a flow's own record write can set
- * {@code createdBy}: see {@code .claude/docs/concerns.md} (record-triggered {@code initiator}).
+ * <p>For a record-triggered run, {@link #INITIATOR} is the user whose write produced the event (the
+ * acting user, {@code ActingUser}). When a flow's own write produced it, that is the upstream run's
+ * user, which may itself be a run-as or owner fallback: the record event carries no source, so the
+ * fallback arrives here as an initiator. See {@code .claude/docs/concerns.md} (a record-triggered run
+ * inherits a flow's fallback actor).
  *
  * <p>Recorded with the execution ({@code flow_execution.started_by_source}), so a resumed or
  * retried run keeps it. {@code null} where it is unknown: a run started before it was recorded, or
@@ -25,8 +27,8 @@ public enum ActorSource {
 
     /**
      * The user the run's trigger names: a manual or API run's caller, or, for a record trigger, the
-     * user the record-change event names. That is the record's creator, not necessarily the user who
-     * changed it, and a flow's own record write can set it (see the class comment).
+     * user whose write produced the event. When that write was a flow's, it is the upstream run's
+     * user, which may itself be a fallback (see the class comment).
      */
     INITIATOR,
 

@@ -124,9 +124,9 @@ A module is called only while its install is `ACTIVE` or `DEGRADED`:
   refuse anything else, including an actor with no `source`. More values may be added, so treat an
   unknown one as a fallback. A route's or hook's `act` is the caller and has no `source`.
 
-  For a record-triggered run, `initiator` is the record's **creator**, not necessarily the user who
-  changed the record, and a flow's own record write can set the creator. A retry runs as the original
-  run's initiator, whoever asked for it. A run that was still waiting when the platform began recording
+  For a record-triggered run, `initiator` is the user whose write produced the event. When a flow's own
+  write produced it, that is the upstream run's user, which may itself be a `run_as` or `owner` fallback
+  arriving as `initiator`. A retry runs as the original run's initiator, whoever asked for it. A run that was still waiting when the platform began recording
   the source sends no `act` when it resumes, so a member-only action refuses it.
 - **Before-save hooks.** `POST /kelta/v1/hooks` answers `{ allowed, fieldUpdates, errors, conflict }`:
   - `errors` reject the write with `400`;

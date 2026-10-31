@@ -36,11 +36,11 @@ an unknown source and an action call with no source, so the module does not depe
 platform version signed the call. A **route** that does the same checks `!is_fallback()`: its
 caller carries no source by design.
 
-For a record-triggered run, `Initiator` is the record's **creator** (`createdBy`, else
-`updatedBy`), not necessarily the user who changed the record, and a flow's own record write can
-set `createdBy`. Read it as "the record's author" until the platform puts the editor on the
-event (tracked in `.claude/docs/concerns.md`). A retry re-runs as the original run's initiator,
-whoever asked for the retry.
+For a record-triggered run, `Initiator` is the user whose write produced the event (the acting
+user). When a flow's own write produced it, that is the upstream run's user, which may itself
+be a `RunAs` or `Owner` fallback: the record event carries no source yet, so the fallback
+arrives as `Initiator` (tracked in the platform's `.claude/docs/concerns.md`). A retry re-runs
+as the original run's initiator, whoever asked for the retry.
 
 Headers that a third party forwards through the platform, such as a webhook provider's
 signature headers, arrive as `UntrustedHeaders`. The sender controls them, including

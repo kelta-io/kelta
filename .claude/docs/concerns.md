@@ -740,10 +740,16 @@ homelab cluster (`ci-cd.md` → Rust external modules). What that does not guara
   write publishes its record event as the run's actor (`ActingUser`), and `FlowActorResolver`
   takes any UUID on the event as the initiator. So a run no one started — a schedule, a webhook, a
   record change with no acting user, whose actor is the flow's run-as user or owner — makes the
-  record-triggered run it causes start with that fallback user as its *initiator*. The event no
-  longer names the record's stored author (resolved 2026-10-31, below); what remains is that it
-  carries no actor source. Closing it needs the source on `ActingUser` and the record event, once
-  flow runs record one (`act.source`, #2135).
+  record-triggered run it causes start with that fallback user as its *initiator*, and an external
+  module then receives that user as `act.source: initiator`, so a member-only action
+  (`Actor::is_initiator()`) serves them. In general, for a record trigger `initiator` is the user
+  whose write produced the event, and a flow's own write passes on the upstream run's user —
+  fallback or not. The event no longer names the record's stored author, and a flow can no longer
+  set `createdBy`/`updatedBy` through a field mapping (`FlowAuditStamp` drops them; resolved
+  2026-10-31, below), so a flow author cannot pick an arbitrary user; what remains is that the
+  event carries no actor source. Flow runs now record one (`flow_execution.started_by_source`,
+  `ActionContext.actorSource`); closing this needs that source carried on `ActingUser` and the
+  record event, and `FlowEventListener` passing it on instead of `INITIATOR`.
 - **The quota hook reads every collection.** Counting a member's records in an arbitrary collection
   needs read access to it, so the manifest asks for `VIEW_ALL_DATA` — shown on the consent screen,
   and narrower than the in-process access the deleted JAR build had, but still a read grant on all of the tenant's data

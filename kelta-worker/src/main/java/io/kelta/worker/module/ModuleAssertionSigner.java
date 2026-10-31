@@ -214,7 +214,8 @@ public class ModuleAssertionSigner {
 
     /**
      * The {@code act.source} value of a flow step's actor: {@code initiator} (the user the trigger
-     * names; for a record trigger the record's creator, see {@link ActorSource}), {@code run_as}
+     * names; for a record trigger the user whose write produced the event, see
+     * {@link ActorSource}), {@code run_as}
      * (the flow's run-as user) or {@code owner} (the flow's owner). The last two are fallback
      * identities, not a person who acted; a module refuses a member-only action for them.
      */

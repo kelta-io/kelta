@@ -361,9 +361,10 @@ to `FlowEngine.startExecution` as the execution user, so:
   branches, `DECISION` children and `TRIGGER_FLOW` hops inherit it; a resumed
   run reads it back; a retry re-asserts the original's user and source, whoever
   asked for it — `resolveRetry`, `FlowExecutionController` retry). `INITIATOR` is
-  the user the trigger names; for a record trigger that is the record's creator,
-  not necessarily its editor, and a flow's own record write can set it
-  (`concerns.md` → record-triggered `initiator`). An external module action sends
+  the user the trigger names; for a record trigger that is the user whose write
+  produced the event (above), and for a flow's own write that is the upstream
+  run's user, which may itself be a run-as or owner fallback (`concerns.md` → A
+  record-triggered run inherits a flow's fallback actor). An external module action sends
   it as `act.source` (`initiator`, `run_as`, `owner`; an open set) so a
   member-only action can accept only `initiator`; a run whose source is unknown
   (`null`: started before V227, including one still waiting when it deployed)

@@ -15,8 +15,9 @@ import java.util.regex.Pattern;
  * Resolves the audit identity ("actor") a flow execution runs as.
  *
  * <p>Precedence: the initiating user when one exists (a manual run's caller, or
- * the user a record-change event names, which is the record's creator, not
- * necessarily the user who changed it: see {@link ActorSource}) → the flow's configured
+ * the user whose write produced a record-change event; for a flow's own write
+ * that is the upstream run's user, possibly a fallback: see {@link ActorSource})
+ * → the flow's configured
  * {@code run_as_user_id} → the flow owner ({@code created_by}). The resolved
  * actor is passed to {@link io.kelta.runtime.flow.FlowEngine#startExecution}
  * as the execution user, so action handlers stamp it into

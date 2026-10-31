@@ -61,8 +61,8 @@ impl Actor {
     /// actor, so it is not known to be a member. A route's caller carries no source by design:
     /// check routes with `!is_fallback()`.
     ///
-    /// For a record-triggered run the initiator is the record's creator, not necessarily the user
-    /// who changed it (see [`ActorSource::Initiator`]).
+    /// For a record-triggered run the initiator is the user whose write produced the event, which
+    /// for a flow's own write may be an upstream fallback (see [`ActorSource::Initiator`]).
     pub fn is_initiator(&self) -> bool {
         matches!(self.source, Some(ActorSource::Initiator))
     }
@@ -77,10 +77,11 @@ impl Actor {
 #[non_exhaustive]
 pub enum ActorSource {
     /// The user the run's trigger names: a manual or API run's caller, or for a record-triggered
-    /// run the record's **creator** (`createdBy`, else `updatedBy`). That is not necessarily the
-    /// user who changed the record, and a flow's own record write can set `createdBy`, so read it
-    /// as "the record's author" (the platform's `.claude/docs/concerns.md` tracks the fix). A
-    /// retry re-runs as the original run's initiator, whoever asked for it.
+    /// run the user whose write produced the event (the acting user). When a flow's own write
+    /// produced it, that is the upstream run's user, which may itself be a `RunAs` or `Owner`
+    /// fallback: the record event carries no source yet, so the fallback arrives as `Initiator`
+    /// (the platform's `.claude/docs/concerns.md` tracks the fix). A retry re-runs as the
+    /// original run's initiator, whoever asked for it.
     Initiator,
     /// The flow's configured run-as user: the trigger named no user.
     RunAs,
