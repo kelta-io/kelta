@@ -14,7 +14,7 @@ repository = "https://github.com/kelta-io/kelta"
 
 [workspace.dependencies]
 axum = "0.8"
-base64 = "0.22"
+base64 = "0.23"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 hex = "0.4"
