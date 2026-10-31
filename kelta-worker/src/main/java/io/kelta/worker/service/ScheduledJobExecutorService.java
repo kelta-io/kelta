@@ -7,12 +7,15 @@ import io.kelta.runtime.flow.InitialStateBuilder;
 import io.kelta.runtime.module.integration.spi.ScriptExecutor;
 import io.kelta.runtime.module.integration.spi.ScriptExecutor.ScriptExecutionRequest;
 import io.kelta.runtime.module.integration.spi.ScriptExecutor.ScriptExecutionResult;
+import io.kelta.runtime.workflow.ActionResult;
+import io.kelta.worker.module.ExternalModuleRegistry;
 import io.kelta.worker.repository.DataExportRepository;
 import io.kelta.worker.repository.ScheduledJobRepository;
 import io.kelta.worker.service.email.DefaultEmailService;
 import io.kelta.worker.service.email.EmailAttachment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.StringWriter;
@@ -35,6 +38,8 @@ import java.util.UUID;
  *   <li><b>SCRIPT</b> — executes a JavaScript script via {@link ScriptExecutor}</li>
  *   <li><b>REPORT_EXPORT</b> — executes a report and exports as CSV via {@link ReportExecutionService}</li>
  *   <li><b>DATA_EXPORT</b> — triggers a tenant data export via {@link DataExportService}</li>
+ *   <li><b>MODULE_ACTION</b> — runs an external module's scheduled action via
+ *       {@link ExternalModuleRegistry#runScheduledAction}</li>
  * </ul>
  *
  * @since 1.0.0
@@ -63,6 +68,12 @@ public class ScheduledJobExecutorService {
      */
     private final DefaultEmailService emailService;
 
+    /**
+     * Runs {@code MODULE_ACTION} jobs. Setter-injected (absent when runtime modules are off), so the
+     * constructor stays as it is.
+     */
+    private ExternalModuleRegistry externalModules;
+
     /** Reports larger than this are delivered as a notification without the CSV attached. */
     static final int MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
@@ -88,6 +99,11 @@ public class ScheduledJobExecutorService {
         this.dataExportRepository = dataExportRepository;
         this.tenantSlugResolver = tenantSlugResolver;
         this.emailService = emailServiceProvider.getIfAvailable();
+    }
+
+    @Autowired(required = false)
+    public void setExternalModuleRegistry(ExternalModuleRegistry externalModules) {
+        this.externalModules = externalModules;
     }
 
     /**
@@ -131,6 +147,8 @@ public class ScheduledJobExecutorService {
                                 cronExpression, timezone, startedAt,
                                 (String) job.get("name"), (String) job.get("config"));
                         case "DATA_EXPORT" -> executeDataExportJob(jobId, tenantId, jobReferenceId, cronExpression, timezone, startedAt);
+                        case "MODULE_ACTION" -> executeModuleActionJob(jobId, tenantId, cronExpression, timezone,
+                                startedAt, (String) job.get("config"), job.get("next_run_at"));
                         default -> {
                             log.warn("Unsupported job type '{}' for job {}, skipping", jobType, jobId);
                             Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
@@ -149,6 +167,59 @@ public class ScheduledJobExecutorService {
                 log.error("Scheduled job failed: jobId={}, type={}, refId={}, tenantId={}, error={}, duration={}ms",
                         jobId, jobType, jobReferenceId, tenantId, e.getMessage(), durationMs);
             }
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // MODULE_ACTION execution (an external module's manifest schedule)
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Runs the action through the module's endpoint ({@code POST /kelta/v1/actions/{key}}) with
+     * {@code Idempotency-Key: <jobId>:<fireTime>}, so a module can drop a run that two pods both
+     * picked up. A disabled or failed install is {@code SKIPPED}, not failed: nothing is wrong
+     * with the schedule. A module that cannot be called throws, and the caller records FAILED.
+     */
+    @SuppressWarnings("unchecked")
+    private void executeModuleActionJob(String jobId, String tenantId, String cronExpression, String timezone,
+                                        Instant startedAt, String configJson, Object scheduledFor) throws Exception {
+        Map<String, Object> config = configJson == null ? Map.of() : objectMapper.readValue(configJson, Map.class);
+        String moduleId = config.get("moduleId") instanceof String m ? m : null;
+        String action = config.get("action") instanceof String a ? a : null;
+        Instant nextRun = ScheduledJobRepository.calculateNextRunAt(cronExpression, timezone);
+        if (externalModules == null || moduleId == null || action == null) {
+            String error = externalModules == null ? "Runtime modules are disabled on this worker"
+                    : "MODULE_ACTION job has no moduleId/action in its config";
+            repository.updateAfterExecution(jobId, "FAILED", startedAt, nextRun);
+            repository.insertExecutionLog(jobId, "FAILED", error, startedAt, Instant.now(),
+                    Instant.now().toEpochMilli() - startedAt.toEpochMilli());
+            return;
+        }
+        if (!externalModules.callable(tenantId, moduleId)) {
+            log.info("Skipping scheduled action '{}' of module '{}' for tenant {}: the install is not active",
+                    action, moduleId, tenantId);
+            repository.updateAfterExecution(jobId, "SKIPPED", startedAt, nextRun);
+            repository.insertExecutionLog(jobId, "SKIPPED", "Module '" + moduleId + "' is not active",
+                    startedAt, Instant.now(), Instant.now().toEpochMilli() - startedAt.toEpochMilli());
+            return;
+        }
+        Instant fireTime = scheduledFor instanceof java.sql.Timestamp ts ? ts.toInstant()
+                : scheduledFor instanceof Instant i ? i : startedAt;
+        ActionResult result = externalModules.runScheduledAction(tenantId, moduleId, action,
+                jobId + ":" + fireTime);
+
+        Instant completedAt = Instant.now();
+        long durationMs = completedAt.toEpochMilli() - startedAt.toEpochMilli();
+        if (result.successful()) {
+            repository.updateAfterExecution(jobId, "SUCCESS", startedAt, nextRun);
+            repository.insertExecutionLog(jobId, "SUCCESS", null, startedAt, completedAt, durationMs);
+            log.info("Scheduled job executed: jobId={}, type=MODULE_ACTION, module={}, action={}, tenantId={}, "
+                    + "duration={}ms", jobId, moduleId, action, tenantId, durationMs);
+        } else {
+            repository.updateAfterExecution(jobId, "FAILED", startedAt, nextRun);
+            repository.insertExecutionLog(jobId, "FAILED", result.errorMessage(), startedAt, completedAt, durationMs);
+            log.warn("Scheduled job failed: jobId={}, type=MODULE_ACTION, module={}, action={}, tenantId={}, "
+                    + "error={}", jobId, moduleId, action, tenantId, result.errorMessage());
         }
     }
 

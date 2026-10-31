@@ -9,6 +9,7 @@ import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,7 +32,7 @@ class ConnectedAppRegisteredClientRepositoryTest {
 
     private static final String SELECT_BY_CLIENT_ID =
             "SELECT id, client_id, client_secret_hash, name, redirect_uris, scopes, "
-            + "grant_types, require_pkce, consent_required "
+            + "grant_types, require_pkce, consent_required, run_as_user_id "
             + "FROM connected_app WHERE client_id = ? AND active = true";
 
     @BeforeEach
@@ -88,6 +89,44 @@ class ConnectedAppRegisteredClientRepositoryTest {
         assertThat(client.getClientSecret()).isNull();
         assertThat(client.getClientSettings().isRequireProofKey()).isTrue();
         assertThat(client.getRedirectUris()).contains("https://app.example.com/callback");
+    }
+
+    @Test
+    void connectedAppWithoutRunAsUserKeepsItsConfiguredGrantsAndHourLongTokens() {
+        when(jdbcTemplate.queryForList(anyString(), eq("klt_plain")))
+                .thenReturn(List.of(appRow("app-p", "klt_plain",
+                        "[\"client_credentials\",\"authorization_code\"]", false)));
+
+        RegisteredClient client = repository.findByClientId("klt_plain");
+
+        assertThat(client.getAuthorizationGrantTypes()).contains(
+                AuthorizationGrantType.CLIENT_CREDENTIALS, AuthorizationGrantType.AUTHORIZATION_CODE);
+        assertThat(client.getRedirectUris()).contains("https://app.example.com/callback");
+        assertThat(client.getTokenSettings().getAccessTokenTimeToLive()).isEqualTo(Duration.ofHours(1));
+    }
+
+    @Test
+    void runAsAppIsAConfidentialClientCredentialsOnlyClientWhateverItsColumnsSay() {
+        // A module service principal's app: an edit that adds authorization_code, PKCE or a
+        // redirect URI must not turn it into a sign-in client or a public one.
+        Map<String, Object> row = appRow("app-svc", "klt_svc", "[\"authorization_code\"]", true);
+        row.put("consent_required", true);
+        row.put("run_as_user_id", "11111111-1111-1111-1111-111111111111");
+        when(jdbcTemplate.queryForList(anyString(), eq("klt_svc"))).thenReturn(List.of(row));
+
+        RegisteredClient client = repository.findByClientId("klt_svc");
+
+        assertThat(client.getAuthorizationGrantTypes())
+                .containsExactly(AuthorizationGrantType.CLIENT_CREDENTIALS);
+        assertThat(client.getClientAuthenticationMethods())
+                .contains(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                .doesNotContain(ClientAuthenticationMethod.NONE);
+        assertThat(client.getClientSecret()).isEqualTo("{bcrypt}bcrypthash");
+        assertThat(client.getRedirectUris()).isEmpty();
+        assertThat(client.getClientSettings().isRequireProofKey()).isFalse();
+        assertThat(client.getClientSettings().isRequireAuthorizationConsent()).isFalse();
+        assertThat(client.getTokenSettings().getAccessTokenTimeToLive())
+                .isEqualTo(ConnectedAppRegisteredClientRepository.RUN_AS_ACCESS_TOKEN_TTL);
     }
 
     @Test

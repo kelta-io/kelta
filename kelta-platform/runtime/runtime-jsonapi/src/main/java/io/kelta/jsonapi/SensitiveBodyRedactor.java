@@ -29,7 +29,8 @@ import java.util.regex.Pattern;
  *       all covered; {@code ssn} must match exactly. Numbers, booleans and nulls are kept (they
  *       carry counters such as token usage, not secret material).</li>
  *   <li><b>Value-based.</b> Any string, regardless of key, has embedded personal access tokens
- *       ({@code klt_…}) and JWTs (three base64url segments starting {@code eyJ}) replaced.</li>
+ *       ({@code klt_…}), external-module task tokens ({@code kmt_…}) and JWTs (three base64url
+ *       segments starting {@code eyJ}) replaced.</li>
  *   <li><b>Redact, then truncate.</b> The body is streamed token-by-token into a redacted copy and
  *       cut at the size limit afterwards, so a cut can never land inside an unredacted value. Only
  *       as much input as needed to fill the limit is parsed.</li>
@@ -61,6 +62,7 @@ public final class SensitiveBodyRedactor {
 
     private static final Pattern TOKEN_VALUE_PATTERN = Pattern.compile(
             "klt_[A-Za-z0-9_-]{8,}"
+                    + "|kmt_[A-Za-z0-9_-]{8,}"
                     + "|eyJ[A-Za-z0-9_-]{4,}\\.[A-Za-z0-9_-]{4,}\\.[A-Za-z0-9_-]*");
 
     private static final ObjectMapper MAPPER = JsonMapper.builder().build();

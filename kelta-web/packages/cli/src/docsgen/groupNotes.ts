@@ -22,7 +22,9 @@ export const GROUP_NOTES: Record<string, string> = {
     'from `kelta.ui-base-url` (`KELTA_UI_BASE_URL`) and `kelta.external-base-url` ' +
     '(`EXTERNAL_BASE_URL`). Sign in at the printed URL, or authenticate via ' +
     '`POST /auth/direct-login` on the auth server (not the API host) with `username`, ' +
-    '`password` and `tenantSlug` from the printed output, or run ' +
+    '`password` and `tenantSlug` from the printed output (an account that requires MFA — ' +
+    'enrolled, or its tenant requires it — is refused with `401 mfa_required` and must use ' +
+    'the browser login), or run ' +
     '`kelta auth login` against the sandbox slug (browser login) and then ' +
     '`kelta token create` to mint a PAT scoped to it. By default the sandbox is a clone ' +
     "of the parent's metadata (collections, fields, picklists, layouts, list views, flows, " +

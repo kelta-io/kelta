@@ -5,7 +5,9 @@
  * (dropdown-based) and an advanced CEL expression editor.
  *
  * Each rule defines a condition under which an action on a collection is
- * allowed or denied for the profile.
+ * allowed or denied for the profile. A matching deny rule wins over every allow.
+ * The server validates the rule on save (operator, value shape, CEL syntax) and
+ * answers a JSON:API error, which is shown as a toast with the form kept open.
  */
 
 import React, { useState, useCallback } from 'react'
@@ -30,19 +32,19 @@ import { CelExpressionEditor } from './CelExpressionEditor'
 interface CustomRule {
   id: string
   profileId: string
-  tenantId: string
   collectionId: string
   action: string
   effect: string
   conditionType: 'visual' | 'cel'
-  condition: VisualCondition | CelCondition
+  condition: VisualCondition | CelCondition | null
   enabled: boolean
 }
 
 interface VisualCondition {
   field: string
   operator: string
-  value: string
+  /** Text from the editor; a rule created through the API may hold a list for `in`. */
+  value: string | string[]
 }
 
 interface CelCondition {
@@ -63,8 +65,6 @@ const OPERATORS = [
 export interface CustomPolicyEditorProps {
   /** Profile ID */
   profileId: string
-  /** Tenant ID */
-  tenantId: string
   /** Whether the editor is read-only */
   readOnly?: boolean
   /** Test ID for the component */
@@ -82,6 +82,18 @@ interface RuleFormState {
   enabled: boolean
 }
 
+/** Placeholder for the value input, by operator: `in` takes a list, the comparisons a number. */
+function valuePlaceholder(operator: string): string {
+  if (operator === 'in') return 'comma-separated, e.g., US, EU'
+  if (operator === 'greater_than' || operator === 'less_than') return 'a number, e.g., 100'
+  return 'e.g., closed'
+}
+
+function valueText(value: VisualCondition['value'] | undefined): string {
+  if (Array.isArray(value)) return value.join(', ')
+  return value ?? ''
+}
+
 const EMPTY_FORM: RuleFormState = {
   collectionId: '',
   action: 'read',
@@ -95,7 +107,6 @@ const EMPTY_FORM: RuleFormState = {
 
 export function CustomPolicyEditor({
   profileId,
-  tenantId,
   readOnly = false,
   testId = 'custom-policy-editor',
 }: CustomPolicyEditorProps): React.ReactElement {
@@ -177,17 +188,18 @@ export function CustomPolicyEditor({
 
   const handleEditRule = useCallback((rule: CustomRule) => {
     const isCel = rule.conditionType === 'cel'
-    const condition = rule.condition as VisualCondition | CelCondition
+    const visual = isCel ? undefined : (rule.condition as VisualCondition | null)
+    const cel = isCel ? (rule.condition as CelCondition | null) : undefined
     setEditingRuleId(rule.id)
     setIsAdvanced(isCel)
     setFormData({
       collectionId: rule.collectionId,
       action: rule.action,
       effect: rule.effect,
-      field: isCel ? '' : ((condition as VisualCondition).field ?? ''),
-      operator: isCel ? 'equals' : ((condition as VisualCondition).operator ?? 'equals'),
-      value: isCel ? '' : ((condition as VisualCondition).value ?? ''),
-      celExpression: isCel ? ((condition as CelCondition).expression ?? '') : '',
+      field: visual?.field ?? '',
+      operator: visual?.operator ?? 'equals',
+      value: valueText(visual?.value),
+      celExpression: cel?.expression ?? '',
       enabled: rule.enabled,
     })
     setShowForm(true)
@@ -198,8 +210,8 @@ export function CustomPolicyEditor({
       ? { expression: formData.celExpression }
       : { field: formData.field, operator: formData.operator, value: formData.value }
 
+    // No tenant in the body: the server writes the rule into the tenant of the request.
     const ruleData: Partial<CustomRule> = {
-      tenantId,
       collectionId: formData.collectionId,
       action: formData.action,
       effect: formData.effect,
@@ -208,14 +220,13 @@ export function CustomPolicyEditor({
       enabled: formData.enabled,
     }
 
+    // Close the form only once the server accepted the rule, so a refused rule can be fixed.
     if (editingRuleId) {
-      updateMutation.mutate({ ruleId: editingRuleId, data: ruleData })
+      updateMutation.mutate({ ruleId: editingRuleId, data: ruleData }, { onSuccess: resetForm })
     } else {
-      createMutation.mutate(ruleData)
+      createMutation.mutate(ruleData, { onSuccess: resetForm })
     }
-
-    resetForm()
-  }, [createMutation, updateMutation, editingRuleId, tenantId, formData, isAdvanced, resetForm])
+  }, [createMutation, updateMutation, editingRuleId, formData, isAdvanced, resetForm])
 
   const getCollectionName = useCallback(
     (collectionId: string) => {
@@ -364,7 +375,7 @@ export function CustomPolicyEditor({
                 <Input
                   value={formData.value}
                   onChange={(e) => setFormData((prev) => ({ ...prev, value: e.target.value }))}
-                  placeholder="e.g., closed"
+                  placeholder={valuePlaceholder(formData.operator)}
                   data-testid={`${testId}-value-input`}
                 />
               </div>
@@ -427,13 +438,13 @@ export function CustomPolicyEditor({
                   <span className="font-medium">{getCollectionName(rule.collectionId)}</span>
                   {rule.conditionType === 'cel' ? (
                     <span className="ml-2 text-xs text-muted-foreground">
-                      [CEL: {(rule.condition as CelCondition).expression}]
+                      [CEL: {(rule.condition as CelCondition | null)?.expression}]
                     </span>
                   ) : (
                     <span className="ml-2 text-xs text-muted-foreground">
-                      [when {(rule.condition as VisualCondition).field}{' '}
-                      {(rule.condition as VisualCondition).operator}{' '}
-                      {(rule.condition as VisualCondition).value}]
+                      [when {(rule.condition as VisualCondition | null)?.field}{' '}
+                      {(rule.condition as VisualCondition | null)?.operator}{' '}
+                      {valueText((rule.condition as VisualCondition | null)?.value)}]
                     </span>
                   )}
                 </div>

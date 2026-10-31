@@ -378,6 +378,7 @@ const sandboxCreate = defineCommand({
         '  POST /auth/direct-login ' +
           `{ "username": "${attrs.adminUsername ?? ''}", "password": "<password>", ` +
           `"tenantSlug": "${attrs.sandboxSlug ?? ''}" }`,
+        '  (refused with 401 mfa_required if the account requires MFA: use the browser login)',
         '  or: kelta token create (after logging in via the browser)'
       );
     }

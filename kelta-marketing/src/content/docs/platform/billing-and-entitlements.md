@@ -24,8 +24,9 @@ Portal billing — letting external (portal) users buy plans and passes — ship
 1. Create a credential of type `stripe` named `stripe` with `secretKey`, `webhookSecret` and
    `allowedReturnOrigins` (checkout may only return to these origins).
 2. Point a Stripe webhook at `https://api.example.com/<tenant>/api/modules/webhooks/<tenantId>/kelta-billing`
-   subscribed to `checkout.session.completed` and `customer.subscription.created|updated|deleted`. The module
-   verifies the HMAC over the raw body.
+   subscribed to `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   `checkout.session.async_payment_failed` and `customer.subscription.created|updated|deleted`. The module
+   verifies the HMAC over the raw body, and grants a pass only once the payment is collected.
 3. Create `billing_plans` rows with matching `stripePriceId`s.
 4. Schedule the `billing:expire-passes` action in a scheduled flow — a module has no scheduler of its own.
 

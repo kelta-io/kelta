@@ -17,6 +17,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
 import java.util.Base64;
@@ -32,6 +33,13 @@ import java.util.regex.Pattern;
  *   <li>Generates Cerbos policy JSON via {@link CerbosPolicyGenerator}</li>
  *   <li>Pushes policies to Cerbos Admin API</li>
  * </ol>
+ *
+ * <p>The Admin API's basic-auth credential is {@code kelta.worker.cerbos.admin-username} /
+ * {@code kelta.worker.cerbos.admin-password} ({@code KELTA_WORKER_CERBOS_ADMIN_USERNAME} /
+ * {@code KELTA_WORKER_CERBOS_ADMIN_PASSWORD}). The password has no built-in default: when it is
+ * blank the service logs one ERROR at startup and refuses every push (policies, base policies and
+ * the startup seed) with {@link #ADMIN_PASSWORD_MISSING}, so permission changes stop reaching
+ * Cerbos until it is set. Authorization checks are unaffected — they go to the PDP over gRPC.
  */
 @Service
 public class CerbosPolicySyncService {
@@ -42,8 +50,13 @@ public class CerbosPolicySyncService {
 
     private static final String SUBJECT_PREFIX = "kelta.cerbos.policies.changed.";
 
+    /** Why a push is refused when no Admin API password is configured. */
+    static final String ADMIN_PASSWORD_MISSING = "the Cerbos Admin API password is not configured "
+            + "(kelta.worker.cerbos.admin-password / KELTA_WORKER_CERBOS_ADMIN_PASSWORD); "
+            + "Cerbos policies are not pushed";
+
     /** The caller's {@code platform_user.id} UUID on every Cerbos principal (gateway and worker). */
-    static final String PRINCIPAL_USER_ID = "P.attr.userId";
+    static final String PRINCIPAL_USER_ID = CustomRuleCel.PRINCIPAL_USER_ID;
     private static final Set<String> SYSTEM_UUID_FIELDS = Set.of("createdBy", "updatedBy");
     private static final Pattern LEGACY_PRINCIPAL_ID = Pattern.compile("(?<![\\w.])P\\.id(?![\\w.])");
     private static final Pattern ATTR_THEN_PRINCIPAL_ID = Pattern.compile(
@@ -59,6 +72,7 @@ public class CerbosPolicySyncService {
     private final PlatformEventPublisher eventPublisher;
     private final WorkerCacheManager cacheManager;
     private final String cerbosAdminUrl;
+    /** The Basic credential for the Admin API, or null when no password is configured. */
     private final String cerbosAdminAuth;
 
     public CerbosPolicySyncService(
@@ -71,7 +85,7 @@ public class CerbosPolicySyncService {
             @Value("${kelta.worker.cerbos.host:cerbos.emf.svc.cluster.local}") String cerbosHost,
             @Value("${kelta.worker.cerbos.http-port:3592}") int cerbosHttpPort,
             @Value("${kelta.worker.cerbos.admin-username:cerbos}") String adminUsername,
-            @Value("${kelta.worker.cerbos.admin-password:cerbosAdmin2026}") String adminPassword) {
+            @Value("${kelta.worker.cerbos.admin-password:}") String adminPassword) {
         this.jdbcTemplate = jdbcTemplate;
         this.bootstrapRepository = bootstrapRepository;
         this.policyGenerator = policyGenerator;
@@ -82,8 +96,20 @@ public class CerbosPolicySyncService {
                 .connectTimeout(java.time.Duration.ofSeconds(5))
                 .build();
         this.cerbosAdminUrl = "http://" + cerbosHost + ":" + cerbosHttpPort;
-        this.cerbosAdminAuth = "Basic " + Base64.getEncoder()
-                .encodeToString((adminUsername + ":" + adminPassword).getBytes());
+        if (adminPassword == null || adminPassword.isBlank()) {
+            this.cerbosAdminAuth = null;
+            log.error("Cerbos policy sync is disabled: {}. Set it to the Admin API password of the "
+                    + "Cerbos at {}; permission changes will not take effect until then.",
+                    ADMIN_PASSWORD_MISSING, cerbosAdminUrl);
+        } else {
+            this.cerbosAdminAuth = "Basic " + Base64.getEncoder().encodeToString(
+                    (adminUsername + ":" + adminPassword).getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    /** True when an Admin API password is configured, so policies can be pushed. */
+    public boolean isAdminApiConfigured() {
+        return cerbosAdminAuth != null;
     }
 
     /**
@@ -93,6 +119,10 @@ public class CerbosPolicySyncService {
         if (tenantId == null || tenantId.isBlank()) {
             // Never bind an empty tenant: that is the RLS bypass setting.
             log.warn("Skipping Cerbos policy sync: no tenant id");
+            return;
+        }
+        if (!isAdminApiConfigured()) {
+            log.error("Cerbos policies for tenant {} not synced: {}", tenantId, ADMIN_PASSWORD_MISSING);
             return;
         }
         // Every caller hands in the tenant to act for; on a request path that is the tenant
@@ -157,6 +187,10 @@ public class CerbosPolicySyncService {
      * for scoped per-tenant policies. Without these, scoped policies fail to compile.
      */
     public void seedBasePolicies() {
+        if (!isAdminApiConfigured()) {
+            log.error("Base Cerbos policies not seeded: {}", ADMIN_PASSWORD_MISSING);
+            return;
+        }
         try {
             log.info("Seeding base (ancestor) Cerbos policies for resource kinds");
             for (String resource : List.of("system_feature", "collection", "field", "record")) {
@@ -173,6 +207,10 @@ public class CerbosPolicySyncService {
      * Syncs policies for all active tenants.
      */
     public void syncAllTenants() {
+        if (!isAdminApiConfigured()) {
+            log.error("Cerbos policies not synced for any tenant: {}", ADMIN_PASSWORD_MISSING);
+            return;
+        }
         List<Map<String, Object>> tenants = bootstrapRepository.findRoutableTenants();
         log.info("Syncing Cerbos policies for {} tenants", tenants.size());
 
@@ -190,6 +228,9 @@ public class CerbosPolicySyncService {
      * empty (fresh/restored Cerbos) or unreachable — either way the caller should seed.
      */
     public boolean basePoliciesPresent() {
+        if (!isAdminApiConfigured()) {
+            return false;
+        }
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(cerbosAdminUrl + "/admin/policies"))
@@ -215,6 +256,9 @@ public class CerbosPolicySyncService {
     }
 
     private void pushPolicy(Map<String, Object> policy) throws Exception {
+        if (!isAdminApiConfigured()) {
+            throw new IllegalStateException(ADMIN_PASSWORD_MISSING);
+        }
         // Cerbos Admin API expects {"policies": [...]} wrapper
         Map<String, Object> wrapper = new LinkedHashMap<>();
         wrapper.put("policies", List.of(policy));
@@ -299,61 +343,60 @@ public class CerbosPolicySyncService {
         return perms;
     }
 
+    /**
+     * Loads the tenant's custom rules. A failure propagates, so {@link #syncTenant} pushes
+     * nothing and Cerbos keeps the previous policies: pushing a record policy without the
+     * tenant's rules would drop its deny rules.
+     */
     private List<CerbosPolicyGenerator.CustomRule> loadCustomRulesForTenant(String tenantId) {
-        try {
-            String sql = "SELECT id, profile_id, collection_id, action, effect, condition_json, enabled " +
-                    "FROM profile_custom_rules WHERE tenant_id = ?";
-            List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, tenantId);
+        String sql = "SELECT id, profile_id, collection_id, action, effect, condition_json, enabled " +
+                "FROM profile_custom_rules WHERE tenant_id = ?";
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, tenantId);
 
-            List<CerbosPolicyGenerator.CustomRule> rules = new ArrayList<>();
-            Map<String, Set<String>> uuidFieldsByCollection = new HashMap<>();
-            for (Map<String, Object> row : rows) {
-                String conditionJson = row.get("condition_json") != null
-                        ? row.get("condition_json").toString() : null;
-                String celExpression = extractCelExpression(conditionJson);
-                String collectionId = (String) row.get("collection_id");
-                if (celExpression != null && collectionId != null
-                        && LEGACY_PRINCIPAL_ID.matcher(celExpression).find()) {
-                    celExpression = rewriteLegacyPrincipalId(celExpression,
-                            uuidFieldsByCollection.computeIfAbsent(collectionId, this::loadUuidFieldNames));
-                }
-
-                rules.add(new CerbosPolicyGenerator.CustomRule(
-                        (String) row.get("id"),
-                        (String) row.get("profile_id"),
-                        collectionId,
-                        (String) row.get("action"),
-                        (String) row.get("effect"),
-                        celExpression,
-                        toBoolean(row.get("enabled"))
-                ));
+        List<CerbosPolicyGenerator.CustomRule> rules = new ArrayList<>();
+        Map<String, Set<String>> uuidFieldsByCollection = new HashMap<>();
+        for (Map<String, Object> row : rows) {
+            String conditionJson = row.get("condition_json") != null
+                    ? row.get("condition_json").toString() : null;
+            String celExpression = extractCelExpression((String) row.get("id"), conditionJson);
+            String collectionId = (String) row.get("collection_id");
+            if (celExpression != null && collectionId != null
+                    && LEGACY_PRINCIPAL_ID.matcher(celExpression).find()) {
+                celExpression = rewriteLegacyPrincipalId(celExpression,
+                        uuidFieldsByCollection.computeIfAbsent(collectionId, this::loadUuidFieldNames));
             }
-            return rules;
-        } catch (Exception e) {
-            // Table may not exist yet during migration
-            log.debug("Could not load custom rules (table may not exist yet): {}", e.getMessage());
-            return Collections.emptyList();
+
+            rules.add(new CerbosPolicyGenerator.CustomRule(
+                    (String) row.get("id"),
+                    (String) row.get("profile_id"),
+                    collectionId,
+                    (String) row.get("action"),
+                    (String) row.get("effect"),
+                    celExpression,
+                    toBoolean(row.get("enabled"))
+            ));
         }
+        return rules;
     }
 
-    @SuppressWarnings("unchecked")
-    private String extractCelExpression(String conditionJson) {
+    /**
+     * The CEL of a stored condition, compiled the same way {@code CustomRuleController} checks it
+     * at save ({@link CustomRuleCel}): {@code {expression}} is raw CEL, {@code {field, operator,
+     * value}} a visual condition. {@code null} when it is missing or cannot be compiled — the
+     * generator then leaves an allow rule out and applies a deny rule to its whole collection.
+     */
+    private String extractCelExpression(String ruleId, String conditionJson) {
         if (conditionJson == null || conditionJson.isBlank()) return null;
         try {
-            Map<String, Object> condition = objectMapper.readValue(conditionJson, Map.class);
-            // CEL type: {expression: "..."}
+            Map<?, ?> condition = objectMapper.readValue(conditionJson, Map.class);
             if (condition.containsKey("expression")) {
-                return (String) condition.get("expression");
+                return CustomRuleCel.compile(CustomRuleCel.TYPE_CEL, condition);
             }
-            // Visual type: {field, operator, value} — convert to CEL
-            String field = (String) condition.get("field");
-            String operator = (String) condition.get("operator");
-            Object value = condition.get("value");
-            if (field != null && operator != null) {
-                return convertVisualToCel(field, operator, value);
-            }
+            return CustomRuleCel.compile(CustomRuleCel.TYPE_VISUAL, condition);
+        } catch (CustomRuleCel.InvalidConditionException e) {
+            log.warn("Custom rule {} has an unusable condition at {}: {}", ruleId, e.pointer(), e.getMessage());
         } catch (Exception e) {
-            log.warn("Failed to parse condition JSON: {}", e.getMessage());
+            log.warn("Failed to parse condition JSON of custom rule {}: {}", ruleId, e.getMessage());
         }
         return null;
     }
@@ -404,31 +447,6 @@ public class CerbosPolicySyncService {
         }
         m.appendTail(out);
         return out.toString();
-    }
-
-    static String convertVisualToCel(String field, String operator, Object value) {
-        String attrRef = "R.attr." + field;
-        return switch (operator) {
-            case "equals" -> {
-                if ("$CURRENT_USER".equals(value)) yield attrRef + " == " + PRINCIPAL_USER_ID;
-                yield attrRef + " == \"" + value + "\"";
-            }
-            case "not_equals" -> attrRef + " != \"" + value + "\"";
-            case "in" -> {
-                if (value instanceof List<?> list) {
-                    String items = list.stream()
-                            .map(v -> "\"" + v + "\"")
-                            .reduce((a, b) -> a + ", " + b)
-                            .orElse("");
-                    yield attrRef + " in [" + items + "]";
-                }
-                yield attrRef + " in " + value;
-            }
-            case "greater_than" -> "double(" + attrRef + ") > " + value;
-            case "less_than" -> "double(" + attrRef + ") < " + value;
-            case "contains" -> attrRef + ".contains(\"" + value + "\")";
-            default -> attrRef + " == \"" + value + "\"";
-        };
     }
 
     private void publishPolicyChangedEvent(String tenantId) {

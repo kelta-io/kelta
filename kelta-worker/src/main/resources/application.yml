@@ -76,6 +76,38 @@ kelta:
       initial-backoff-ms: ${KELTA_MODULES_LOAD_RETRY_INITIAL_BACKOFF_MS:30000}
       max-backoff-ms: ${KELTA_MODULES_LOAD_RETRY_MAX_BACKOFF_MS:600000}
       escalate-after-attempts: ${KELTA_MODULES_LOAD_RETRY_ESCALATE_AFTER_ATTEMPTS:8}
+    # External modules (specs/module-platform/9-external-modules.md). Every request the platform
+    # sends a module is an ES256 assertion signed with this key: one or more PKCS#8 PEM P-256
+    # private keys (openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256). The first
+    # signs; all are published at GET /api/modules/.well-known/jwks.json, so rotate by putting the
+    # new key first and dropping the old one later. Blank = external modules cannot be installed.
+    platform-signing-key: ${KELTA_MODULE_SIGNING_KEY:}
+    # The assertions' iss claim; a module fetches {issuer}/.well-known/jwks.json. Must be the
+    # public URL of /api/modules as modules reach it.
+    issuer: ${KELTA_MODULE_ISSUER:${EXTERNAL_BASE_URL:http://localhost:8080}/api/modules}
+    # Module hosts that may use http and resolve to private addresses (in-cluster modules), for
+    # module traffic only: comma-separated hostnames or *.suffix patterns. Public https hosts need
+    # no entry. Never widen KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS for a module instead -- that
+    # variable also opens HTTP_CALLOUT, CALL_API and outbound messages.
+    allowed-hosts: ${KELTA_MODULE_ALLOWED_HOSTS:}
+    # Each pod re-reads every external module's row this often and re-registers what changed
+    # (handlers, hooks, entitlements port), so a missed module.changed event heals; the same pass
+    # probes GET /kelta/v1/health of a DEGRADED module or one whose breaker is open. Runtime-checked.
+    external:
+      reconcile-enabled: ${KELTA_MODULES_EXTERNAL_RECONCILE_ENABLED:true}
+      reconcile-interval-ms: ${KELTA_MODULES_EXTERNAL_RECONCILE_INTERVAL_MS:60000}
+      # Redelivery of a record event a module did not acknowledge (worker-module-events, part 9e):
+      # one delay per retry, comma-separated (5s, 2m, 1h). After the last retry the event is
+      # written to module_event_dead_letter and acknowledged. The protocol documents the default.
+      event-backoff: ${KELTA_MODULES_EXTERNAL_EVENT_BACKOFF:5s,30s,2m,10m,1h}
+      # Long-running module actions (part 9h): the longest a task may stay open, in seconds,
+      # whatever the action's manifest maxDurationSeconds says (that is at most 7 days). The flow
+      # step parked on it fails with ModuleTimeoutException when it passes. Default one day.
+      async-action-max-duration-seconds: ${KELTA_MODULES_EXTERNAL_ASYNC_ACTION_MAX_DURATION_SECONDS:86400}
+  # The running Kelta release (e.g. 0.1.0), compared against a module's minPlatformVersion at
+  # install and upgrade. Blank = unknown: the check is skipped with a WARN, never failed.
+  platform:
+    version: ${KELTA_VERSION:}
   # AES-256 master key for envelope encryption (Base64-encoded 32 bytes)
   # Generate with: openssl rand -base64 32
   encryption:
@@ -85,7 +117,7 @@ kelta:
     required: true
   # Outbound fetches of tenant-supplied URLs (OIDC discovery, OpenAPI spec import, flow
   # HTTP_CALLOUT/CALL_API/OUTBOUND_MESSAGE, external-rest collections, OAuth 2.0 credential token
-  # URLs, Web Push) refuse non-public addresses (loopback, RFC 1918, link-local/metadata, CGNAT,
+  # URLs, Web Push, the availability-alert webhook) refuse non-public addresses (loopback, RFC 1918, link-local/metadata, CGNAT,
   # ULA…). List comma-separated CIDRs here only for ranges that legitimately host such targets,
   # e.g. a self-hosted identity provider or an in-cluster service a flow calls. kelta-auth reads
   # the same variable for its OIDC discovery and federated login.
@@ -114,6 +146,11 @@ kelta:
   # own scheme/host/port, which is only right for local dev. X-Forwarded-Proto/-Host are never read.
   scim:
     public-url: ${KELTA_PUBLIC_URL:}
+  # Availability-alert webhook channel: the URL used when a tenant has no settings.alerts.webhookUrl.
+  # The POST goes through the outbound guard, so an in-cluster receiver needs its CIDR in
+  # KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS. Blank = such deliveries fail as "webhook URL not configured".
+  alerts:
+    webhook-url: ${KELTA_ALERTS_WEBHOOK_URL:}
   # SMS delivery (MFA verification codes + availability alerts). The default provider only
   # logs; set provider=twilio and the twilio.* secret to send for real (consumer-alerting
   # slice 10). Selecting twilio without the secret still boots — sends fail as FAILED deliveries.
@@ -138,6 +175,13 @@ kelta:
     cerbos:
       host: ${CERBOS_HOST:cerbos.emf.svc.cluster.local}
       grpc-port: ${CERBOS_GRPC_PORT:3593}
+      # Basic-auth credentials for the Cerbos Admin API, which the worker uses to push the
+      # base and per-tenant policies (CerbosPolicySyncService). The password has no built-in
+      # default: set KELTA_WORKER_CERBOS_ADMIN_PASSWORD to the Cerbos server's admin password
+      # before deploying. Blank = the worker starts, logs one ERROR and pushes no policies
+      # (authorization checks over gRPC keep working against what Cerbos already holds).
+      admin-username: ${KELTA_WORKER_CERBOS_ADMIN_USERNAME:cerbos}
+      admin-password: ${KELTA_WORKER_CERBOS_ADMIN_PASSWORD:}
       seed:
         # Re-push every tenant's policies on startup even if this image already seeded
         # (e.g. after restoring the Cerbos store from backup). Declared here, not env-only.
@@ -159,6 +203,13 @@ kelta:
     admin-username: ${SUPERSET_ADMIN_USERNAME:admin}
     admin-password: ${SUPERSET_ADMIN_PASSWORD:}
   flow:
+    resume:
+      # The Wait / awaited-Task resume poller (FlowResumePollerConfig). A pending-resume row
+      # that a resume claimed but never consumed (its pod died, its queued resume was dropped
+      # at shutdown, or it failed) is taken over by the poller after this many seconds, at least
+      # 1. Keep it longer than a resume waits in the flow engine's queue; a takeover racing a
+      # slow resume runs the step once either way, as only the current claim consumes the row.
+      claim-lease-seconds: ${KELTA_FLOW_RESUME_CLAIM_LEASE_SECONDS:300}
     # Retention for flow/job execution history. Nothing else deletes these tables,
     # so without this they grow without bound.
     # DESTRUCTIVE — dry-run is the DEFAULT: the sweep only logs what it WOULD

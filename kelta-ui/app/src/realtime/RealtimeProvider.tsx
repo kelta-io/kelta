@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import { useConfig } from '@/context/ConfigContext'
 import { useOnlineStatus } from '@/offline/useOnlineStatus'
-import { buildNavTabs } from '@/shells/EndUserShell/navTabs'
+import { buildNavTabs, navCollections } from '@/shells/EndUserShell/navTabs'
 import {
   MAX_SUBSCRIPTIONS,
   RealtimeClient,
@@ -13,6 +13,9 @@ import {
 import { chatQueryKeysForEvent, queryKeysForEvent } from './invalidation'
 
 const DEBOUNCE_MS = 250
+/** Subscriptions kept free for the open page's own collection (useRealtimeCollection). */
+const PAGE_SUBSCRIPTION_HEADROOM = 5
+const APPROVAL_COLLECTIONS = ['approval-instances', 'approval-step-instances']
 
 /**
  * Builds the wss:// connect URL against the gateway origin with a fresh token.
@@ -32,9 +35,10 @@ export function buildSocketUrl(token: string): string {
 /**
  * Mounts one realtime socket for the end-user shell and turns record.changed events into
  * React Query invalidations (INVALIDATION-ONLY — pushed data never enters caches; the
- * server does no per-subscriber FLS). Subscribes to the nav collections plus the approval
- * collections; bursts are debounced per collection. Offline → socket closed; the offline
- * SyncEngine owns reconnect data sync, this provider just reconnects the socket.
+ * server does no per-subscriber FLS). Subscribes to the approval collections plus every nav
+ * collection (grouped ones included); pages add their own collection via
+ * useRealtimeCollection. Bursts are debounced per collection. Offline → socket closed; the
+ * offline SyncEngine owns reconnect data sync, this provider just reconnects the socket.
  */
 /** Exposes the live socket client so hooks (usePresence) can join resources. */
 const RealtimeContext = createContext<{ client: RealtimeClient | null }>({ client: null })
@@ -53,11 +57,11 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const [activeClient, setActiveClient] = useState<RealtimeClient | null>(null)
 
   const collections = useMemo(() => {
-    const fromNav = buildNavTabs(config?.menus)
-      .filter((tab) => tab.kind === 'collection')
-      .map((tab) => tab.target)
-    const set = new Set<string>([...fromNav, 'approval-instances', 'approval-step-instances'])
-    return [...set].slice(0, MAX_SUBSCRIPTIONS)
+    const set = new Set<string>([
+      ...APPROVAL_COLLECTIONS,
+      ...navCollections(buildNavTabs(config?.menus)),
+    ])
+    return [...set].slice(0, MAX_SUBSCRIPTIONS - PAGE_SUBSCRIPTION_HEADROOM)
   }, [config?.menus])
 
   useEffect(() => {

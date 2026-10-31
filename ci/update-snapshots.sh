@@ -123,7 +123,7 @@ status=0
 mkdir -p "$REPORT_DIR/playwright-report" "$REPORT_DIR/test-results"
 "$DOCKER" cp "$container":/work/playwright-report/. "$REPORT_DIR/playwright-report/" 2>/dev/null || true
 "$DOCKER" cp "$container":/work/test-results/. "$REPORT_DIR/test-results/" 2>/dev/null || true
-[ "$status" -eq 0 ] || die "playwright exited $status while updating baselines for $spec_list; nothing committed (see the e2e-report artifact)"
+[ "$status" -eq 0 ] || die "playwright exited $status while updating baselines for $spec_list; nothing committed (see the e2e-report-shard-1 artifact)"
 
 for spec in "${specs[@]}"; do
   mkdir -p "$head/e2e-tests/$spec-snapshots"

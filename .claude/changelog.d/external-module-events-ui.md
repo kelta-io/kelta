@@ -1,0 +1,1 @@
+- 2026-10-31 feat(modules): deliver record events to external modules with backoff and a dead-letter table, pin their admin UI bundle at install and serve only the approved copy, and install, upgrade and uninstall them from the Modules page behind a consent screen (external modules part 9e)

@@ -80,6 +80,36 @@ anonymous access for the tenant — see [Anonymous access (Guest profile)](/docs
 Policies are generated from the tenant's metadata and pushed to Cerbos whenever profiles or permissions change; a
 Cerbos outage fails closed.
 
+## Custom rules
+
+A profile can carry custom rules (the *Custom authorization rules* section of the profile page): each one allows or
+denies one action (`create`, `read`, `edit`, `delete`) on one collection's records when a condition holds.
+
+- **Deny wins.** When a deny rule matches a record, the record check for that action is denied even if
+  `VIEW_ALL_DATA` / `MODIFY_ALL_DATA` or an allow rule would grant it. Object permissions are checked first, for the
+  whole collection, and a custom rule cannot widen them.
+- **Rules act on the records an API response returns.** A matching `read` deny removes the record from lists and
+  reads. For `create`, `edit` and `delete` the rule is applied to the record in the response, after the write; it does
+  not stop the write itself. Use object permissions or a validation rule to stop a write.
+- **A rule applies only to its own collection**, whatever its condition contains.
+- **Visual conditions** compare one field with a value: `equals`, `not equals`, `contains`, `in`, `greater than`,
+  `less than`. For `in`, give the values comma-separated (`US, EU`). The comparisons take a number. `$CURRENT_USER`
+  with `equals` or `not equals` compares the field with the caller's user id. The value is matched as text exactly as
+  typed, quotes and backslashes included.
+- **CEL conditions** (the advanced editor) must be a valid CEL expression over `R.attr.<field>` and `P.attr.*`.
+
+A rule that cannot be compiled is refused when you save it, with a `400 VALIDATION_FAILED` that points at the
+offending part (`source.pointer`, for example `/condition/value`). The API:
+
+```http
+POST /api/admin/profiles/{profileId}/custom-rules
+{ "collectionId": "<id>", "action": "edit", "effect": "deny", "conditionType": "visual",
+  "condition": { "field": "region", "operator": "in", "value": "US, EU" } }
+```
+
+`effect` is `allow` or `deny`; `conditionType` is `visual` or `cel` (a `cel` condition is `{ "expression": "…" }`);
+`enabled` defaults to `true`. The rule is created in the tenant of the request.
+
 Your own effective permissions: `GET /api/me/permissions`; identity and profile: `GET /api/me/identity`.
 
 ## Record sharing

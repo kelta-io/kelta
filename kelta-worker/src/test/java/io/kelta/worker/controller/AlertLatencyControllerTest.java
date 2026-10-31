@@ -144,6 +144,18 @@ class AlertLatencyControllerTest {
     }
 
     @Test
+    @DisplayName("channel=webhook is accepted, passed through and echoed")
+    void webhookChannelAccepted() {
+        when(deliveryRepository.findSentSince(anyString(), any(), eq("webhook"))).thenReturn(List.of(
+                new DeliveryLatencyRow("a1", "webhook", "SENT", CREATED, CREATED.plusSeconds(2))));
+
+        Map<String, Object> data = data(controller.latency(null, "webhook", operator()));
+
+        assertThat(data).containsEntry("channel", "webhook").containsEntry("count", 1);
+        verify(deliveryRepository).findSentSince(eq(TENANT), any(), eq("webhook"));
+    }
+
+    @Test
     @DisplayName("an invalid since is 400")
     void invalidSince() {
         assertThatThrownBy(() -> controller.latency("last tuesday", null, operator()))

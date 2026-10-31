@@ -275,6 +275,33 @@ class DefaultEmailServiceTest {
             verify(emailRepository).markFailed(eq("log-2"), eq("Connection refused"), anyString());
             verify(emailRepository, never()).markSent(anyString(), anyString());
         }
+
+        @Test
+        @DisplayName("Never hands a reserved .invalid address (a SERVICE user's) to the provider")
+        void neverSendsToReservedInvalidDomain() {
+            service.sendAsync("log-3", "billing.ab12cd34@service.kelta.invalid", "Subject", "<p>Body</p>", null);
+
+            verify(emailProvider, never()).sendAndReport(any(), any());
+            verify(emailRepository, never()).markSending(anyString());
+            verify(emailRepository).markFailed(eq("log-3"), contains(".invalid"), anyString());
+        }
+    }
+
+    @Nested
+    @DisplayName("isReservedRecipient")
+    class ReservedRecipient {
+
+        @Test
+        @DisplayName("matches only the .invalid top-level domain")
+        void matchesOnlyInvalidTld() {
+            assertThat(DefaultEmailService.isReservedRecipient("svc@service.kelta.invalid")).isTrue();
+            assertThat(DefaultEmailService.isReservedRecipient(" Svc <SVC@Service.Kelta.INVALID> ")).isTrue();
+            assertThat(DefaultEmailService.isReservedRecipient("svc@example.invalid.")).isTrue();
+            assertThat(DefaultEmailService.isReservedRecipient("user@example.com")).isFalse();
+            assertThat(DefaultEmailService.isReservedRecipient("user@invalid.example.com")).isFalse();
+            assertThat(DefaultEmailService.isReservedRecipient("user@notinvalid")).isFalse();
+            assertThat(DefaultEmailService.isReservedRecipient(null)).isFalse();
+        }
     }
 
     @Nested

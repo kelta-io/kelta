@@ -6,7 +6,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.*;
 
@@ -493,6 +495,51 @@ class InternalBootstrapControllerTest {
         row.put("profile_attribute", null);
         row.put("active", true);
         return row;
+    }
+
+    @Nested
+    @DisplayName("POST /internal/user-identity/jit")
+    class JitProvisionTests {
+
+        @Test
+        @DisplayName("refuses a federated login that matches a SERVICE user, touching nothing")
+        void refusesServiceUser() {
+            JdbcTemplate jdbc = mock(JdbcTemplate.class);
+            when(repository.getJdbcTemplate()).thenReturn(jdbc);
+            Map<String, Object> existing = new HashMap<>();
+            existing.put("id", "svc-1");
+            existing.put("profile_id", "profile-svc");
+            existing.put("status", "ACTIVE");
+            existing.put("user_type", "SERVICE");
+            when(repository.findUserByEmailAnyStatus("billing.ab12@service.kelta.invalid", "tenant-1"))
+                    .thenReturn(Optional.of(existing));
+
+            ResponseEntity<Map<String, Object>> response = controller.jitProvisionUser(Map.of(
+                    "email", "billing.ab12@service.kelta.invalid", "tenantId", "tenant-1"));
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            verifyNoInteractions(jdbc); // no last-login update, no second user created
+        }
+
+        @Test
+        @DisplayName("an existing INTERNAL user still signs in")
+        void existingInternalUserSignsIn() {
+            JdbcTemplate jdbc = mock(JdbcTemplate.class);
+            when(repository.getJdbcTemplate()).thenReturn(jdbc);
+            Map<String, Object> existing = new HashMap<>();
+            existing.put("id", "u-1");
+            existing.put("profile_id", "profile-1");
+            existing.put("status", "ACTIVE");
+            existing.put("user_type", "INTERNAL");
+            when(repository.findUserByEmailAnyStatus("ada@example.com", "tenant-1"))
+                    .thenReturn(Optional.of(existing));
+
+            ResponseEntity<Map<String, Object>> response = controller.jitProvisionUser(Map.of(
+                    "email", "ada@example.com", "tenantId", "tenant-1"));
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(response.getBody()).containsEntry("userId", "u-1").containsEntry("created", false);
+        }
     }
 
     private Map<String, Object> collectionRow(String id, String name, String path, boolean system) {

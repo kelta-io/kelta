@@ -41,7 +41,12 @@ io.kelta.auth/
    that same tenant + email/username — refusals that load no user (unknown, inactive, no
    tenant) are not counted. A lockout that has expired restarts the count at the next miss
    (likewise `TotpService` for `mfa_failed_attempts`).
-4. `KeltaTokenCustomizer` adds custom claims (tenantId, profileId, groups)
+4. `KeltaTokenCustomizer` adds custom claims (tenantId, profileId, groups). A `client_credentials`
+   token gets `connected_app_id`/`auth_method=api_key`/`app_scopes`; when the app has
+   `run_as_user_id` (a module service principal) it also carries that `SERVICE` user's identity
+   and profile, or is refused (`access_denied`) unless the user is ACTIVE, SERVICE, of the app's
+   tenant and has a profile (root `architecture.md` → Run-as connected-app tokens). SERVICE users
+   never pass `KeltaUserDetailsService`, password reset or email verification.
 5. Token issued and returned to client
 6. Silent refresh: the SPA (`kelta-platform`, public client, PKCE) refreshes with
    `grant_type=refresh_token` + `client_id` only. Spring AS has no built-in
@@ -280,6 +285,16 @@ plain surefire here and skip without Docker.
 - `TotpService` — TOTP generation and verification
 - `MfaController` — enrollment and challenge pages
 - Session attributes: `SESSION_MFA_USER_ID`, `SESSION_MFA_PENDING`, `SESSION_MFA_SETUP_REQUIRED`
+- `service/LoginMfaPolicy` — the one rule for "which MFA step follows a correct password":
+  `CHALLENGE` for a verified TOTP enrollment, else `SETUP` when the tenant's
+  `password_policy.mfa_required` is set, else `NONE`. Used by the browser success handler
+  (`AuthorizationServerConfig`) and by `POST /auth/direct-login` (`DirectLoginController`), which has
+  no second step and so refuses any step with `401 {"error":"mfa_required"}` and no token. A new MFA
+  trigger goes here, or direct login becomes a way around it.
+- Direct login authenticates through the same global `AuthenticationManager` as the form, so its
+  wrong passwords count toward lockout (`AuthenticationEventListener`) and a locked account is
+  refused. Tests: `LoginMfaPolicyTest`, `DirectLoginControllerTest`,
+  `FailedSignInLockoutIntegrationTest` (Postgres).
 
 ### Error Handling
 Standard Spring Security exceptions (`AuthenticationException` hierarchy). No custom exception classes in this service.

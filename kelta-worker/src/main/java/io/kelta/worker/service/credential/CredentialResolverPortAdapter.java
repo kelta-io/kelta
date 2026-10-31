@@ -41,8 +41,14 @@ public class CredentialResolverPortAdapter implements CredentialResolverPort {
 
     @Override
     public ResolvedCredential resolve(String tenantId, String reference, String purpose) {
+        return resolve(tenantId, reference, purpose, null);
+    }
+
+    /** As the three-argument form, with {@code actorUserId} recorded as the audit row's user. */
+    @Override
+    public ResolvedCredential resolve(String tenantId, String reference, String purpose, String actorUserId) {
         ResolvedCredential base = resolver.resolve(
-            tenantId, reference, ResolutionContext.forUser(null, purpose));
+            tenantId, reference, ResolutionContext.forUser(actorUserId, purpose));
 
         if (!isOAuthType(base.type())) {
             return base;

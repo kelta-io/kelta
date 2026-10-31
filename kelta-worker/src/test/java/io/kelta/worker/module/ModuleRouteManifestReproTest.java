@@ -24,7 +24,7 @@ class ModuleRouteManifestReproTest {
     @DisplayName("every declared billing route resolves to its handler")
     void everyDeclaredRouteResolves() throws Exception {
         String json = Files.readString(
-                Path.of("../kelta-modules/billing/src/main/resources/kelta-module.json"));
+                Path.of("../kelta-modules/billing-jar/src/main/resources/kelta-module.json"));
         var manifest = new ModuleManifestParser(new ObjectMapper()).parse(json);
 
         var registry = new ModuleRouteRegistry();

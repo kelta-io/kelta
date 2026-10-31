@@ -5,7 +5,13 @@ import { useApi } from '../../context/ApiContext'
 import { ConfirmDialog, LoadingSpinner, ErrorMessage } from '../../components'
 import { componentRegistry } from '../../services/componentRegistry'
 import { Button } from '@/components/ui/button'
+import { ExternalModuleInstall } from './ExternalModuleInstall'
+import { ExternalModuleUpgradeDialog } from './ExternalModuleUpgradeDialog'
+import { ExternalModuleUninstallDialog } from './ExternalModuleUninstallDialog'
+import { ExternalModuleHealth } from './ExternalModuleHealth'
 import {
+  ArrowUpCircle,
+  Globe,
   Package,
   Power,
   PowerOff,
@@ -50,7 +56,13 @@ interface TenantModule {
   installedBy: string
   installedAt: string
   updatedAt: string
-  actions: ModuleAction[]
+  /** Absent from rows a worker older than part 9e lists. */
+  actions?: ModuleAction[]
+  /** An external module's base URL (an HTTPS service installed by URL); null for a JAR module. */
+  baseUrl?: string | null
+  protocolVersion?: number | null
+  /** SHA-256 of the external module's pinned admin UI bundle, the one approved at install. */
+  uiBundleSha256?: string | null
   /** Why the last load failed (QUARANTINED reason, or the transient error being retried). */
   lastError?: string | null
   lastErrorAt?: string | null
@@ -128,6 +140,20 @@ function statusBadge(status: string) {
   }
 }
 
+/** What a module's `lastError` means in its status. */
+function lastErrorPrefix(status: string): string {
+  switch (status) {
+    case 'QUARANTINED':
+      return 'Quarantined: '
+    case 'DEGRADED':
+      return 'Not answering, calls are failing fast: '
+    case 'FAILED':
+      return 'Install did not finish: '
+    default:
+      return 'Temporarily unavailable, retrying automatically: '
+  }
+}
+
 export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): React.ReactElement {
   const { apiClient } = useApi()
   const queryClient = useQueryClient()
@@ -141,6 +167,9 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
   const [expandedModule, setExpandedModule] = useState<string | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [moduleToDelete, setModuleToDelete] = useState<TenantModule | null>(null)
+  const [installMode, setInstallMode] = useState<'url' | 'jar'>('url')
+  const [moduleToUpgrade, setModuleToUpgrade] = useState<TenantModule | null>(null)
+  const [externalToUninstall, setExternalToUninstall] = useState<TenantModule | null>(null)
 
   const {
     data: modules,
@@ -149,7 +178,8 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
     refetch,
   } = useQuery({
     queryKey: ['modules'],
-    queryFn: () => apiClient.get<TenantModule[]>('/api/modules'),
+    // getList, not get: the worker answers a JSON:API collection, which get leaves wrapped.
+    queryFn: () => apiClient.getList<TenantModule>('/api/modules'),
   })
 
   const installMutation = useMutation({
@@ -293,7 +323,11 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
             Install and manage runtime modules that extend flow capabilities
           </p>
         </div>
-        <Button onClick={() => setIsInstallOpen(true)} className="gap-2">
+        <Button
+          onClick={() => setIsInstallOpen(true)}
+          className="gap-2"
+          data-testid="install-button"
+        >
           <Plus size={16} />
           Install Module
         </Button>
@@ -304,116 +338,148 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
         <div className="mb-6 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
           <h2 className="mb-4 text-lg font-medium text-gray-900">Install Module</h2>
 
-          <div className="space-y-4">
-            <div>
-              <label
-                htmlFor="module-manifest"
-                className="mb-1 block text-sm font-medium text-gray-700"
-              >
-                Module Manifest (JSON) *
-              </label>
-              <textarea
-                id="module-manifest"
-                value={manifestInput}
-                onChange={(e) => setManifestInput(e.target.value)}
-                className="h-40 w-full rounded-md border border-gray-300 p-3 font-mono text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                placeholder='{"id": "my-module", "name": "My Module", "version": "1.0.0", ...}'
-              />
-            </div>
-
-            <div>
-              <label htmlFor="module-jar" className="mb-1 block text-sm font-medium text-gray-700">
-                Module JAR
-              </label>
-              <input
-                id="module-jar"
-                type="file"
-                accept=".jar"
-                onChange={(e) => setJarFile(e.target.files?.[0] ?? null)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-              {!jarFile && (
-                <p className="mt-1 text-xs text-amber-700">
-                  Without a JAR the module has no implementation. It installs, but every action it
-                  declares is quarantined and will refuse to run.
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label
-                htmlFor="module-signature"
-                className="mb-1 block text-sm font-medium text-gray-700"
-              >
-                Publisher Signature (base64)
-              </label>
-              <input
-                id="module-signature"
-                type="text"
-                value={signatureInput}
-                onChange={(e) => setSignatureInput(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                placeholder="detached Ed25519 signature over the JAR bytes"
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                The signature is the trust boundary: a module runs with the worker&apos;s full
-                access, and its UI bundle runs in your session. Required when this tenant has a
-                signing key registered.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label
-                  htmlFor="module-source-url"
-                  className="mb-1 block text-sm font-medium text-gray-700"
-                >
-                  Source URL
-                </label>
-                <input
-                  id="module-source-url"
-                  type="text"
-                  value={sourceUrlInput}
-                  onChange={(e) => setSourceUrlInput(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  placeholder="https://modules.example.com/module.jar"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="module-checksum"
-                  className="mb-1 block text-sm font-medium text-gray-700"
-                >
-                  SHA-256 Checksum
-                </label>
-                <input
-                  id="module-checksum"
-                  type="text"
-                  value={checksumInput}
-                  onChange={(e) => setChecksumInput(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  placeholder="a1b2c3d4e5f6..."
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setIsInstallOpen(false)
-                  setManifestInput('')
-                  setSourceUrlInput('')
-                  setChecksumInput('')
-                }}
-              >
-                Cancel
-              </Button>
-              <Button onClick={handleInstall} disabled={installMutation.isPending}>
-                {installMutation.isPending ? 'Installing...' : 'Install'}
-              </Button>
-            </div>
+          <div className="mb-4 flex gap-2" role="tablist" aria-label="Install from">
+            <Button
+              role="tab"
+              aria-selected={installMode === 'url'}
+              variant={installMode === 'url' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setInstallMode('url')}
+              data-testid="install-mode-url"
+            >
+              From URL
+            </Button>
+            <Button
+              role="tab"
+              aria-selected={installMode === 'jar'}
+              variant={installMode === 'jar' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setInstallMode('jar')}
+              data-testid="install-mode-jar"
+            >
+              JAR (legacy)
+            </Button>
           </div>
+
+          {installMode === 'url' && (
+            <ExternalModuleInstall onDone={() => setIsInstallOpen(false)} />
+          )}
+
+          {installMode === 'jar' && (
+            <div className="space-y-4">
+              <div>
+                <label
+                  htmlFor="module-manifest"
+                  className="mb-1 block text-sm font-medium text-gray-700"
+                >
+                  Module Manifest (JSON) *
+                </label>
+                <textarea
+                  id="module-manifest"
+                  value={manifestInput}
+                  onChange={(e) => setManifestInput(e.target.value)}
+                  className="h-40 w-full rounded-md border border-gray-300 p-3 font-mono text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  placeholder='{"id": "my-module", "name": "My Module", "version": "1.0.0", ...}'
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="module-jar"
+                  className="mb-1 block text-sm font-medium text-gray-700"
+                >
+                  Module JAR
+                </label>
+                <input
+                  id="module-jar"
+                  type="file"
+                  accept=".jar"
+                  onChange={(e) => setJarFile(e.target.files?.[0] ?? null)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                {!jarFile && (
+                  <p className="mt-1 text-xs text-amber-700">
+                    Without a JAR the module has no implementation. It installs, but every action it
+                    declares is quarantined and will refuse to run.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label
+                  htmlFor="module-signature"
+                  className="mb-1 block text-sm font-medium text-gray-700"
+                >
+                  Publisher Signature (base64)
+                </label>
+                <input
+                  id="module-signature"
+                  type="text"
+                  value={signatureInput}
+                  onChange={(e) => setSignatureInput(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  placeholder="detached Ed25519 signature over the JAR bytes"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  The signature is the trust boundary: a module runs with the worker&apos;s full
+                  access, and its UI bundle runs in your session. Required when this tenant has a
+                  signing key registered.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label
+                    htmlFor="module-source-url"
+                    className="mb-1 block text-sm font-medium text-gray-700"
+                  >
+                    Source URL
+                  </label>
+                  <input
+                    id="module-source-url"
+                    type="text"
+                    value={sourceUrlInput}
+                    onChange={(e) => setSourceUrlInput(e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="https://modules.example.com/module.jar"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="module-checksum"
+                    className="mb-1 block text-sm font-medium text-gray-700"
+                  >
+                    SHA-256 Checksum
+                  </label>
+                  <input
+                    id="module-checksum"
+                    type="text"
+                    value={checksumInput}
+                    onChange={(e) => setChecksumInput(e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="a1b2c3d4e5f6..."
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setIsInstallOpen(false)
+                    setManifestInput('')
+                    setSourceUrlInput('')
+                    setChecksumInput('')
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button onClick={handleInstall} disabled={installMutation.isPending}>
+                  {installMutation.isPending ? 'Installing...' : 'Install'}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -499,6 +565,15 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
                       <h3 className="text-base font-medium text-gray-900">{mod.name}</h3>
                       <span className="text-xs text-gray-500">v{mod.version}</span>
                       {statusBadge(mod.status)}
+                      {mod.baseUrl && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700"
+                          data-testid={`module-external-${mod.moduleId}`}
+                        >
+                          <Globe size={12} />
+                          External
+                        </span>
+                      )}
                       {mod.status === 'ACTIVE' && mod.loadRetrying && (
                         <span
                           className="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800"
@@ -514,20 +589,21 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
                     )}
                     {mod.lastError &&
                       (mod.status === 'QUARANTINED' ||
+                        mod.status === 'DEGRADED' ||
+                        mod.status === 'FAILED' ||
                         (mod.status === 'ACTIVE' && mod.loadRetrying)) && (
                         <p
                           className="mt-0.5 text-xs text-red-700"
                           data-testid={`module-last-error-${mod.moduleId}`}
                         >
-                          {mod.status === 'QUARANTINED'
-                            ? 'Quarantined: '
-                            : 'Temporarily unavailable, retrying automatically: '}
+                          {lastErrorPrefix(mod.status)}
                           {mod.lastError}
                         </p>
                       )}
                     <p className="mt-0.5 text-xs text-gray-400">
-                      {mod.actions.length} action{mod.actions.length !== 1 ? 's' : ''} &middot;
-                      Installed {new Date(mod.installedAt).toLocaleDateString()}
+                      {(mod.actions ?? []).length} action
+                      {(mod.actions ?? []).length !== 1 ? 's' : ''} &middot; Installed{' '}
+                      {new Date(mod.installedAt).toLocaleDateString()}
                     </p>
                   </div>
                 </div>
@@ -545,7 +621,19 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
                       Retry now
                     </Button>
                   )}
-                  {mod.status === 'ACTIVE' ? (
+                  {mod.baseUrl && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setModuleToUpgrade(mod)}
+                      className="gap-1"
+                      data-testid={`module-check-upgrade-${mod.moduleId}`}
+                    >
+                      <ArrowUpCircle size={14} />
+                      Upgrade
+                    </Button>
+                  )}
+                  {mod.status === 'ACTIVE' || mod.status === 'DEGRADED' ? (
                     <Button
                       variant="outline"
                       size="sm"
@@ -565,16 +653,25 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
                       className="gap-1"
                     >
                       <Power size={14} />
-                      {mod.status === 'QUARANTINED' ? 'Re-enable' : 'Enable'}
+                      {mod.status === 'QUARANTINED'
+                        ? 'Re-enable'
+                        : mod.status === 'FAILED' && mod.baseUrl
+                          ? 'Retry install'
+                          : 'Enable'}
                     </Button>
                   )}
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => {
+                      if (mod.baseUrl) {
+                        setExternalToUninstall(mod)
+                        return
+                      }
                       setModuleToDelete(mod)
                       setDeleteDialogOpen(true)
                     }}
+                    aria-label={`Uninstall ${mod.name}`}
                     className="gap-1 text-red-600 hover:bg-red-50 hover:text-red-700"
                   >
                     <Trash2 size={14} />
@@ -595,42 +692,80 @@ export function ModulesPage({ testId = 'modules-page' }: ModulesPageProps): Reac
 
               {/* Expanded Actions List */}
               {expandedModule === mod.id && (
-                <div className="border-t border-gray-100 px-6 py-4">
-                  <h4 className="mb-3 text-sm font-medium text-gray-700">Action Handlers</h4>
-                  {mod.actions.length === 0 ? (
-                    <p className="text-sm text-gray-400">No action handlers declared</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {mod.actions.map((action) => (
-                        <div
-                          key={action.id}
-                          className="flex items-center justify-between rounded-md bg-gray-50 px-4 py-2.5"
-                        >
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <code className="rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-700">
-                                {action.actionKey}
-                              </code>
-                              <span className="text-sm text-gray-900">{action.name}</span>
-                            </div>
-                            {action.description && (
-                              <p className="mt-0.5 text-xs text-gray-500">{action.description}</p>
-                            )}
-                          </div>
-                          {action.category && (
-                            <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-600">
-                              {action.category}
-                            </span>
+                <div className="space-y-4 border-t border-gray-100 px-6 py-4">
+                  {mod.baseUrl && (
+                    <div className="space-y-3">
+                      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-xs">
+                        <dt className="text-gray-500">Base URL</dt>
+                        <dd className="break-all text-gray-900">{mod.baseUrl}</dd>
+                        <dt className="text-gray-500">Admin UI bundle</dt>
+                        <dd className="break-all text-gray-900">
+                          {mod.uiBundleSha256 ? (
+                            <>
+                              pinned, SHA-256 <code>{mod.uiBundleSha256}</code>
+                            </>
+                          ) : (
+                            'none'
                           )}
-                        </div>
-                      ))}
+                        </dd>
+                      </dl>
+                      <ExternalModuleHealth moduleId={mod.moduleId} />
                     </div>
                   )}
+                  <div>
+                    <h4 className="mb-3 text-sm font-medium text-gray-700">Action Handlers</h4>
+                    {(mod.actions ?? []).length === 0 ? (
+                      <p className="text-sm text-gray-400">No action handlers declared</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {(mod.actions ?? []).map((action) => (
+                          <div
+                            key={action.id}
+                            className="flex items-center justify-between rounded-md bg-gray-50 px-4 py-2.5"
+                          >
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <code className="rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-700">
+                                  {action.actionKey}
+                                </code>
+                                <span className="text-sm text-gray-900">{action.name}</span>
+                              </div>
+                              {action.description && (
+                                <p className="mt-0.5 text-xs text-gray-500">{action.description}</p>
+                              )}
+                            </div>
+                            {action.category && (
+                              <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-600">
+                                {action.category}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
           ))}
         </div>
+      )}
+
+      {moduleToUpgrade?.baseUrl && (
+        <ExternalModuleUpgradeDialog
+          moduleId={moduleToUpgrade.moduleId}
+          name={moduleToUpgrade.name}
+          baseUrl={moduleToUpgrade.baseUrl}
+          onClose={() => setModuleToUpgrade(null)}
+        />
+      )}
+
+      {externalToUninstall && (
+        <ExternalModuleUninstallDialog
+          moduleId={externalToUninstall.moduleId}
+          name={externalToUninstall.name}
+          onClose={() => setExternalToUninstall(null)}
+        />
       )}
 
       {/* Delete Confirmation */}

@@ -170,8 +170,14 @@ The tenant predicate depends on how the row reaches its tenant:
 bootstrap) bind no tenant, which is the `''` sentinel — a table with only
 `tenant_isolation` returns zero rows to them and silently drops their writes.
 `kelta_pinned_tenant()` (V201) makes a per-tenant database login unable to `SET` its way
-out; prefer it over the raw GUC, falling back to the GUC alone only where the function may
-not exist (`kelta-ai`'s own migrations).
+out. Every kelta-worker migration that creates a policy writes it with the pinned expressions
+above, copied verbatim — never the plain `current_setting(...)` shape of an older migration;
+fall back to the GUC alone only where the function may not exist (`kelta-ai`'s own
+migrations). V201 rewrote the policies that existed when it ran, so a table created later in
+the old shape is open to a pinned login that sets the GUC to `''` (three were, V224 re-pinned
+them). `RowLevelSecurityIntegrationTest.everyGucPolicyIsPinned` fails the build on any
+`public` policy whose `USING` or `WITH CHECK` reads `app.current_tenant_id` without
+`kelta_pinned_tenant()`.
 
 `RowLevelSecurityIntegrationTest.everyTenantDerivedTableIsCovered` derives the set of
 tables this applies to from the catalog — a `tenant_id` column, or an `ON DELETE CASCADE`
@@ -240,6 +246,11 @@ FLS/Cerbos check (masking-configured collections already suppress `data`). Front
 consumers therefore NEVER write pushed `data` into caches — on `record.changed`, invalidate
 the matching React Query keys (`src/realtime/invalidation.ts` is the canonical mapping) and
 let the refetch go through the authorized JSON:API path where per-viewer authz applies.
+
+A view that must stay live subscribes its collection with `useRealtimeCollection(name)`
+(`src/realtime/`). Subscriptions are ref-counted in `RealtimeClient`, so a view releasing its
+ref never drops one the provider holds for the nav. `RecordShell` (via its `collectionName`
+prop) and `useRecordListModel` already do this — don't re-subscribe from a page.
 
 ### Conversation-scoped socket events (chat)
 

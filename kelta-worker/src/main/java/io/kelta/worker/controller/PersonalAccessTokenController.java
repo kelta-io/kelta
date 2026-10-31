@@ -171,7 +171,7 @@ public class PersonalAccessTokenController {
             minted = issueToken(userId, tenantId, name.trim(), scopes,
                     Instant.now().plus(expiresInDays, ChronoUnit.DAYS), actorId, eventType, "name=" + name.trim());
         } catch (ResponseStatusException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", String.valueOf(e.getReason())));
+            return ResponseEntity.status(e.getStatusCode()).body(Map.of("error", String.valueOf(e.getReason())));
         }
         return ResponseEntity.ok(Map.of(
                 "token", minted.token(),
@@ -190,7 +190,10 @@ public class PersonalAccessTokenController {
      * Must run with {@code tenantId} bound (RLS on {@code platform_user} / {@code user_api_token}).
      *
      * @throws ResponseStatusException 400 when the user does not exist in the tenant or already has
-     *                                 the maximum number of live tokens
+     *                                 the maximum number of live tokens; 403 for a {@code SERVICE} user —
+     *                                 a module service principal never holds a stored credential (its
+     *                                 short-lived token comes with every call), so neither it nor an
+     *                                 admin on its behalf can mint one
      * @throws UniqueConstraintViolationException when the user already has a token with {@code name}
      */
     public MintedToken issueToken(String userId, String tenantId, String name, List<String> scopes,
@@ -198,9 +201,13 @@ public class PersonalAccessTokenController {
                                   String auditDetail) {
         // Get user email for Redis cache
         var userResult = jdbcTemplate.queryForList(
-                "SELECT email FROM platform_user WHERE id = ? AND tenant_id = ?", userId, tenantId);
+                "SELECT email, user_type FROM platform_user WHERE id = ? AND tenant_id = ?", userId, tenantId);
         if (userResult.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "User not found");
+        }
+        if ("SERVICE".equals(userResult.get(0).get("user_type"))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Service principals cannot hold personal access tokens");
         }
         String userEmail = (String) userResult.get(0).get("email");
 

@@ -1,13 +1,21 @@
 package io.kelta.worker.controller;
 
+import io.kelta.jsonapi.JsonApiResponseBuilder;
 import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.workflow.ActionResult;
+import io.kelta.runtime.workflow.ModuleTimeoutException;
+import io.kelta.worker.module.ExternalModuleProxy;
 import io.kelta.worker.module.RuntimeModuleManager;
+import io.kelta.worker.repository.BootstrapRepository;
+import io.kelta.worker.service.CerbosPermissionResolver;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -16,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -63,8 +72,22 @@ public class ModuleHttpController {
      */
     private final ObjectProvider<RuntimeModuleManager> runtimeModuleManager;
 
+    /** External modules (part 9d); null when module support is switched off. */
+    private ExternalModuleProxy externalModules;
+    private CerbosPermissionResolver permissionResolver;
+    private BootstrapRepository bootstrapRepository;
+
     public ModuleHttpController(ObjectProvider<RuntimeModuleManager> runtimeModuleManager) {
         this.runtimeModuleManager = runtimeModuleManager;
+    }
+
+    /** Injected via setter so the existing constructor stays as it is; absent without module support. */
+    @Autowired(required = false)
+    public void setExternalModules(ExternalModuleProxy externalModules, CerbosPermissionResolver permissionResolver,
+                                   BootstrapRepository bootstrapRepository) {
+        this.externalModules = externalModules;
+        this.permissionResolver = permissionResolver;
+        this.bootstrapRepository = bootstrapRepository;
     }
 
     // Depth-1..3 patterns are listed explicitly and the catch-all only backstops deeper paths.
@@ -87,6 +110,10 @@ public class ModuleHttpController {
             log.warn("Refusing {} {}: it does not sit under this module's own route prefix",
                     request.getMethod(), request.getRequestURI());
             return ResponseEntity.notFound().build();
+        }
+
+        if (externalModules != null && externalModules.isExternal(tenantId, moduleId)) {
+            return proxy(tenantId, moduleId, path, rawBody, request);
         }
 
         RuntimeModuleManager manager = runtimeModuleManager.getIfAvailable();
@@ -137,6 +164,56 @@ public class ModuleHttpController {
                     .body(Map.of("error", "The module returned an oversized response"));
         }
         return ResponseEntity.ok(output == null ? Map.of() : output);
+    }
+
+    /**
+     * An external module's route: forwarded to {@code {baseUrl}/kelta/v1/routes/<path>}, and the
+     * module's status and JSON body passed back ({@link ExternalModuleProxy#route}).
+     */
+    private ResponseEntity<?> proxy(String tenantId, String moduleId, String path, String rawBody,
+                                    HttpServletRequest request) {
+        String profileId = permissionResolver == null ? null : permissionResolver.getProfileId(request);
+        ExternalModuleProxy.RouteOutcome outcome;
+        try {
+            outcome = externalModules.route(tenantId, moduleId, request.getMethod(),
+                    path.startsWith("/") ? path.substring(1) : path, request.getQueryString(),
+                    rawBody == null ? null : rawBody.getBytes(StandardCharsets.UTF_8), request.getContentType(),
+                    permission -> holds(profileId, permission), profileId);
+        } catch (ModuleTimeoutException e) {
+            // A module that timed out answered nothing: the protocol makes that the caller's 502.
+            log.warn("External module '{}' of tenant {} timed out serving {} {}", moduleId, tenantId,
+                    request.getMethod(), path);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(JsonApiResponseBuilder.error("502",
+                    "ModuleUnreachable", "Bad Gateway", "Module '" + moduleId + "' did not answer in time"));
+        }
+        // ModuleUnavailableException (breaker open, unreachable) propagates to the global 503.
+        if (outcome.refusal() == ExternalModuleProxy.Refusal.NOT_FOUND) {
+            return ResponseEntity.notFound().build();
+        }
+        if (outcome.refusal() == ExternalModuleProxy.Refusal.FORBIDDEN) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(JsonApiResponseBuilder.error("403",
+                    "FORBIDDEN", "Forbidden", outcome.permission() + " permission required"));
+        }
+        ExternalModuleProxy.Forwarded forwarded = outcome.forwarded();
+        if (forwarded.status() >= 500) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(JsonApiResponseBuilder.error("502",
+                    "ModuleUnreachable", "Bad Gateway", "Module '" + moduleId + "' failed to handle this request"));
+        }
+        // Always JSON and never sniffed: the body is the module's, served from the platform origin.
+        return ResponseEntity.status(forwarded.status())
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("X-Content-Type-Options", "nosniff")
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(forwarded.body() == null ? new byte[0] : forwarded.body());
+    }
+
+    /** Whether the caller's profile holds a system permission. Fail-closed without a profile. */
+    private boolean holds(String profileId, String permission) {
+        if (profileId == null || profileId.isBlank() || bootstrapRepository == null) {
+            return false;
+        }
+        return bootstrapRepository.findProfileSystemPermissions(profileId).stream()
+                .anyMatch(p -> permission.equals(p.get("permission_name")) && Boolean.TRUE.equals(p.get("granted")));
     }
 
     /**

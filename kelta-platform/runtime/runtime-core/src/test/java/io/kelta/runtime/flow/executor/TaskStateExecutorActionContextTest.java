@@ -54,5 +54,7 @@ class TaskStateExecutorActionContextTest {
         assertThat(seen.get().tenantId()).isEqualTo("tenant-1");
         assertThat(seen.get().workflowRuleId()).isEqualTo("flow-7");
         assertThat(seen.get().executionLogId()).isEqualTo("exec-42");
+        assertThat(seen.get().stepName()).isEqualTo("Step");
+        assertThat(seen.get().attempt()).isEqualTo(1);
     }
 }

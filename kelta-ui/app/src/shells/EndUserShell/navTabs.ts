@@ -147,3 +147,16 @@ export function buildNavTabs(menus: MenuConfig[] | undefined): NavTab[] {
   }
   return tabs
 }
+
+/**
+ * Collection names the nav points at, group children included, in nav order without
+ * duplicates. A group tab holds its collections in `children`, so reading only top-level
+ * `collection` tabs misses every grouped one.
+ */
+export function navCollections(tabs: NavTab[]): string[] {
+  const names = tabs
+    .flatMap((tab) => (tab.kind === 'group' ? (tab.children ?? []) : [tab]))
+    .filter((tab) => tab.kind === 'collection')
+    .map((tab) => tab.target)
+  return [...new Set(names)]
+}

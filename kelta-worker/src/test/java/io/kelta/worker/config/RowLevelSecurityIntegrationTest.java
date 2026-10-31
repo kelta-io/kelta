@@ -78,6 +78,12 @@ class RowLevelSecurityIntegrationTest {
     static final String CREDENTIAL_A = "aaaaaaaa-0000-0000-0000-000000000c01";
     static final String CREDENTIAL_B = "bbbbbbbb-0000-0000-0000-000000000c01";
     static final String TEMPLATE_B = "bbbbbbbb-0000-0000-0000-00000000b001";
+    static final String NOTIFICATION_A = "aaaaaaaa-0000-0000-0000-000000000a11";
+    static final String NOTIFICATION_B = "bbbbbbbb-0000-0000-0000-000000000a11";
+    static final String MODULE_A = "aaaaaaaa-0000-0000-0000-000000000d11";
+    static final String MODULE_B = "bbbbbbbb-0000-0000-0000-000000000d11";
+    static final String DEAD_LETTER_A = "aaaaaaaa-0000-0000-0000-000000000e11";
+    static final String DEAD_LETTER_B = "bbbbbbbb-0000-0000-0000-000000000e11";
 
     /** Container superuser: runs the migrations and plants the fixtures (bypasses RLS). */
     static JdbcTemplate admin;
@@ -160,11 +166,27 @@ class RowLevelSecurityIntegrationTest {
         // Tenant B's own override of a platform default template (seeded by V167 under 'system').
         admin.update("INSERT INTO email_template (id, tenant_id, name, subject, body_html, template_key) "
                 + "VALUES (?, ?, 'Invite (B)', 'B subject', '<p>B</p>', 'portal.invite')", TEMPLATE_B, TENANT_B);
+
+        // Rows on tables created after V201's one-time policy rewrite (V214, V222), whose
+        // policies V224 had to pin after the fact.
+        for (String[] t : new String[][]{
+                {TENANT_A, USER_A, NOTIFICATION_A, MODULE_A, DEAD_LETTER_A},
+                {TENANT_B, USER_B, NOTIFICATION_B, MODULE_B, DEAD_LETTER_B}}) {
+            admin.update("INSERT INTO notification (id, tenant_id, recipient_id, title, body) "
+                    + "VALUES (?, ?, ?, 'Title', 'Body')", t[2], t[0], t[1]);
+            admin.update("INSERT INTO tenant_module (id, tenant_id, module_id, name, version, source_url, "
+                    + "manifest, installed_by) VALUES (?, ?, 'sample', 'Sample', '1.0.0', "
+                    + "'https://modules.example/sample', '{}'::jsonb, ?)", t[3], t[0], t[1]);
+            admin.update("INSERT INTO module_event_dead_letter (id, tenant_id, tenant_module_id, event_id, "
+                    + "payload, attempts) VALUES (?, ?, ?, 'event-1', '{}'::jsonb, 5)", t[4], t[0], t[3]);
+        }
+
         // A direct per-tenant login of the kind SupersetDatabaseUserService creates: public SELECT,
         // no wrapper, and pinned to tenant A through tenant_db_role (V201) rather than the GUC.
         admin.execute("CREATE ROLE pinned_a LOGIN PASSWORD 'pinned_a' NOBYPASSRLS");
         admin.execute("GRANT USAGE ON SCHEMA public TO pinned_a");
-        admin.execute("GRANT SELECT ON page_layout, platform_user, ui_page, collection, field TO pinned_a");
+        admin.execute("GRANT SELECT ON page_layout, platform_user, ui_page, collection, field, "
+                + "notification, module_event_dead_letter TO pinned_a");
         admin.update("INSERT INTO tenant_db_role (role_name, tenant_id) VALUES ('pinned_a', ?)", TENANT_A);
 
         // One pooled physical connection, reused by every borrow — the shape in which a
@@ -481,6 +503,128 @@ class RowLevelSecurityIntegrationTest {
         } finally {
             direct.destroy();
         }
+    }
+
+    @Test
+    @DisplayName("every policy keyed on app.current_tenant_id also consults kelta_pinned_tenant()")
+    void everyGucPolicyIsPinned() {
+        // V201 rewrote the policies that existed when it ran. A table created later that copies
+        // the plain current_setting(...) shape gives a pinned login a way out: SET the GUC to ''
+        // (admin_bypass) or to another tenant's id. Checked per expression, so a pinned USING
+        // beside an unpinned WITH CHECK fails too.
+        List<String> unpinned = admin.queryForList("""
+                SELECT tablename || '.' || policyname
+                FROM pg_policies
+                WHERE schemaname = 'public'
+                  AND ((qual LIKE '%app.current_tenant_id%'
+                        AND qual NOT LIKE '%kelta_pinned_tenant%')
+                    OR (with_check LIKE '%app.current_tenant_id%'
+                        AND with_check NOT LIKE '%kelta_pinned_tenant%'))
+                ORDER BY 1
+                """, String.class);
+        assertThat(unpinned)
+                .as("policies keyed on app.current_tenant_id alone — write them with the pinned "
+                        + "expressions (conventions.md → Row-level security)")
+                .isEmpty();
+        // Sanity: the check is not vacuous — the patterns match the catalog's deparsed text.
+        assertThat(admin.queryForObject(
+                "SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND qual LIKE '%kelta_pinned_tenant%'",
+                Integer.class))
+                .isGreaterThan(135);
+    }
+
+    @Test
+    @DisplayName("a pinned role sees only its own tenant on tables created after V201, whatever it sets the GUC to")
+    void pinnedRoleCannotHopTenantsOnTablesCreatedAfterV201() {
+        SingleConnectionDataSource direct = new SingleConnectionDataSource(
+                POSTGRES.getJdbcUrl(), "pinned_a", "pinned_a", true);
+        direct.setDriverClassName("org.postgresql.Driver");
+        try {
+            JdbcTemplate pinned = new JdbcTemplate(direct);
+            // The two ways out for an unpinned role: blank the setting (admin_bypass), or name
+            // another tenant outright.
+            for (String guc : new String[]{"", TENANT_B}) {
+                pinned.execute("SET app.current_tenant_id = '" + guc + "'");
+                assertThat(pinned.queryForList("SELECT id FROM notification WHERE id IN (?, ?)", String.class,
+                        NOTIFICATION_A, NOTIFICATION_B))
+                        .as("notification with app.current_tenant_id = '%s'", guc)
+                        .containsExactly(NOTIFICATION_A);
+                assertThat(pinned.queryForList("SELECT id FROM module_event_dead_letter WHERE id IN (?, ?)",
+                        String.class, DEAD_LETTER_A, DEAD_LETTER_B))
+                        .as("module_event_dead_letter with app.current_tenant_id = '%s'", guc)
+                        .containsExactly(DEAD_LETTER_A);
+                assertThat(pinned.queryForList("SELECT DISTINCT tenant_id FROM notification", String.class))
+                        .as("unfiltered notification read with app.current_tenant_id = '%s'", guc)
+                        .containsExactly(TENANT_A);
+            }
+        } finally {
+            direct.destroy();
+        }
+    }
+
+    @Test
+    @DisplayName("V224 pins any policy left in the pre-V201 shape, expression by expression, and is idempotent")
+    void v224PinsUnpinnedPoliciesGenericallyAndIdempotently() throws Exception {
+        String v224 = new String(getClass().getResourceAsStream(
+                "/db/migration/V224__rls_pin_late_policies.sql").readAllBytes(),
+                java.nio.charset.StandardCharsets.UTF_8);
+        // The migrating role, on one connection. DDL is transactional and both transactions roll
+        // back, so the throwaway tables and policies are never visible to another test.
+        SingleConnectionDataSource owner = new SingleConnectionDataSource(
+                POSTGRES.getJdbcUrl(), "app_rls", "app_rls", true);
+        owner.setDriverClassName("org.postgresql.Driver");
+        JdbcTemplate migrator = new JdbcTemplate(owner);
+        TransactionTemplate tx = new TransactionTemplate(new DataSourceTransactionManager(owner));
+        String plain = "((tenant_id)::text = current_setting('app.current_tenant_id'::text, true))";
+        try {
+            tx.executeWithoutResult(status -> {
+                status.setRollbackOnly();
+                migrator.execute("CREATE TABLE late_tenant_table "
+                        + "(id varchar(36) PRIMARY KEY, tenant_id varchar(36) NOT NULL)");
+                migrator.execute("ALTER TABLE late_tenant_table ENABLE ROW LEVEL SECURITY");
+                migrator.execute("CREATE POLICY tenant_isolation ON late_tenant_table FOR ALL "
+                        + "USING " + plain + " WITH CHECK " + plain);
+                migrator.execute("CREATE POLICY admin_bypass ON late_tenant_table "
+                        + "USING (current_setting('app.current_tenant_id'::text, true) = ''::text)");
+                migrator.execute("CREATE POLICY tenant_insert ON late_tenant_table FOR INSERT WITH CHECK " + plain);
+
+                migrator.execute(v224);
+                migrator.execute(v224);
+
+                Map<String, Map<String, Object>> policies = new HashMap<>();
+                migrator.queryForList("SELECT policyname, qual, with_check FROM pg_policies "
+                                + "WHERE schemaname = 'public' AND tablename = 'late_tenant_table'")
+                        .forEach(row -> policies.put((String) row.get("policyname"), row));
+                assertThat(policies).containsOnlyKeys("tenant_isolation", "admin_bypass", "tenant_insert");
+                assertThat((String) policies.get("tenant_isolation").get("qual")).contains("kelta_pinned_tenant()");
+                assertThat((String) policies.get("tenant_isolation").get("with_check"))
+                        .as("the WITH CHECK is pinned, not dropped")
+                        .contains("kelta_pinned_tenant()");
+                assertThat((String) policies.get("admin_bypass").get("qual"))
+                        .contains("kelta_pinned_tenant()").contains("IS NULL");
+                assertThat(policies.get("admin_bypass").get("with_check")).isNull();
+                assertThat(policies.get("tenant_insert").get("qual")).as("an INSERT policy gets no USING").isNull();
+                assertThat((String) policies.get("tenant_insert").get("with_check")).contains("kelta_pinned_tenant()");
+            });
+
+            // A GUC-keyed policy on a table with no tenant_id cannot take V201's expression: the
+            // migration stops and names it instead of guessing.
+            assertThatThrownBy(() -> tx.executeWithoutResult(status -> {
+                status.setRollbackOnly();
+                migrator.execute("CREATE TABLE late_child_table (id varchar(36) PRIMARY KEY)");
+                migrator.execute("CREATE POLICY tenant_isolation ON late_child_table "
+                        + "USING (current_setting('app.current_tenant_id'::text, true) <> ''::text)");
+                migrator.execute(v224);
+            }))
+                    .rootCause()
+                    .hasMessageContaining("late_child_table")
+                    .hasMessageContaining("no tenant_id column");
+        } finally {
+            owner.destroy();
+        }
+        assertThat(admin.queryForObject("SELECT to_regclass('public.late_tenant_table') IS NULL", Boolean.class))
+                .as("the throwaway table rolled back")
+                .isTrue();
     }
 
     @Test

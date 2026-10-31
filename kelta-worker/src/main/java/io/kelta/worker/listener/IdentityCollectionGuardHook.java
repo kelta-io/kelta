@@ -9,6 +9,7 @@ import io.kelta.worker.service.delegated.DelegatedWriteContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.stereotype.Component;
@@ -40,6 +41,12 @@ import java.util.Set;
  * <p>Writes with no HTTP request context (NATS listeners, flows, schedulers, provisioning) and
  * request-context writes with no identity headers (SCIM and other internal callers — the gateway
  * always stamps identity on authenticated {@code /api} traffic) are admitted unchanged.
+ *
+ * <p>A {@code SERVICE} user (a module service principal) is never updated or deleted by an API
+ * caller, whatever its permissions: its identity and profile come from the module's approved
+ * manifest and are maintained by {@code ModuleServicePrincipalService} over JDBC. An edit here
+ * would change what the module can do (its profile) or whom it mails as, behind the consent the
+ * admin gave.
  */
 @Component
 public class IdentityCollectionGuardHook implements BeforeSaveHook {
@@ -53,6 +60,8 @@ public class IdentityCollectionGuardHook implements BeforeSaveHook {
     private static final Set<String> AUDIT_FIELDS = Set.of("updatedAt");
 
     private static final String PROFILE_ID_HEADER = "X-User-Profile-Id";
+
+    private static final String SERVICE_USER_TYPE = "SERVICE";
 
     private final BootstrapRepository bootstrapRepository;
 
@@ -81,6 +90,9 @@ public class IdentityCollectionGuardHook implements BeforeSaveHook {
     public BeforeSaveResult beforeUpdate(String collectionName, String id,
                                          Map<String, Object> record,
                                          Map<String, Object> previous, String tenantId) {
+        if ("users".equals(collectionName) && requestProfileId() != null && isServiceUser(previous)) {
+            return serviceUserRefused("update", id);
+        }
         if (isOwnSelfProfileUpdate(collectionName, id, record)) {
             return BeforeSaveResult.ok();
         }
@@ -89,7 +101,30 @@ public class IdentityCollectionGuardHook implements BeforeSaveHook {
 
     @Override
     public BeforeSaveResult beforeDelete(String collectionName, String id, String tenantId) {
-        return guard(collectionName, "delete");
+        BeforeSaveResult result = guard(collectionName, "delete");
+        if (result.isSuccess() && "users".equals(collectionName) && requestProfileId() != null
+                && isServiceUser(id)) {
+            return serviceUserRefused("delete", id);
+        }
+        return result;
+    }
+
+    private static boolean isServiceUser(Map<String, Object> previous) {
+        return previous != null && SERVICE_USER_TYPE.equals(previous.get("userType"));
+    }
+
+    private boolean isServiceUser(String id) {
+        try {
+            return SERVICE_USER_TYPE.equals(bootstrapRepository.getJdbcTemplate().queryForObject(
+                    "SELECT user_type FROM platform_user WHERE id = ?", String.class, id));
+        } catch (EmptyResultDataAccessException e) {
+            return false;
+        }
+    }
+
+    private static BeforeSaveResult serviceUserRefused(String action, String id) {
+        log.warn("Blocked {} of SERVICE user {} through the users collection", action, id);
+        return BeforeSaveResult.error(null, "Service principals are managed by their module");
     }
 
     private BeforeSaveResult guard(String collectionName, String action) {

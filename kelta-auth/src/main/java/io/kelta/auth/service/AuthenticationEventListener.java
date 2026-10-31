@@ -72,7 +72,8 @@ public class AuthenticationEventListener {
         String username = event.getAuthentication().getName();
         List<String> userIds = jdbcTemplate.queryForList(
                 "SELECT pu.id FROM platform_user pu "
-                        + "WHERE (pu.email = ? OR pu.username = ?) AND pu.tenant_id = ? AND pu.status = 'ACTIVE'",
+                        + "WHERE (pu.email = ? OR pu.username = ?) AND pu.tenant_id = ? AND pu.status = 'ACTIVE' "
+                        + "AND pu.user_type <> 'SERVICE'",
                 String.class,
                 username, username, tenantId
         );

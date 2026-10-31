@@ -26,7 +26,8 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * Fetches URLs that come from tenant or administrator configuration, with every target checked
- * by an {@link OutboundUrlGuard}.
+ * by an {@link OutboundTargetGuard} — normally the {@link OutboundUrlGuard}; module traffic uses
+ * the {@link ModuleHostGuard}.
  *
  * <ul>
  *   <li><b>Every hop is validated.</b> Automatic redirects are off. When {@link Limits#maxRedirects()}
@@ -34,7 +35,8 @@ import java.util.concurrent.TimeoutException;
  *       {@code Location} goes through the guard again before it is requested; a hop to another
  *       origin drops credential headers. With {@code maxRedirects == 0} a redirect response is
  *       returned to the caller like any other status. Other methods never follow redirects.</li>
- *   <li><b>One deadline</b> ({@link Limits#deadline()}) covers every hop, headers and body
+ *   <li><b>One deadline</b> ({@link Limits#deadline()}, or the request's own
+ *       {@link Request#deadline()} when it sets one) covers every hop, headers and body
  *       together, so a slow server cannot hold the caller longer; connects are bounded by
  *       {@link Limits#connectTimeout()}.</li>
  *   <li><b>Bounded body.</b> At most {@link Limits#maxResponseBytes()} are kept; when the server
@@ -58,11 +60,11 @@ public final class OutboundHttpClient {
     private static final Set<String> CREDENTIAL_HEADERS =
             Set.of("authorization", "cookie", "proxy-authorization");
 
-    private final OutboundUrlGuard guard;
+    private final OutboundTargetGuard guard;
     private final Limits limits;
     private final HttpClient httpClient;
 
-    public OutboundHttpClient(OutboundUrlGuard guard, Limits limits) {
+    public OutboundHttpClient(OutboundTargetGuard guard, Limits limits) {
         this.guard = Objects.requireNonNull(guard, "guard");
         this.limits = Objects.requireNonNull(limits, "limits");
         this.httpClient = HttpClient.newBuilder()
@@ -89,14 +91,15 @@ public final class OutboundHttpClient {
      * @throws OutboundRequestException when the request fails, times out or redirects too often
      */
     public Response send(Request request) {
-        long deadline = System.nanoTime() + limits.deadline().toNanos();
+        Duration budget = request.deadline() != null ? request.deadline() : limits.deadline();
+        long deadline = System.nanoTime() + budget.toNanos();
         String method = request.method().toUpperCase(Locale.ROOT);
         boolean followable = limits.maxRedirects() > 0 && (method.equals("GET") || method.equals("HEAD"));
         Map<String, String> headers = new LinkedHashMap<>(request.headers());
 
         URI target = guard.check(request.url());
         for (int redirects = 0; ; redirects++) {
-            Response response = exchange(method, target, headers, request.body(), deadline);
+            Response response = exchange(method, target, headers, request.body(), deadline, budget);
             if (!followable || !isRedirect(response.statusCode())) {
                 return response;
             }
@@ -124,10 +127,10 @@ public final class OutboundHttpClient {
     }
 
     private Response exchange(String method, URI uri, Map<String, String> headers, byte[] body,
-                              long deadline) {
+                              long deadline, Duration budget) {
         long remaining = deadline - System.nanoTime();
         if (remaining <= 0) {
-            throw timedOut();
+            throw timedOut(budget);
         }
         HttpRequest httpRequest;
         try {
@@ -156,7 +159,7 @@ public final class OutboundHttpClient {
             response = pending.get(remaining, TimeUnit.NANOSECONDS);
         } catch (TimeoutException e) {
             pending.cancel(true);
-            throw timedOut();
+            throw timedOut(budget);
         } catch (InterruptedException e) {
             pending.cancel(true);
             Thread.currentThread().interrupt();
@@ -164,7 +167,7 @@ public final class OutboundHttpClient {
         } catch (ExecutionException e) {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             if (cause instanceof HttpTimeoutException) {
-                throw timedOut();
+                throw timedOut(budget);
             }
             throw new OutboundRequestException(OutboundRequestException.Kind.FAILED,
                     cause.getClass().getSimpleName()
@@ -175,9 +178,9 @@ public final class OutboundHttpClient {
                 captured.bytes(), captured.truncated());
     }
 
-    private OutboundRequestException timedOut() {
+    private static OutboundRequestException timedOut(Duration budget) {
         return new OutboundRequestException(OutboundRequestException.Kind.TIMEOUT,
-                "timed out after " + limits.deadline().toMillis() + " ms");
+                "timed out after " + budget.toMillis() + " ms");
     }
 
     private static boolean isRedirect(int status) {
@@ -215,11 +218,23 @@ public final class OutboundHttpClient {
         }
     }
 
-    /** An outbound request. {@code body} may be {@code null}. */
-    public record Request(String method, String url, Map<String, String> headers, byte[] body) {
+    /**
+     * An outbound request. {@code body} may be {@code null}. {@code deadline}, when set, replaces
+     * {@link Limits#deadline()} for this request alone (a module call's manifest timeout);
+     * {@code null} keeps the client's.
+     */
+    public record Request(String method, String url, Map<String, String> headers, byte[] body,
+                          Duration deadline) {
         public Request {
             Objects.requireNonNull(method, "method");
             headers = headers == null ? Map.of() : headers;
+            if (deadline != null && (deadline.isNegative() || deadline.isZero())) {
+                throw new IllegalArgumentException("deadline must be positive");
+            }
+        }
+
+        public Request(String method, String url, Map<String, String> headers, byte[] body) {
+            this(method, url, headers, body, null);
         }
     }
 

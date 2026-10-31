@@ -21,7 +21,8 @@ io.kelta.worker/
     email/         ← Email providers (SMTP, templates)
     entitlement/   ← EntitlementService → the tenant's module EntitlementProvider; no module ⇒
                      MemberEntitlements.EMPTY. Billing is NOT compiled in — it is the
-                     kelta-modules/billing runtime module (there is no service/billing/)
+                     kelta-billing module: the Rust external service kelta-modules/billing,
+                     or the legacy JAR kelta-modules/billing-jar (there is no service/billing/)
     push/          ← Push notification providers (FCM, APNs, Web Push)
     sms/           ← SMS providers
 ```
@@ -117,7 +118,7 @@ A presence-gated hook (secret/integration configured) uses `@ConditionalOnProper
 ## When Adding a System Collection
 
 1. Declare it in `runtime-core/.../model/system/` — add a `<name>()` factory to the matching `<Area>SystemCollections` section class via the `systemBuilder(name, displayName, tableName)` helper (`SystemCollectionBuilders`), add it to `SystemCollectionDefinitions.all()`, and update the pinned hash in `SystemCollectionDefinitionsSplitTest` (see `.claude/docs/playbooks.md` §5).
-2. The worker does **NOT** create system tables (Flyway owns them) — ship `src/main/resources/db/migration/V<n>__create_<table>.sql` **and** add the table to the RLS-enable migration (V77-style, table names hardcoded).
+2. The worker does **NOT** create system tables (Flyway owns them) — ship `src/main/resources/db/migration/V<n>__create_<table>.sql` with the table's RLS in the same file: `ENABLE` + `FORCE ROW LEVEL SECURITY` and the `tenant_isolation` / `admin_bypass` pair, using the **pinned** expressions (`kelta_pinned_tenant()`, `.claude/docs/conventions.md` → Row-level security) — never the plain `current_setting(...)` shape some older migrations show. `RowLevelSecurityIntegrationTest` fails the build on a missing pair or an unpinned policy.
 3. Add a `<Name>RefreshHook` `@Component` in `listener/` (see **When Adding a BeforeSaveHook**) that publishes `kelta.config.collection.changed.<id>` (reuse `CollectionConfigEventPublisher.SUBJECT_PREFIX`).
 4. A field that stores a secret, ciphertext or a credential hash is declared `.withServerOnly(true)` (never serialized, never filterable, only a before-save hook may set it), read for real use over JDBC, and added to `SystemCollectionDefinitionsTest.secretMaterialIsServerOnly`. See `.claude/docs/architecture.md` → Server-only fields.
 
@@ -142,6 +143,12 @@ A presence-gated hook (secret/integration configured) uses `@ConditionalOnProper
 | Write-only secret input (not a field) encrypted into a server-only field; plaintext removed before anything else sees it; blank keeps the stored value; refuse, never drop, when encryption is unconfigured | `listener/OidcProviderSecretHook.java` |
 | Fetching a tenant-supplied URL (runtime-core `OutboundHttpClient` + the `OutboundUrlGuard` bean from `config/OutboundConfig`: non-public addresses refused unless allow-listed, redirects re-validated per hop, overall deadline, size cap, tree-model JSON) | `listener/OidcDiscoveryHook.java`, `service/api/ApiSpecService.java` (`fetchSpec`), `service/storage/RestClientExecutor.java`, `service/push/WebPushProvider.java` |
 | Transient vs permanent failure (fail closed on the pod, never persist a terminal status for an infrastructure error, per-pod `@Scheduled` retry with capped backoff, runtime-checked enable flag) | `module/ModuleLoadFailureClassifier.java`, `module/ModuleLoadRetryScheduler.java` |
+| Calling an external service per tenant install (one call path: status gate → token → per-pod circuit breaker → signed HTTP; timeout vs unavailable exceptions; compare-and-set status writes off the caller's transaction; metrics) | `module/ExternalModuleInvoker.java`, `module/ModuleCircuitBreaker.java` |
+| Per-pod registry rebuilt from DB rows (NATS refresh + local read-after-write refresh + periodic reconcile with no tenant bound; re-register only on a fingerprint change; register new before removing old) | `module/ExternalModuleRegistry.java`, `module/ExternalModuleReconcileScheduler.java` |
+| At-least-once JetStream → HTTP delivery (queue-group `EventSubscription.queueGroupWithRedelivery`; throw to nak with the next backoff; on the last attempt write a dead-letter row and return so the message is acked; never on the write path) | `module/ModuleEventDeliveryListener.java`, `module/ModuleEventDeadLetterStore.java` |
+| Pinning third-party bytes by the hash an admin approved (fetch and hash at plan time, store under a hash-named object key, re-hash on every read, never proxy live) | `module/ExternalModuleUiBundles.java` |
+| Handing secret material to an external caller (every check before decrypting, read through `CredentialResolverPort` with the caller as audit actor, literal error codes, `no-store`, a `credentials` path segment so span capture skips the body, a redacting `toString`) | `module/ModuleCredentialService.java`, `controller/ModuleCredentialController.java` |
+| A single-use callback token that resumes a parked flow step (256-bit token, only its SHA-256 stored; every state change one conditional `UPDATE … WHERE status = 'PENDING' … RETURNING`; one refusal for unknown/foreign/used/expired; record first, then claim the pending-resume row, so any pod can take the callback; the token rides the body, never the path) | `module/ModuleAsyncTaskStore.java`, `module/ModuleTaskService.java`, `controller/ModuleTaskController.java` |
 
 ## Running Tests
 

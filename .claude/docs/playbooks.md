@@ -27,7 +27,7 @@ A handler that runs as a Task state in the Visual Flow Builder (e.g. `SendSlackM
 **Backend**
 1. Create `kelta-platform/runtime/runtime-module-integration/src/main/java/io/kelta/runtime/module/integration/handlers/<Name>ActionHandler.java` implementing `io.kelta.runtime.workflow.ActionHandler`:
    - `String getActionTypeKey()` → the action type (e.g. `"SEND_SLACK_MESSAGE"`).
-   - `ActionResult execute(ActionContext context)` → read **static node config** from `context.actionConfigJson()` (parse with `ObjectMapper`) and **runtime-resolved values** from `context.resolvedData()` (the `$.input.*` envelope feeds this); do the work; return `ActionResult.success(map)` / `failure(...)`.
+   - `ActionResult execute(ActionContext context)` → read **static node config** from `context.actionConfigJson()` (parse with `ObjectMapper`) and **runtime-resolved values** from `context.resolvedData()` (the `$.input.*` envelope feeds this); do the work; return `ActionResult.success(map)` / `failure(...)`. Work that finishes later may return `ActionResult.awaiting(resumeKey, expiresAt)` — only when `context.awaitable()` — and needs an `AwaitedTaskOutcomes` source plus a caller of `FlowEngine.resumeAwaitedTask` (`integrations.md` → Wait states, Awaited Tasks; the external-module task is the one implementation).
    - optional `validate(...)` and `getDescriptor()`.
    - Collaborators are **constructed** (not field-injected) and pulled from `ModuleContext.getExtension(Type.class)` in the module. A handler that calls a **tenant-configured URL** uses runtime-core's `OutboundHttpClient` with the `OutboundUrlGuard` extension (as `HttpCalloutActionHandler`, `CallApiActionHandler` and `OutboundMessageActionHandler` do), never a bare HTTP client or `RestTemplate` (`RestTemplate` is not a registered extension). Resolve secret refs (webhook URLs/keys) via the `CredentialResolverPort` extension. See `runtime-module-integration/CLAUDE.md` → Handler collaborators & config.
 2. **Register it** (the step no agent guesses): in `runtime-module-integration/.../IntegrationModule.java`, construct your handler in `onStartup(ModuleContext)` and return it from `getActionHandlers()`. The module is wired as a `@Bean` in `kelta-worker/.../config/FlowConfig.java` (`integrationModule()`); `ModuleRegistry` calls `onStartup` then registers handlers into `ActionHandlerRegistry`.
@@ -152,7 +152,7 @@ Platform-managed metadata (not a user collection) — e.g. `feature_announcement
 1. **Declare it**: in `runtime-core/.../model/system/`, add a `public static CollectionDefinition <name>()` factory to the section class it belongs to (`CoreSystemCollections`, `UiSystemCollections`, `AutomationSystemCollections`, `IntegrationSystemCollections`, `AuditLogSystemCollections`, … — one per area; create a new `<Area>SystemCollections` only for a genuinely new area). Build it with `systemBuilder(name, displayName, tableName)` (or `readOnlySystemBuilder` for an API-read-only table), statically imported from the package-private `SystemCollectionBuilders` — it injects audit fields + `systemCollection(true)` + the physical table. Then add `definitions.add(<Section>SystemCollections.<name>())` to `SystemCollectionDefinitions.all()` (the registry entry point).
 2. **Create the table** (the worker does **NOT** auto-create system tables — Flyway owns them):
    - Ship `kelta-worker/src/main/resources/db/migration/V<next>__create_<table>.sql` (check the dir for the head number; currently V142 → V143).
-   - Add the table to the RLS-enable migration set (the V77-style migration hardcodes table names) so RLS applies.
+   - Give the table its RLS in the same migration: `ENABLE` + `FORCE ROW LEVEL SECURITY` and the `tenant_isolation` / `admin_bypass` pair, written with the **pinned** expressions from [`conventions.md`](conventions.md) → Row-level security (`COALESCE((SELECT kelta_pinned_tenant()), current_setting(...))`), copied verbatim — not the plain `current_setting(...)` shape of an older migration. `RowLevelSecurityIntegrationTest` fails on a tenant table without the pair (`everyTenantDerivedTableIsCovered`) and on any unpinned policy (`everyGucPolicyIsPinned`).
 3. **Multi-pod refresh**: add a `<Name>RefreshHook` in `kelta-worker/.../listener/` annotated `@Component` — that is the whole registration (see **Add a BeforeSaveHook** below). The hook implements `BeforeSaveHook`, and in `afterCreate/Update/Delete` publishes via `PlatformEventPublisher` to `kelta.config.collection.changed.<id>` (reuse `CollectionConfigEventPublisher.SUBJECT_PREFIX`, build a `CollectionChangedPayload` via `EventFactory`). All pods consume it via `NatsSubscriptionConfig` → `CollectionLifecycleManager` refreshes the `CollectionRegistry`. See [Critical Rule 1](../../CLAUDE.md).
    - Reference impl: `listener/ValidationRuleRefreshHook.java`, `listener/CollectionConfigEventPublisher.java`.
    - ⚠️ The reference `ValidationRuleRefreshHook.afterDelete` is a **no-op** (the `collectionId` isn't available on delete). If your collection needs delete to refresh other pods, handle it explicitly rather than copying the no-op.
@@ -200,10 +200,79 @@ returned from that module's `getBeforeSaveHooks()` instead (recipe 5b).
 
 ## 5b. Ship a runtime-installable module (collections + hooks + handlers)
 
-A module is one signed JAR + `kelta-module.json`, uploaded through `POST /api/modules/install-jar`
-and installed **per tenant at runtime**. Nothing in this repo is recompiled or redeployed.
+A module is installed **per tenant at runtime**. Nothing in this repo is recompiled or redeployed.
+Build new modules as **external modules**: an HTTP service in any language, installed by URL. The
+JAR path further down is legacy; part 9g removes it
+(`specs/module-platform/9-external-modules.md`).
 
-**Reference implementation: [`kelta-modules/billing/`](../../kelta-modules/billing/)** — collections,
+### External module (an HTTP service)
+
+The contract is `docs/module-protocol/openapi.yaml`; what each call carries and when it comes is
+`integrations.md` → External modules — the module protocol.
+
+**Reference implementation: [`kelta-modules/billing/`](../../kelta-modules/billing/)** (Rust,
+AGPL-3.0-only) on the **[`kelta-module` SDK crate](../../kelta-modules/sdk-rust/)** (MIT). Both are
+members of the `kelta-modules/Cargo.toml` workspace; `kelta-modules/Dockerfile` builds the image.
+A module in another language implements the same protocol by hand — the SDK is the checklist.
+
+1. **Declare everything in the manifest.** With the SDK, `kelta_module::Manifest` builds the v2
+   manifest (spec §3.1) and validates it: `permissions` (object grants, `system`, `credentials`), a
+   `metadata` package of the collections and fields it provisions, then `actions`, `hooks`,
+   `events`, `services.entitlements`, `routes`, `schedules`, `webhook` and `ui`. Nothing undeclared
+   is ever called, and the plan shows all of it to the admin. `ModuleService` serves it at
+   `{baseUrl}/.well-known/kelta-module.json` (the one unauthenticated endpoint — use it for probes).
+2. **Verify every request.** `AssertionVerifier` checks the ES256 assertion in `Authorization`
+   against `{iss}/.well-known/jwks.json` (cached; refetched on an unknown `kid`), `iss`, `aud` (=
+   module id), `exp`/`iat`, `htm`/`htu` against the request, `body_sha256` against the raw body,
+   and rejects a replayed `jti`. `ModuleService` runs it before any handler, so a handler only ever
+   sees a verified `Call`. **Identity comes from the signed claims only** (`Call::tenant_id`,
+   `install_id`, `actor`): the headers a webhook forwards — including a caller-made `X-User-Id` —
+   are attacker-controlled (`UntrustedHeaders`), and the SDK has no API that reads identity from
+   a header. Without the SDK, implement every one of those checks.
+3. **Call Kelta back with `Kelta-Access-Token`** (`Call::platform()` → `PlatformClient`: list, get,
+   create, update, credential). It is a short-lived token for the install's `SERVICE` user, whose
+   profile holds exactly the manifest's `permissions` plus the collections the module owns. A
+   tenant secret (a provider API key) is a credential named in `permissions.credentials`: read it
+   per request (`PlatformClient::credential`, i.e. `GET /api/modules/self/credentials/{name}`),
+   never store it, never log it (`architecture.md` → External module credential read).
+4. **Implement `ModuleHandlers`**: one method per declared capability (action, hook, event,
+   entitlements, route, webhook, lifecycle, health); the defaults answer 404 or allow. Deduplicate
+   actions and schedules on `Call::idempotency_key()` and events on `eventId`, since all three can
+   arrive twice. Answer events with any 2xx; anything else is retried, then dead-lettered. A flow
+   action may arrive with **no `act`** (no caller context, e.g. a scheduled or async flow): never
+   take the acting member from the input instead.
+5. **A UI is a pinned bundle.** `Manifest::ui_bundle(path, bytes)` puts its SHA-256 in the manifest
+   and `ModuleService::asset` serves it. Kelta stores the approved copy at install and serves only
+   that; a changed bundle ships as a new `version`, and the upgrade plan shows the change.
+6. **Test it.** Unit tests run against `kelta_module::testing` (dev-dependency feature `testing`):
+   `PlatformKey` signs assertions, `MemoryPlatform` stands in for the platform, `Call::for_testing`
+   builds a call. Then a `kelta-test-harness` scenario against the real image —
+   `BillingModuleScenarioTest` (install by URL → action → hook → event → entitlements → signed
+   webhook → uninstall). `ExternalModuleInstallScenarioTest` covers the platform side with a
+   WireMock module.
+7. **CI and image.** A crate in the `kelta-modules` workspace is checked by `test-rust-modules`
+   (`cargo fmt --check`, `clippy -D warnings`, `cargo test`, in the Dockerfile's `check` stage) on
+   the `rust_modules` path filter; Build and Deploy's `build-and-push-modules` pushes
+   `harbor.rzware.com/kelta-modules/<image>:main-<sha>` and bumps homelab-argo's `kelta-billing/`
+   overlay (`ci-cd.md` → Rust external modules). A second module needs its own Dockerfile target,
+   image and overlay.
+8. **Host it.** Public `https`, or in-cluster `http` on a host listed in
+   `KELTA_MODULE_ALLOWED_HOSTS` (never widen `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` for a module).
+   Redirects are never followed. In-cluster, give it its own namespace with a NetworkPolicy that
+   denies it the worker pods: the worker trusts identity headers from the gateway
+   (`concerns.md` → External modules).
+9. **Install it**: Modules page → Install Module → From URL → Review → Approve and install. Or
+   call `POST /api/modules/plan`, then `POST /api/modules/install` with the plan's `planHash`.
+   Upgrade from the module's card (**Upgrade**). An upgrade that asks for more access says so,
+   and installs only on re-consent.
+
+### Legacy: JAR module (removed in part 9g)
+
+A JAR module is one signed JAR + `kelta-module.json`, uploaded through
+`POST /api/modules/install-jar`.
+
+**Reference implementation: [`kelta-modules/billing-jar/`](../../kelta-modules/billing-jar/)** — the
+Java billing module the Rust one replaces, kept for rollback until part 9g: collections,
 two action handlers, a webhook handler, and a UI bundle in one JAR. Copy its `pom.xml` shape: no
 parent pom, outside the reactor, platform deps `provided` (they load from the platform
 classloader; bundling them puts a second copy of the runtime model in the JAR and every cast to a

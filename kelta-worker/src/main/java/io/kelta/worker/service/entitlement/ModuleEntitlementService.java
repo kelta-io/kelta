@@ -17,8 +17,8 @@ import java.util.Optional;
  * {@link MemberEntitlements#EMPTY}.
  *
  * <h2>No module ⇒ no entitlements</h2>
- * Billing is a runtime module ({@code kelta-modules/billing}); the worker keeps no billing tables
- * or plans of its own. A tenant with no module publishing an {@link EntitlementProvider} — or a
+ * Billing is a module ({@code kelta-modules/billing}, or the legacy JAR
+ * {@code kelta-modules/billing-jar}); the worker keeps no billing tables or plans of its own. A tenant with no module publishing an {@link EntitlementProvider} — or a
  * worker with runtime modules switched off, where no {@link ModuleServiceRegistry} bean exists —
  * resolves {@code EMPTY} for every member. That is exactly what such a tenant got from the former
  * compiled-in service (no subscription and no DEFAULT plan ⇒ no plan code, no status, no values),

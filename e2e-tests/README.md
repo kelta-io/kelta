@@ -85,13 +85,15 @@ rm -rf e2e-tests/test-results e2e-tests/playwright-report \
 
 ## CI
 
-The `e2e` job in [.github/workflows/ci.yml](../.github/workflows/ci.yml) runs the same loop:
+The `e2e` job in [.github/workflows/ci.yml](../.github/workflows/ci.yml) runs the same loop as two
+matrix shards, each on its own stack:
 
 1. `docker buildx bake -f docker-compose.yml -f docker-compose.ci.yml` (JVM variants via GHA cache)
 2. `docker compose ... up -d --wait` waits for healthchecks
 3. `docker compose --profile seed run --rm kelta-bootstrap`
-4. `npx playwright test`
-5. Uploads `playwright-report/`, `test-results/`, and per-service logs as `e2e-report` artifact
+4. `npx playwright test --shard=<n>/2` (files keep their order; a spec must not depend on data
+   another spec file created, since the next file may run on the other shard's stack)
+5. Uploads `playwright-report/`, `test-results/`, and per-service logs as the `e2e-report-shard-<n>` artifact
 
 The job is wired into `quality-gate` and **blocks merge** when it fails. To triage a flake, add `test.fixme(...)` with an issue link — do not skip the gate.
 

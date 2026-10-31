@@ -50,24 +50,29 @@ class JdbcModuleStoreInstalledByWidthTest {
         // know. Declaring JSONB as a domain lets the REAL statement run unmodified — the point of
         // this test is the column width, so the SQL under test must not be rewritten for it.
         jdbcTemplate.execute("CREATE DOMAIN IF NOT EXISTS JSONB AS VARCHAR(100000)");
-        // Mirrors the shipped schema after V187. If installed_by is ever narrowed back toward a
-        // UUID width, this test fails rather than the next long-named actor discovering it.
+        // Mirrors the shipped schema after V221 (installed_by widened in V187). If installed_by is
+        // ever narrowed back toward a UUID width, this test fails rather than the next long-named
+        // actor discovering it.
         jdbcTemplate.execute("""
                 CREATE TABLE tenant_module (
                     id VARCHAR(36) PRIMARY KEY,
                     tenant_id VARCHAR(36) NOT NULL,
                     module_id VARCHAR(100) NOT NULL,
                     name VARCHAR(200) NOT NULL,
-                    version VARCHAR(20) NOT NULL,
+                    version VARCHAR(64) NOT NULL,
                     description VARCHAR(1000),
                     source_url VARCHAR(2000) NOT NULL,
-                    jar_checksum VARCHAR(64) NOT NULL,
+                    jar_checksum VARCHAR(64),
                     jar_size_bytes BIGINT,
-                    module_class VARCHAR(500) NOT NULL,
+                    module_class VARCHAR(500),
                     manifest VARCHAR(100000),
                     status VARCHAR(20) NOT NULL,
                     installed_by VARCHAR(255) NOT NULL,
                     s3_key VARCHAR(2000),
+                    base_url VARCHAR(2000),
+                    protocol_version INTEGER,
+                    connected_app_id VARCHAR(36),
+                    service_user_id VARCHAR(36),
                     installed_at TIMESTAMP,
                     updated_at TIMESTAMP
                 )""");

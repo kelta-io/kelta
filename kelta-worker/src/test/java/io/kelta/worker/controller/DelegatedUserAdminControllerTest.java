@@ -199,7 +199,10 @@ class DelegatedUserAdminControllerTest {
             ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
             verify(queryEngine).executeQuery(eq(usersDef), captor.capture());
             List<FilterCondition> filters = captor.getValue().filters();
-            assertThat(filters).hasSize(1);
+            assertThat(filters).hasSize(2);
+            assertThat(filters.get(1).fieldName()).isEqualTo("userType");
+            assertThat(filters.get(1).operator()).isEqualTo(FilterOperator.NEQ);
+            assertThat(filters.get(1).value()).isEqualTo("SERVICE");
             FilterCondition condition = filters.get(0);
             assertThat(condition.fieldName()).isEqualTo("profileId");
             assertThat(condition.operator()).isEqualTo(FilterOperator.IN);
@@ -311,6 +314,21 @@ class DelegatedUserAdminControllerTest {
                     Map.of("firstName", "Renamed")))
                     .isInstanceOf(ResponseStatusException.class)
                     .hasFieldOrPropertyWithValue("statusCode", HttpStatus.NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("404 when the target is a SERVICE user, even with its profile in scope")
+        void notFoundWhenTargetIsServiceUser() {
+            stubCaller(fullScope());
+            Map<String, Object> service = userRow("svc-1", "profile-a");
+            service.put("userType", "SERVICE");
+            when(queryEngine.getById(eq(usersDef), eq("svc-1"))).thenReturn(Optional.of(service));
+
+            assertThatThrownBy(() -> controller.updateUser(request, "svc-1",
+                    Map.of("firstName", "Renamed")))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .hasFieldOrPropertyWithValue("statusCode", HttpStatus.NOT_FOUND);
+            verify(queryEngine, never()).update(any(), any(), any());
         }
 
         @Test

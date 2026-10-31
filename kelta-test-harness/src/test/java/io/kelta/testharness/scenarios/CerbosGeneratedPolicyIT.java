@@ -45,12 +45,22 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code col-c/contacts}; profiles
  * <ul>
  *   <li>{@code admin-profile} — VIEW_ALL_DATA + MODIFY_ALL_DATA, full CRUD on col-a</li>
- *   <li>{@code editor-profile} — read+edit col-a, read col-b, nothing on col-c; a custom
- *       ABAC rule denies {@code edit} on accounts when {@code R.attr.status == "locked"}, and an
- *       own-record rule allows {@code edit} on bookings when
- *       {@code R.attr.createdBy == P.attr.userId}</li>
+ *   <li>{@code editor-profile} — read+edit col-a, read col-b, nothing on col-c. Custom rules,
+ *       with effects in their stored form ({@code allow}/{@code deny}):
+ *       <ul>
+ *         <li>deny {@code edit} on accounts when {@code R.attr.status == "locked"};</li>
+ *         <li>deny {@code edit} on accounts when {@code region} is in {@code "US, EU"} (a visual
+ *             {@code in} condition as the admin UI sends it);</li>
+ *         <li>allow {@code edit} on bookings when {@code R.attr.createdBy == P.attr.userId};</li>
+ *         <li>allow {@code delete} on bookings when
+ *             {@code R.attr.status == "draft" || R.attr.priority == "low"} (a top-level {@code ||});</li>
+ *         <li>allow {@code read} on contacts when {@code title} equals {@code Say "hi" \ bye} (a
+ *             visual value holding a quote and a backslash).</li>
+ *       </ul></li>
  *   <li>{@code viewer-profile} — VIEW_ALL_DATA only</li>
  *   <li>{@code nobody-profile} — no grants</li>
+ *   <li>{@code module-profile} — a module service principal's generated profile: API_ACCESS and
+ *       read on col-b only</li>
  * </ul>
  *
  * <p>Runs a standalone Cerbos (sqlite in-memory store + admin API) pinned to the production
@@ -161,6 +171,17 @@ class CerbosGeneratedPolicyIT {
         assertThat(check("collection", "editor-profile", "other-tenant", "col-a")).isEqualTo("....");
     }
 
+    @Test
+    @DisplayName("a module service principal's profile reads exactly its granted collection and nothing else")
+    void moduleServicePrincipalReadsOnlyItsGrant() {
+        assertThat(check("collection", "module-profile", TENANT, "col-b")).isEqualTo(".A..");
+        assertThat(check("collection", "module-profile", TENANT, "col-a")).isEqualTo("....");
+        assertThat(check("collection", "module-profile", TENANT, "col-c")).isEqualTo("....");
+        assertThat(check("record", "module-profile", TENANT, "bookings")).isEqualTo(".A..");
+        assertThat(check("record", "module-profile", TENANT, "contacts")).isEqualTo("....");
+        assertThat(check("collection", "module-profile", "other-tenant", "col-b")).isEqualTo("....");
+    }
+
     // ----- record policy (name-keyed, what the worker record advice checks) -----
 
     @Test
@@ -193,6 +214,48 @@ class CerbosGeneratedPolicyIT {
         // P.id is the email: the pre-fix rule (createdBy == P.id) could never match a UUID column.
         assertThat(check("record", "editor-profile", TENANT, "bookings",
                 Map.of("createdBy", "user@example.test"), "")).isEqualTo(".A..");
+    }
+
+    @Test
+    @DisplayName("a stored deny rule with an in list denies the action the profile otherwise allows")
+    void storedDenyInListBeatsObjectPermission() {
+        assertThat(check("record", "editor-profile", TENANT, "accounts", Map.of("region", "US")))
+                .as("region in the list: edit denied, read kept").isEqualTo(".A..");
+        assertThat(check("record", "editor-profile", TENANT, "accounts", Map.of("region", "EU")))
+                .isEqualTo(".A..");
+        assertThat(check("record", "editor-profile", TENANT, "accounts", Map.of("region", "APAC")))
+                .as("region outside the list: the object permission applies").isEqualTo(".AA.");
+        assertThat(check("record", "editor-profile", TENANT, "accounts", Map.of("region", "US, EU")))
+                .as("the list holds the items, not the raw text").isEqualTo(".AA.");
+        assertThat(check("record", "admin-profile", TENANT, "accounts", Map.of("region", "US")))
+                .as("another profile is not affected").isEqualTo("AAAA");
+    }
+
+    @Test
+    @DisplayName("a custom rule with a top-level || applies only inside its own collection")
+    void orRuleDoesNotLeakToAnotherCollection() {
+        assertThat(check("record", "editor-profile", TENANT, "bookings", Map.of("status", "draft")))
+                .isEqualTo(".A.A");
+        assertThat(check("record", "editor-profile", TENANT, "bookings", Map.of("priority", "low")))
+                .isEqualTo(".A.A");
+        assertThat(check("record", "editor-profile", TENANT, "bookings",
+                Map.of("status", "open", "priority", "high"))).isEqualTo(".A..");
+        assertThat(check("record", "editor-profile", TENANT, "accounts", Map.of("priority", "low")))
+                .as("the right-hand side of || must not grant delete on accounts").isEqualTo(".AA.");
+        assertThat(check("record", "editor-profile", TENANT, "contacts",
+                Map.of("status", "draft", "priority", "low"))).isEqualTo("....");
+    }
+
+    @Test
+    @DisplayName("a visual value holding a quote and a backslash compiles and matches exactly that text")
+    void escapedValueMatchesExactly() {
+        assertThat(check("record", "editor-profile", TENANT, "contacts", Map.of("title", "Say \"hi\" \\ bye")))
+                .isEqualTo(".A..");
+        assertThat(check("record", "editor-profile", TENANT, "contacts", Map.of("title", "Say ")))
+                .isEqualTo("....");
+        assertThat(check("record", "editor-profile", TENANT, "contacts",
+                Map.of("title", "Say \\\"hi\\\" \\\\ bye"))).as("the escaped spelling is a different value")
+                .isEqualTo("....");
     }
 
     // ----- helpers -----

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
+  MAX_SUBSCRIPTIONS,
   RealtimeClient,
   type ChatEvent,
   type PresenceUser,
@@ -117,6 +118,44 @@ describe('RealtimeClient', () => {
     client.close()
     await vi.advanceTimersByTimeAsync(1000)
     expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
+  it('ref-counts collection subscriptions: one subscribe, unsubscribe on the last release', async () => {
+    const client = makeClient([])
+    await client.connect()
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+    const actions = () => ws.sent.map((s) => JSON.parse(s))
+
+    client.subscribe('orders') // the nav's ref
+    client.subscribe('orders') // a page's ref
+    expect(actions()).toEqual([{ action: 'subscribe', collection: 'orders' }])
+
+    client.unsubscribe('orders') // the page leaves — the nav still holds it
+    expect(actions()).toHaveLength(1)
+
+    client.unsubscribe('orders')
+    expect(actions()).toEqual([
+      { action: 'subscribe', collection: 'orders' },
+      { action: 'unsubscribe', collection: 'orders' },
+    ])
+    client.unsubscribe('orders') // over-release is a no-op
+    expect(actions()).toHaveLength(2)
+    client.close()
+  })
+
+  it('ignores subscriptions past MAX_SUBSCRIPTIONS distinct collections', async () => {
+    const client = makeClient([])
+    await client.connect()
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    for (let i = 0; i <= MAX_SUBSCRIPTIONS; i += 1) client.subscribe(`c${i}`)
+    client.unsubscribe(`c${MAX_SUBSCRIPTIONS}`)
+    const sent = ws.sent.map((s) => JSON.parse(s))
+    expect(sent.filter((m) => m.action === 'subscribe')).toHaveLength(MAX_SUBSCRIPTIONS)
+    expect(sent.filter((m) => m.action === 'unsubscribe')).toHaveLength(0)
+    client.close()
   })
 
   describe('presence (app-intelligence slice 3)', () => {

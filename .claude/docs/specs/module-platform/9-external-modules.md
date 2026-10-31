@@ -1,0 +1,714 @@
+# Slice 9 — External Modules: Out-of-Process Add-Ons over HTTP
+
+> **Status:** 🟡 **In progress** — 9a (spec + contract) merged 2026-10-30; 9b (service principal)
+> built 2026-10-30; 9c (install by URL) built 2026-10-30; 9d (invocation) built 2026-10-30; 9e
+> (events, UI bundle pinning, Modules page) built 2026-10-31 — external modules install from the
+> Modules page behind a consent screen, run flow actions, hooks, the entitlements port, routes,
+> webhooks and schedules, receive record events, and ship a pinned admin UI bundle; 9e.1
+> (credential read) built 2026-10-31 — a module reads the tenant credentials its manifest declares
+> (§3.3); 9f (Rust `kelta-module` SDK + `kelta-billing` service, CI, image, harness scenario)
+> built 2026-10-31 and every billing tenant cut over the same day (`kelta-modules/billing/CUTOVER.md`).
+> 9h (long-running actions with task tokens) built 2026-10-31 — an action declaring
+> `maxDurationSeconds` answers `202`, its flow step parks, and the module completes it later
+> (§3.6.2). 9g (delete the JAR path) waits for the last tenant JAR module, a long-running ingest
+> action, to move out of process on 9h. The settings form
+> (§3.8) and a dead-letter list are not built yet. Planning spec for replacing the
+> in-process JAR module path with modules that run as **separate HTTP services, in any language**.
+> The machine-readable protocol contract is
+> [`docs/module-protocol/openapi.yaml`](../../../../docs/module-protocol/openapi.yaml); this
+> document is the design and the slice plan around it.
+>
+> Source-verified against the codebase on **2026-10-30** at main `0d93c0467` (Flyway directory
+> head **V219** (`V219__watch_target_synthetic.sql`); deployed `flyway_schema_history` keeps
+> pre-flatten numbering, so always check the directory *and* deployed history before numbering).
+> If code and this doc disagree, trust the code and fix this doc.
+>
+> Conforms to the parent [`README.md`](README.md): **Module status**, **Provenance**, **Tenant
+> binding** and **Idempotent / destructive / consent**. It **changes** the parent's security model
+> (§1, "What this slice reverses") and supersedes slice 3's manifest v2 (§3.1 there).
+
+## 1. Goal & scope
+
+### Why
+
+Today a module is a signed JAR loaded into the worker JVM by `SandboxedModuleClassLoader`. The
+parent spec states the consequence plainly: **the JAR publisher signature is the entire trust
+boundary**, capabilities are disclosure rather than containment, and `data:read` / `data:write`
+cannot be enforced because a module holds `QueryEngine` directly. Every module must be written in
+Java against platform classes, and the worker can never be a native image (deploy hazard 1).
+
+The direction decided on 2026-10-30: **all module code runs out of process.** A module is any
+HTTPS service. It publishes a manifest; a tenant admin installs it by URL; the platform calls the
+module over HTTP for every piece of logic, and the module calls the platform back through the
+public JSON:API under a service principal whose permissions the admin approved.
+
+### What this slice reverses in the parent spec
+
+| Parent spec says (JAR world) | External world |
+|---|---|
+| The JAR signature is the whole trust boundary | The boundary is the **network + the module's service principal**. Module code never runs in a platform process. |
+| `data:read` / `data:write` will not be shipped — a module holds `QueryEngine` | The module reaches data **only** through the public API with its own token, so Cerbos object/field permissions, RLS and rate limits apply. Permissions become real (slice 4's goal, met by a generated profile). |
+| A module cannot subscribe to NATS, has no scheduler, cannot read the actor tier | Events are delivered over HTTP (§3.6); the manifest declares schedules (§3.7); the actor rides in the signed request (§3.3). |
+| The worker must stay JVM (deploy hazard 1) | No JAR classloading after part 9g. Whether the worker goes native again is a separate decision. |
+
+`moduleUiBundles.ts` still evaluates a module's UI bundle same-origin in the admin session. That
+part of the parent's warning **does not change**: the UI bundle is trusted code. This slice pins it
+by hash at install so a running module cannot swap it later (§3.9).
+
+### Delivers
+
+1. **Module protocol v1**: HTTPS + JSON, contract-first in `docs/module-protocol/openapi.yaml`.
+   Endpoints under `{baseUrl}/kelta/v1/…` for actions, hooks, events, services, routes, webhooks,
+   lifecycle and health, plus the manifest at `{baseUrl}/.well-known/kelta-module.json`.
+2. **Manifest v2** (§3.1), fetched from the module, embedding a metadata package for everything
+   the module provisions.
+3. **Trust model** (§3.2–3.4): platform→module requests signed as short-lived JWTs (ES256, JWKS
+   published by the worker); module→platform calls with a per-install service principal token.
+4. **Install by URL with plan + consent**, reusing slice 3's `planHash` design (§3.5).
+5. **Every capability of today's in-process SPI** mapped to an HTTP endpoint (§3.6), so the
+   billing module can move without losing behavior.
+6. **A Rust reference module**: billing, rewritten as an external service, plus a Rust SDK crate
+   (part 9f). Billing also serves as the trial for Rust in this codebase (see §8).
+7. **Removal of the JAR path** once billing runs externally (part 9g).
+
+### Does not
+
+- Deploy modules. Kelta stores a base URL; who runs the service (homelab-argo, a third party's
+  cloud) is outside the platform.
+- Open the closed extension points in the parent's **What is closed** table (credential types,
+  `FieldType`, MCP tools, NATS subjects, arbitrary gateway paths).
+- Give modules direct database or NATS access.
+- Add module-defined system permissions. A route may require an **existing** permission; a
+  module minting new permission names stays slice 4.
+- Long-running work inside one synchronous call. An action's call is still bounded by its
+  `timeoutMs`; work that takes longer declares `maxDurationSeconds` and answers `202` with a task
+  the module completes later (part 9h, §3.6.2).
+- Module settings UI beyond what the manifest's `settings` schema renders (§3.8).
+
+### The parts (one PR each, in order)
+
+| Part | PR | Security | Depends on |
+|---|---|---|---|
+| 9a | Protocol contract + this spec (docs only) | — | — |
+| 9b | Module service principal: `SERVICE` user type, manifest-generated profile, client_credentials token resolves to it — **built** (V220, `ModuleServicePrincipalService`; install does not call it until 9c) | **yes, no auto-merge** | 9a |
+| 9c | Registry + install by URL: manifest v2 parser, plan/consent, metadata provisioning, worker signing key + JWKS, `KELTA_MODULE_ALLOWED_HOSTS` — **built** (V221, `ExternalModuleService`, `ExternalModulePlanner`, `ModuleUninstaller`, `ModuleAssertionSigner`, `ModuleHostGuard`). Deferred: UI bundle pinning (9e), schedule registration (9d), `settings` validation (column only) | **yes, no auto-merge** | 9b |
+| 9d | Invocation layer: remote actions, before-save hooks, service ports, route + webhook proxies, schedules, timeouts, circuit breaker, `DEGRADED`, metrics — **built** (`ExternalModuleRegistry`, `ExternalModuleInvoker`, `ModuleCircuitBreaker`, `RemoteActionHandler`, `RemoteBeforeSaveHook`, `RemoteEntitlementProvider`, `ExternalModuleProxy`, `ModuleScheduleSync`; no migration — V221 already allows `MODULE_ACTION`) | **yes, no auto-merge** | 9c |
+| 9e | Event delivery (NATS → HTTP) + UI bundle pinning + Modules page install-by-URL and consent screen — **built** (V222 `module_event_dead_letter`, `ModuleEventDeliveryListener`, `EventSubscription.Redelivery`, `ExternalModuleUiBundles`; Modules page: install from URL with the plan review, upgrade re-consent, uninstall plan, health). Deferred: the settings form (§3.8), a dead-letter list or replay | **yes, no auto-merge** | 9d |
+| 9e.1 | Module credential read: `GET /api/modules/self/credentials/{name}` for the calling install's declared credentials, audited as the module (§3.3) — **built** (`ModuleCredentialController`, `ModuleCredentialService`; gateway forwards the token's `connected_app_id` as `X-Connected-App-Id`; no migration) | **yes, no auto-merge** | 9e |
+| 9f | Rust billing module + `kelta-module` Rust SDK; cut the prod tenant over — **built** (`kelta-modules/sdk-rust`, `kelta-modules/billing`; the JAR moved to `kelta-modules/billing-jar` for rollback; CI `test-rust-modules`, image `harbor.rzware.com/kelta-modules/kelta-billing`, `BillingModuleScenarioTest`). Prod cutover not done: runbook `kelta-modules/billing/CUTOVER.md` | **yes, no auto-merge** (assertion verification + credential handling) | 9e.1 |
+| 9g | Delete the JAR path | — | 9f soaked one release |
+| 9h | Long-running actions with task tokens: `202` parks the flow step; the module completes it with `POST /api/modules/self/tasks/complete`, the token in the body (§3.6.2) — **built** (V223 `module_async_task` + `flow_pending_resume.claimed_at`, `ModuleAsyncTaskStore`, `ModuleTaskService`, `ModuleTaskController`, `ModuleSelfPrincipal`; runtime-core `AwaitedTaskOutcomes`, `ActionResult.awaiting`, `FlowEngine.resumeAwaitedTask`; resume claim lease) | **yes, no auto-merge** (a completion resumes a tenant's flow with module data) | 9d |
+
+Standing acceptance lines for every code part: `/verify` green; a `.claude/changelog.d/` fragment;
+the docs rows in §7 that the part touches; tests from §6 for what it builds.
+
+## 2. UI samples
+
+N/A for 9a–9d (backend). Part 9e changes the Modules admin page:
+
+```
+┌ Install module ────────────────────────────────────────────────────┐
+│ Module URL  [ https://billing.modules.example.com            ]    │
+│                                              [ Fetch manifest ]    │
+├────────────────────────────────────────────────────────────────────┤
+│ Billing · kelta-billing 2.0.0 · by Example Ltd                     │
+│ Host: billing.modules.example.com (allowed)                        │
+│                                                                    │
+│ This module will be able to:                                       │
+│   ✔ Read, create, edit billing_plans, billing_customers, … (own)   │
+│   ✔ Read users (name, email)                                       │
+│   ✔ Read the tenant credential "stripe"                            │
+│   ✔ Run on every create of any collection (before-save hook)       │
+│   ✔ Receive created/updated events for billing_subscriptions       │
+│   ✔ Answer the "entitlements" service for this tenant              │
+│   ✔ Run "expire-passes" every hour                                 │
+│   ✔ Add a UI bundle to the admin app (sha256 3f9a…c21)             │
+│                                                                    │
+│ It will create: 5 collections, 23 fields, 2 picklists              │
+│ It will adopt (already exist, left unchanged): none                │
+│                                                                    │
+│                               [ Cancel ]  [ Approve and install ]  │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+Upgrade shows the same panel as a diff: added/removed grants, created/kept metadata.
+
+## 3. Data & API contracts
+
+The OpenAPI document is authoritative for wire shapes. This section explains the design and the
+platform-side behavior the OpenAPI document cannot express.
+
+### 3.1 Manifest v2
+
+Served by the module at `GET {baseUrl}/.well-known/kelta-module.json`, unauthenticated (it holds no
+secrets). Schema: `ModuleManifest` in the OpenAPI components.
+
+```jsonc
+{
+  "manifestVersion": 2,
+  "protocolVersion": 1,
+  "id": "kelta-billing",                // ^[a-z][a-z0-9-]{1,62}$, stable forever
+  "name": "Billing",
+  "version": "2.0.0",                   // semver; upgrade requires strictly higher
+  "description": "Stripe-backed portal billing",
+  "author": "Example Ltd",
+  "minPlatformVersion": "0.4.0",
+  "permissions": {
+    "objects": [ { "collection": "users", "read": true } ],
+    "fields":  [ { "collection": "users", "field": "email", "visibility": "READ_ONLY" } ],
+    "system":  [],
+    "credentials": [ "stripe" ]
+  },
+  "metadata": { "formatVersion": 2, "items": [ /* PackageImportService items */ ] },
+  "settings": { "type": "object", "properties": { "allowedReturnOrigins": { "type": "array" } } },
+  "actions":  [ { "key": "create-checkout-session", "name": "Create checkout session",
+                  "timeoutMs": 15000, "inputSchema": {}, "outputSchema": {} } ],
+  "hooks":    [ { "collection": "*", "events": ["beforeCreate"], "order": 500,
+                  "timeoutMs": 2000, "failurePolicy": "fail" } ],
+  "events":   [ { "collection": "billing_subscriptions", "types": ["created", "updated"] } ],
+  "services": [ { "port": "entitlements", "cacheTtlSeconds": 60 } ],
+  "routes":   [ { "path": "me", "methods": ["GET"], "permission": null } ],
+  "schedules":[ { "action": "expire-passes", "cron": "0 0 * * * *" } ],
+  "webhook":  { "enabled": true },
+  "ui":       { "bundlePath": "/kelta/v1/ui-bundle.js", "sha256": "3f9a…c21" }
+}
+```
+
+Rules the parser enforces (part 9c):
+
+- `manifestVersion: 2` is the external manifest. A manifest without it is the JAR manifest (v1),
+  accepted only by the JAR install endpoints until part 9g deletes them. **Slice 3's §3.1
+  "manifest v2" (an in-JAR v2) is superseded by this one and will not be built.**
+- `protocolVersion` must be one the platform speaks (`1`). The platform calls only the endpoints
+  of that version.
+- `minPlatformVersion` is checked against the running platform version as slice 3 §3.2 designs it
+  (`KELTA_VERSION` → `kelta.platform.version`).
+- `metadata` is a **metadata package** (`formatVersion: 2`, the shape `PackageService` exports).
+  Item types are limited to **slice 3's allowlist**: `COLLECTION`, `FIELD`, `GLOBAL_PICKLIST`,
+  `PICKLIST_VALUE`, `VALIDATION_RULE`, `UI_PAGE`, `UI_MENU`, `UI_MENU_ITEM`. The reasons carry
+  over unchanged: these types have natural keys that never involve a source-tenant id; layouts key
+  on sort orders; `FLOW` runs with platform powers on a schedule the admin did not author.
+  `schedules` (§3.7) replaces the one flow billing needed. Widening the allowlist is §8 open
+  question 2.
+- Every `actions[].key`, `routes[].path`, `events[].collection` and `hooks[].collection` must be
+  unique within its list. A hook or event on a collection the module neither provisions nor has
+  `read` on is rejected at plan time.
+- `timeoutMs` bounds: actions 1–120000 (default 30000); hooks 100–5000 (default 2000).
+- `actions[].maxDurationSeconds` (optional, 1–604800) makes the action long-running (§3.6.2):
+  its call may answer `202` and finish later, within that many seconds. Absent, the action is
+  synchronous and a `202` is an invalid answer.
+- No wildcards in `permissions`. Collections the module provisions through `metadata` get full
+  object access implicitly and are listed as "(own)" on the consent screen.
+
+### 3.2 Platform → module: signed requests
+
+Every request the platform sends to a module carries `Authorization: Bearer <assertion>`, a JWS
+compact token:
+
+| Claim | Value |
+|---|---|
+| `iss` | `kelta.modules.issuer`, e.g. `https://api.kelta.io/api/modules` |
+| `aud` | the module `id` |
+| `sub` | the module install id (`tenant_module.id`) |
+| `tenant_id`, `tenant_slug` | the tenant being served |
+| `act` | the acting user, when there is one: `{ "sub": userId, "user_type": "INTERNAL"\|"PORTAL", "profile_id": … }` (RFC 8693 actor claim). On a flow action it is the run's user (the caller, the record's changer, or the flow's run-as user or owner), sent only when that is an active `INTERNAL` or `PORTAL` user. Absent for module schedules, webhooks and events |
+| `htm`, `htu` | HTTP method and full target URL (as in DPoP, RFC 9449) |
+| `body_sha256` | base64url SHA-256 of the exact request body bytes (of the empty string for GET) |
+| `iat`, `exp` | `exp = iat + 60 s` |
+| `jti` | random, unique per request |
+
+- **Algorithm ES256.** It is supported by every mainstream JWT library; EdDSA is not yet universal.
+- **Keys**: one platform-wide P-256 key pair, configured as a secret
+  (`KELTA_MODULE_SIGNING_KEY`, PEM) and declared in `application.yml` as
+  `${KELTA_MODULE_SIGNING_KEY:}` (never env-only; see CLAUDE.md pitfalls). The public JWKS is served
+  unauthenticated at `GET /api/modules/.well-known/jwks.json` with a `kid` per key, so rotation
+  is publish-new-key, sign with it, drop the old one after `exp` plus cache time.
+- **The module verifies**: signature against the JWKS for the configured issuer, `aud` equals its
+  id, `exp`, `htm`/`htu` match the request, and `body_sha256` matches the body it received. The
+  Rust and future SDKs do this in one call. A module that skips verification is accepting
+  unauthenticated calls; the protocol doc says so in the security section.
+- **Why not HMAC (Standard Webhooks)**: a shared secret per install would have to be delivered to
+  the module and stored by it, per tenant. A public-key assertion needs nothing but the issuer URL.
+  Google Pub/Sub push authenticates with an OIDC JWT the same way.
+
+Trace context: every request also carries `traceparent` (W3C), so module spans join the platform's
+Tempo trace.
+
+### 3.3 Module → platform: the service principal
+
+Each install gets a **service principal**, created by the install plan's apply (part 9b):
+
+- A `platform_user` row with **`user_type = 'SERVICE'`** (new value in
+  `platform_user_user_type_check`, which today allows `INTERNAL` and `PORTAL`, V167). A service
+  user cannot log in interactively, never receives mail, is not shown in the Users list by
+  default, and does not count against the `users` governor limit.
+- A **profile generated from `manifest.permissions`** plus full object access on collections the
+  module provisions, written to `profile_object_permission` (`can_create/can_read/can_edit/
+  can_delete`), `profile_field_permission` (`visibility`) and `profile_system_permission`.
+  `CerbosPolicyGenerator` compiles it like any other profile; **no Cerbos change**.
+- A **`connected_app`** with `grant_types = ["client_credentials"]` bound to that user. Today
+  `connected_app` has no run-as column (V1 baseline) and a client_credentials token carries
+  `connected_app_id`, `auth_method=api_key` and `app_scopes` but no profile
+  (`KeltaTokenCustomizer`), so the gateway's `RouteAuthorizationFilter` answers
+  `403 User identity not resolved`. Part 9b adds `connected_app.run_as_user_id` (V220) and resolves a
+  token with one to that user's identity and profile in `UserIdentityResolutionFilter`.
+  As built: kelta-auth puts the user's `run_as_user_id`, `user_type=SERVICE`, `profile_id`,
+  `profile_name`, `email` and `preferred_username` on the token (`sub` stays the client id),
+  refuses the token unless the user is an `ACTIVE` `SERVICE` user of the app's tenant with a
+  profile, builds a run-as app as a `client_credentials`-only confidential client whatever its
+  other columns say, and gives it a **15-minute** access token. The gateway sets the principal's
+  user id from `run_as_user_id`.
+- The connected app's **plaintext client secret** is kept by the worker, encrypted with the
+  existing `EncryptionService`, because `connected_app` stores only `client_secret_hash` and the
+  worker must request tokens with it. As built it lives on the app itself,
+  `connected_app.client_secret_enc` (V220), JDBC-only like `run_as_user_id` — neither is a field of
+  the `connected-apps` collection, so no generic read path can serve them — and
+  `ModuleServicePrincipalService.clientCredentials` decrypts it. Deactivating the principal clears it.
+- `ModuleServicePrincipalService` (worker) creates the three rows in one transaction under the
+  tenant, validates every collection, field, visibility and system permission against the
+  tenant's metadata (`API_ACCESS` is always granted), marks the profile `is_system`, gives the user
+  an email under the reserved `.invalid` TLD, then requests a Cerbos sync and publishes
+  `kelta.record.changed` for the profile and connected-app collections.
+
+**Token delivery.** The worker requests a client_credentials access token from kelta-auth per
+install, caches it until `exp − 60 s`, and sends it on every module request as
+**`Kelta-Access-Token`**. The module uses it as a bearer token against the public API
+(`/api/…`, JSON:API) for that request's work. Modules therefore **never store a Kelta
+credential**: every invocation brings what it needs, and background work is a platform-driven
+schedule (§3.7) or event delivery (§3.6), each of which carries a token.
+
+**Credentials.** A module that declared `permissions.credentials: ["stripe"]` reads that tenant
+credential with `GET /api/modules/self/credentials/{name}` using its access token. The endpoint
+resolves the module from the token's `connected_app_id`, refuses any name not declared in the
+installed manifest, and resolves through `CredentialResolverPort` (which already audits resolves,
+V188). Security-sensitive: it returns secret material to an external service by design.
+
+As built (9e.1):
+
+- **Who may read.** The gateway forwards the token's `connected_app_id` as `X-Connected-App-Id`
+  (stripped from every client request, stamped only for a connected-app token). The worker finds
+  the one `tenant_module` row of the tenant with that `connected_app_id`, and requires that the row
+  is external, the caller `CallerContextFilter` resolved is the row's `service_user_id`, and the app
+  and its `SERVICE` user are still active. Anything else — a user token, a PAT, a plain connected
+  app, another install's principal — is `403 NOT_MODULE_PRINCIPAL`. The install must be `ACTIVE` or
+  `DEGRADED`, read from the row on every call (`403 MODULE_NOT_ACTIVE`; so a module cannot read
+  while still `INSTALLING`, including during the `installed` lifecycle call). The name must be in the
+  stored manifest's `permissions.credentials` exactly, and a UUID-shaped name is refused because the
+  resolver would look it up as a credential id (`403 CREDENTIAL_NOT_DECLARED`). A declared name the
+  tenant has not created, or has deactivated, is `404 CREDENTIAL_NOT_FOUND`; no credential store
+  (`KELTA_ENCRYPTION_KEY`) is `503 CREDENTIALS_UNAVAILABLE`. All checks run before decryption.
+- **What it returns.** `{name, type, secrets, metadata}`: the decrypted secret fields and the
+  credential's non-secret metadata as the admin entered it (billing's `allowedReturnOrigins`, a list
+  or a comma-separated string). Every answer is `Cache-Control: no-store`. Neither service records the
+  body as span data (`SensitiveBodyRedactor` skips any path with a `credentials` segment), and
+  nothing logs a value.
+- **Audit and purpose.** The read goes through `CredentialResolverPort.resolve(tenant, name,
+  purpose, actor)` (the actor overload is new), so the `CREDENTIAL_RESOLVE` row in
+  `setup_audit_trail` has the module's `SERVICE` user as `user_id`. The purpose is
+  platform-authored: `MODULE:<moduleId>`, plus `:<label>` when the module sends `?purpose=<label>`
+  (`[A-Za-z0-9_.:-]{1,64}`, else `400 INVALID_PARAMETER`). The module can label its reads but cannot
+  hide which module made them.
+- **Authorization at the gateway.** `/api/modules/**` is the `static-modules` route, so the gateway
+  checks only `API_ACCESS` (which every module principal holds); the decision above is the worker's.
+  The path is not in `unauthenticated-paths`.
+
+### 3.4 What a module may see of a record
+
+Hook and event payloads are built from the query engine's internal record, which can contain
+**server-only fields** (encrypted secrets, credential hashes) and fields the module's profile may
+not read. The platform therefore filters every outbound record:
+
+1. **Server-only fields are always removed** (`FieldDefinition.serverOnly`).
+2. Fields whose `visibility` for the module's profile is `HIDDEN` are removed; `MASKED` fields are
+   masked with the existing masking shape.
+3. Hook `fieldUpdates` naming a field the profile cannot write are refused, and the hook result is
+   treated as a module error (§3.6, failure handling).
+
+This mirrors `CerbosFieldSecurityAdvice` / `CerbosFieldWriteSecurityAdvice`, evaluated for the
+module's principal instead of the caller.
+
+### 3.5 Install, upgrade, uninstall
+
+All on the existing `ModuleController`, gated on `CUSTOMIZE_APPLICATION` as today:
+
+| Endpoint | Behavior |
+|---|---|
+| `POST /api/modules/plan` `{ "baseUrl": "…", "purgeData": false }` | Fetches the manifest (through the module-host guard, §3.10), validates it, dry-runs `metadata` through `ModuleMetadataProvisioner`, diffs against the installed version if any, and returns the plan: grants (objects/fields/system/credentials), capabilities (hooks/events/services/routes/schedules/UI), metadata (create/adopt/keep), blockers, and `planHash` |
+| `POST /api/modules/install` `{ "baseUrl": "…", "planHash": "…" }` | Recomputes the plan; refuses with `409` and the new plan when `planHash` differs. Otherwise: creates the service principal (§3.3), provisions metadata (provenance rows as slice 2), fetches and pins the UI bundle (§3.9), registers schedules, writes `tenant_module` with `base_url`, then calls the module's `lifecycle` (`installed`). A non-2xx from `lifecycle` marks the install `FAILED` with `last_error`; metadata stays (provisioning is idempotent) and `POST /{id}/enable` retries. *As built (9c):* the row is written `INSTALLING` first, metadata is provisioned **before** the principal (its grants include full access to the collections the module just `CREATED`, so their ids must exist), then action rows, `lifecycle`, and `ACTIVE` + the event; blockers are `422`, an unreachable module `502` |
+| `POST /api/modules/{id}/upgrade` `{ "planHash": "…" }` | Same, from the stored `base_url`; requires a strictly higher `version`; regenerates the profile; `lifecycle` (`upgraded`, with `fromVersion`) |
+| `POST /api/modules/{id}/enable` / `disable` | Status change + `lifecycle`; disable stops all invocations |
+| `GET /api/modules/{id}/uninstall-plan?purgeData=…` | (9c) What `DELETE` would remove and keep, one decision per provenance row (slice 3 §3.5 table), and its `planHash`. Writes nothing |
+| `DELETE /api/modules/{id}?purgeData=…&planHash=…` | `lifecycle` (`uninstalled`, best effort), removes schedules, deactivates the connected app and the service user, removes `CREATED` resources whose `content_hash` still matches (slice 3 §3.5 contract) |
+
+Every state change publishes `kelta.config.module.changed.<tenantId>.<moduleId>`
+(`ModuleConfigEventPublisher`, already exists), and every pod refreshes its **endpoint registry**
+from the database. No code is loaded on a pod, so the "install activates immediately" and
+"cross-pod divergence" hazards of the JAR path do not apply: a pod that missed an event reads
+current rows on its next refresh (part 9d reconciles every 60 s, `ExternalModuleReconcileScheduler`).
+
+### 3.6 Capability map (nothing lost from the in-process SPI)
+
+| In-process today | External form | Platform side |
+|---|---|---|
+| `ActionHandler` (`ActionContext` → `ActionResult`) | `POST /kelta/v1/actions/{key}` → `{ success, output, error }` | `RemoteActionHandler`, registered per tenant in `ActionHandlerRegistry` under the module's key, so flows reference it exactly as today. Body carries `input` (`resolvedData`), `config`, record context, and `execution { executionId, flowId, stepName, attempt }`. Header `Idempotency-Key` = `executionId:stepName` (stable across retries of one step); a call that carries a task (§3.6.2) is keyed per attempt, `executionId:stepName:attempt` |
+| `BeforeSaveHook.beforeCreate/Update/Delete` → `BeforeSaveResult` | `POST /kelta/v1/hooks` → `{ allowed, fieldUpdates, errors[], conflict }` | `RemoteBeforeSaveHook`, registered in `BeforeSaveHookRegistry` with the manifest `order`. `errors[]` map to `ValidationError(field, message, code)`; `conflict` maps to `HookConflictException` (409). Delete hooks may only veto. Shape follows Kubernetes admission webhooks |
+| `afterCreate/Update/Delete` | `POST /kelta/v1/events` (async) | Delivered from `kelta.record.changed` (§3.6.1). **Never blocks a write**, which matches today's swallowed after-hook exceptions |
+| `getServices()` → `EntitlementProvider.resolve(tenantId, userId)` | `POST /kelta/v1/services/entitlements/resolve` → `MemberEntitlements { planCode, subscriptionStatus, values }` | `ModuleEntitlementService` keeps its contract: any failure or timeout → `MemberEntitlements.EMPTY` (restrictive). Responses cached per `(tenant, user)` for `cacheTtlSeconds` (0–300) |
+| Routes `/api/modules/{id}/x/**` | Proxied to `{baseUrl}/kelta/v1/routes/{path}` | Real HTTP pass-through: method, query, body, `Content-Type`; response status and JSON body back to the caller, 1 MiB cap. Module 5xx or timeout → `502`. Optional `permission` checked against the caller before proxying |
+| Webhook `/api/modules/webhooks/{tenantId}/{moduleId}` | Proxied to `{baseUrl}/kelta/v1/webhooks` | Raw body and today's lower-cased header allowlist (`x-`, `stripe-`, `signature`, `digest`, `content-type`, `user-agent`) pass through; the module verifies the provider's signature; its status passes back so the provider retries on non-2xx |
+| `uiBundlePath` | Fetched and pinned at install (§3.9) | Served at `GET /api/modules/{id}/ui-bundle.js` as today |
+| `scheduled_jobs` FLOW → flow → module action (billing's workaround) | Manifest `schedules` (§3.7) | New job type `MODULE_ACTION` |
+| (none) | `POST /kelta/v1/lifecycle`, `GET /kelta/v1/health` | Lifecycle on install/upgrade/enable/disable/uninstall; health on demand from `GET /api/modules/{id}/health` |
+
+**Failure handling.** Every call has a hard timeout (the manifest's `timeoutMs`; connect timeout
+2 s). The flow `TaskState.timeoutSeconds` field is parsed but not enforced today
+(`FlowDefinitionParser` reads it, `TaskStateExecutor` does not); for remote actions the HTTP
+timeout is the enforcement.
+
+| Outcome | Action (flow error code) | Hook | Service port | Route |
+|---|---|---|---|---|
+| 2xx, `success`/`allowed` | output | apply `fieldUpdates` | cache + use | pass through |
+| 2xx, `success: false` | `ActionFailed` (message `<error.code>: <error.message>`) | validation errors → `400` | — | pass through |
+| Timeout | `ModuleTimeoutException` | `failurePolicy`: `fail` → `503`, `ignore` → proceed | `EMPTY` | `502` |
+| Connect error / 5xx / invalid body | `ModuleUnavailableException` | as timeout | `EMPTY` | `502` |
+| Module disabled or breaker open | `ModuleUnavailableException` | as timeout | `EMPTY` | `503` |
+
+*As built (9d):* a route whose module cannot be reached (connect error) answers `503`
+`ModuleUnavailable` like an open breaker, not `502` — the invoker cannot tell them apart and both
+mean "retry later"; a timeout or a module `5xx` is `502 ModuleUnreachable`. A **disabled** (or
+`FAILED`) install's hooks and entitlements port are unregistered rather than failing: its hooks
+are skipped and the write proceeds, its port is absent (so `EMPTY`). Only a breaker that opens on
+an `ACTIVE`/`DEGRADED` install takes the "as timeout" row. A hook's `fieldUpdates` key that its
+principal may not write (§3.4) is a module failure and follows `failurePolicy`. The flow error code
+for `success: false` is the handler's failure result, message `<error.code>: <error.message>`.
+
+`TaskStateExecutor` uses a thrown exception's simple class name as the flow error code, so the
+remote handler throws `ModuleUnavailableException` (the class today's quarantined handlers throw)
+and a new `ModuleTimeoutException`. Existing flow `Catch` clauses on `ModuleUnavailableException`
+keep matching.
+
+**Circuit breaker.** Per pod, per install: open after 5 consecutive failures, half-open after
+30 s. Opening writes `DEGRADED` with `last_error` (the status exists in `chk_module_status` and has
+never been written); the first success after half-open writes `ACTIVE` again.
+
+**Hooks and transactions.** The query engine opens no transaction itself, but hooks run inside one
+when the caller has one (`AtomicOperationsController`, `PackageImportService`). A remote hook there
+holds a pooled connection (`DB_POOL_MAX` defaults to 10) for up to its timeout. That is why hook
+timeouts cap at 5 s, and it is listed in §8.
+
+#### 3.6.1 Event delivery
+
+A queue-group JetStream consumer `worker-module-events` on `kelta.record.changed.>` (one pod
+processes each event) looks up installs subscribed to the event's tenant + collection + type and
+POSTs `{ eventId, type, collection, recordId, timestamp, data, previousData, changedFields }`,
+filtered per §3.4.
+
+- **At least once.** Ack after a 2xx; on failure `nak` with backoff (5 s, 30 s, 2 min, 10 min,
+  1 h); after the last attempt write a `module_event_dead_letter` row and ack. Modules dedupe on
+  `eventId`.
+- **No ordering guarantee** across records. Per record, `timestamp` lets a module discard stale
+  updates.
+- **`payloadOmitted: true`** events (over `kelta.nats.max-event-payload-bytes`) are forwarded
+  without `data`; the module re-reads by id with its token.
+- No new NATS subject or stream: the consumer reads `KELTA_RECORDS`, which exists.
+
+#### 3.6.2 Long-running actions (task tokens, part 9h)
+
+For work that outlasts one call (an ingest that runs for minutes or hours). The action declares
+`maxDurationSeconds` in the manifest; the consent screen shows it.
+
+1. **Issue.** When a top-level flow Task calls such an action, `RemoteActionHandler` first writes a
+   `module_async_task` row and adds `task: { token, expiresAt }` to the `ActionRequest`. The token
+   is `kmt_` + 32 bytes from `SecureRandom`, base64url (256 bits); only its SHA-256 is stored
+   (`token_hash`, unique). The row binds the tenant, the install, the execution, the step and the
+   attempt. `expiresAt` is now + `maxDurationSeconds`, capped by
+   `kelta.modules.external.async-action-max-duration-seconds`
+   (`KELTA_MODULES_EXTERNAL_ASYNC_ACTION_MAX_DURATION_SECONDS`, default 86400), in whole seconds.
+   The call's `Idempotency-Key` is `<executionId>:<stepName>:<attempt>`, not the synchronous
+   `<executionId>:<stepName>`: each attempt (a `Retry` after a failure or a timeout) brings a new
+   task, so a module that replays its stored answer to an earlier attempt would never see the new
+   token.
+2. **Accept.** The module answers `202 Accepted` (body ignored). The step parks: the execution goes
+   `WAITING` on the Task with a `flow_pending_resume` row whose `resume_event` is
+   `module-task:<id>` and whose `resume_at` is `expiresAt`. A `200` answer finishes the step as a
+   synchronous one and the unused task is deleted, so a module may decide per call. A call that
+   fails deletes it too.
+3. **Complete.** The module (or its worker) calls `POST /api/modules/self/tasks/complete` with its
+   `Kelta-Access-Token` and an `ActionResponse` plus the task's token as the body
+   (`{token, success, output, error}`) → `202`. The token rides the body, never the path: request
+   paths are recorded (span attributes and names, the gateway's audit log on a refusal, ingress
+   access logs), and a recorded body has its `token` member, and any `kmt_…` value, redacted by
+   `SensitiveBodyRedactor`. The outcome is recorded with one conditional update (`PENDING`,
+   unexpired, this tenant, this install), which is what makes the token single use; then the
+   parked step is claimed by its resume key (`claimPendingResumeByEvent`, tenant-scoped,
+   `FOR UPDATE SKIP LOCKED`) and resumed. Everything is in Postgres, so the completion may land
+   on any worker pod; no NATS subject.
+4. **Resume.** The Task re-enters with the recorded outcome in place of a handler call: success
+   applies `ResultPath`/`OutputPath` and continues; failure is `ActionFailed`
+   (`<error.code>: <error.message>`, as a synchronous `success: false`) and takes the Task's
+   `Retry` (a new call and a new task, the attempt count continuing) and then its `Catch`.
+5. **Expire.** Nobody completed it: at `expiresAt` the worker's resume poller claims the row, the
+   task moves `PENDING → EXPIRED` (the same single conditional update a completion races), and the
+   step fails with `ModuleTimeoutException`, Retry and Catch applying. A completion after that is
+   refused. Cancelling the execution expires its pending tasks at once (`AwaitedTaskOutcomes.abandon`),
+   so the module can neither complete them nor renew its access token with them.
+6. **Heartbeat.** The `Kelta-Access-Token` lasts 15 minutes and a task may run for hours, so
+   `POST /api/modules/self/tasks/heartbeat` with `{token}` (same checks, token not consumed) records
+   `last_heartbeat_at` and answers `{accessToken, accessTokenExpiresAt, taskExpiresAt}` with a
+   principal token valid at least 10 more minutes. It does not extend the task.
+7. **A lost answer.** A completion whose `202` the module never saw (a timeout, a dropped
+   connection) is sent again; a `404 TASK_NOT_FOUND` to that retry may mean the first one landed,
+   because a used token and an unknown one get the same answer. The module treats it as possibly
+   delivered. The platform keeps no outcome to replay.
+
+**Who may complete.** The rule of the credential read (§3.3), shared as `ModuleSelfPrincipal`: the
+token's `connected_app_id` (gateway `X-Connected-App-Id`) names an external install of the tenant,
+the caller is its `service_user_id`, the app and user are active (`403 NOT_MODULE_PRINCIPAL`), and
+the install is `ACTIVE`/`DEGRADED` (`403 MODULE_NOT_ACTIVE`). Then the body must be a valid
+`ActionResponse` within a synchronous answer's limits (1 MiB, `output` an object of at most 1000
+keys; `400 INVALID_TASK_RESULT`, checked before the token so a module can fix and retry). A
+missing or malformed token, an unknown one, another install's or tenant's, a used one or an
+expired one are all `404 TASK_NOT_FOUND`: one answer, so a caller learns nothing about tokens it
+does not hold. A
+heartbeat whose new token kelta-auth refuses is `503 TOKEN_UNAVAILABLE`. Every answer is
+`no-store`; the token is never logged or echoed.
+
+**Where a step can wait.** Only a top-level Task of a flow execution (manual, triggered,
+scheduled, MCP or HTTP-started) or of one resumed from WAITING. Inside a `Parallel` or `Map` branch or an invoked sub-flow the
+handler is told it cannot wait (`ActionContext.awaitable() == false`), so no task is issued and a
+`202` is an invalid answer (`ModuleUnavailableException`). A manifest schedule (§3.7) calls the
+action with no task either. A handler that returns `awaiting` anyway where it cannot wait fails
+with `States.AwaitNotSupported`.
+
+**Engine contract (runtime-core).** A handler returns `ActionResult.awaiting(resumeKey, expiresAt)`;
+the engine parks WAITING with a pending-resume row keyed by `resumeKey` and due at `expiresAt`.
+`FlowEngine.resumeAwaitedTask(tenant, key)` claims and resumes it; an `AwaitedTaskOutcomes` bean
+(`ModuleAsyncTaskStore`) settles the outcome the Task resumes with. Parking writes the row, then
+checks `delivered()`, and the completer records the outcome, then claims: each side writes before it
+reads the other, so an outcome that arrives before the step parked still resumes it exactly once.
+
+**Claim lease.** A claim stamps `flow_pending_resume.claimed_at` (V223), and every claim has its
+own identifier. The resume consumes the row (`DELETE … WHERE claimed_by = <its claim>`) before it
+does anything else, and does nothing if the row is gone or held by another claim. A resume that
+fails before it is queued releases its claim and makes the row due now. A claim no resume consumed
+within `kelta.flow.resume.claim-lease-seconds` (`KELTA_FLOW_RESUME_CLAIM_LEASE_SECONDS`, default
+300) is taken over by the resume poller, whatever the row's `resume_at`: the claimer's pod died,
+or its queued resume was dropped at shutdown. A takeover racing a slow resume runs the step once,
+since only the current claim consumes the row. Rows claimed before V223 have no `claimed_at` and are
+never taken over.
+
+### 3.7 Schedules
+
+`schedules[]` become `scheduled_job` rows with a new `job_type = 'MODULE_ACTION'`, executed by
+`ScheduledJobExecutorService` (today it handles `FLOW`, `SCRIPT`, `REPORT_EXPORT`, `DATA_EXPORT`).
+The action is invoked as in §3.6 with no `act` claim. Rows are owned by the install and removed on
+uninstall. This replaces billing's "a module has no scheduler; create a scheduled flow by hand"
+workaround. *As built (9d, `ModuleScheduleSync`):* `job_reference_id` is the install id (the column
+is `varchar(36)`, too short for `<moduleId>:<actionKey>`), `name` is
+`module:<moduleId>:<action>@<cron>` (truncated to 200), `config` is `{"moduleId", "action"}`, and the
+timezone is `UTC`. Sync runs on install and upgrade: a schedule whose name is gone is deleted (with
+its `job_execution_log` rows), a new one inserted, so a changed cron is a new job. The call's
+`Idempotency-Key` is `<jobId>:<fireTime>`; a non-callable install records `SKIPPED`.
+
+### 3.8 Settings
+
+`manifest.settings` is a JSON Schema for per-install configuration (billing's
+`allowedReturnOrigins`). Values are stored on `tenant_module.settings` (jsonb), edited on the
+Modules page through the schema, and sent on every invocation in the `settings` field of the
+request body. Secrets never go in settings; they are credentials (§3.3). This is the minimal form
+of slice 5; slice 5's `credential-ref` setting type folds into `permissions.credentials`.
+
+### 3.9 UI bundle
+
+At install and upgrade the platform fetches `ui.bundlePath` from the module, checks its SHA-256
+against `ui.sha256` (refusing the install on mismatch or absence), stores it in object storage under
+`modules/{tenantId}/{moduleId}/{version}/ui-bundle.{sha256}.js`, and serves it from the Kelta
+origin at the existing `GET /api/modules/{id}/ui-bundle.js`. It is **never proxied live**: the
+bundle runs same-origin in admin sessions, so a compromised or replaced module service must not be
+able to change it after the admin approved it.
+
+### 3.10 Module hosts and SSRF
+
+Module base URLs are typed by tenant admins, and in-cluster modules resolve to private addresses,
+which `OutboundUrlGuard` refuses unless `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` admits them. That
+variable also governs `HTTP_CALLOUT`, `CALL_API` and outbound messages, so widening it to the
+cluster's pod/service ranges would let any flow reach internal services.
+
+So module traffic gets its **own** allow-list, `KELTA_MODULE_ALLOWED_HOSTS` (declared in
+`application.yml` as `${KELTA_MODULE_ALLOWED_HOSTS:}`): a comma-separated list of hostnames or
+`*.suffix` patterns that may resolve to private addresses for module calls only. Public hosts need
+no entry. `https` is required except for hosts on that list. The guard re-checks every request (DNS
+can change after install) and follows no redirects.
+
+### 3.11 Data model (part 9c / 9e migrations)
+
+`tenant_module` gains: `base_url text`, `protocol_version int`, `connected_app_id varchar(36)`,
+`service_user_id varchar(36)`, `settings jsonb`,
+`ui_bundle_sha256 varchar(64)`, `ui_bundle_key text`. `s3_key`, `jar_checksum`, `jar_signature`,
+`module_class` become nullable in 9c and are dropped in 9g.
+
+New: `module_event_dead_letter (id, tenant_id, tenant_module_id, event_id, payload jsonb,
+last_status int, last_error text, attempts int, created_at)` with the standard tenant RLS policy.
+
+## 4. DB migrations
+
+None in 9a. Later parts, numbered at their own head+1 when written (head is **V219** today):
+
+- 9b (V220, built): `platform_user_user_type_check` gains `SERVICE`; `connected_app.run_as_user_id`
+  (FK `platform_user`) and `connected_app.client_secret_enc` (the kept secret, moved here from
+  `tenant_module`).
+- 9c (V221, built): the `tenant_module` columns in §3.11 (`jar_checksum`, `module_class` drop
+  `NOT NULL`; `s3_key`, `jar_signature` already allowed it), `version` widened to 64, and
+  `scheduled_job.chk_job_type` accepts `MODULE_ACTION`.
+- 9e (V222, built): `module_event_dead_letter`.
+- 9h (V223, built): `module_async_task` (`id`, `tenant_id`, `tenant_module_id` → `tenant_module`
+  and `execution_id` → `flow_execution`, both `ON DELETE CASCADE`; `step_name`, `attempt`,
+  `action_key`, `token_hash` unique, `status` `PENDING|COMPLETED|EXPIRED`, `outcome jsonb`,
+  `expires_at`, `last_heartbeat_at`, `created_at`, `completed_at`; indexed by `execution_id` and
+  `tenant_module_id` for the cascades), tenant RLS + admin bypass; `flow_pending_resume.claimed_at`
+  and a partial index on it for the claim lease.
+- 9g: drop the JAR columns and `tenant_module_signing_key` (V186), and remove `QUARANTINED`/`STUB`
+  from `chk_module_status` once no row holds them.
+
+## 5. File-by-file code changes
+
+9a (this PR): this file; `docs/module-protocol/openapi.yaml`; parent `README.md` slice row +
+superseded notes; `3-lifecycle.md` status note; `status.md` modules row; changelog fragment.
+
+Later parts, representative files (each part's PR lists all):
+
+| Part | Files |
+|---|---|
+| 9b | `kelta-auth/.../service/ConnectedAppRegisteredClientRepository.java`, `KeltaTokenCustomizer.java`; `kelta-gateway/.../UserIdentityResolutionFilter.java`, `authz/RouteAuthorizationFilter.java`; worker `CerbosPolicyGenerator.java`, new `ModuleServicePrincipalService`; user listing / governor-limit counting to exclude `SERVICE` |
+| 9c | (as built) runtime-core: new `ExternalModuleManifest`, `ModuleVersion`, `ModuleManifestParser.parseExternal` (v2), new `outbound/ModuleHostGuard` + `OutboundTargetGuard` (so `OutboundHttpClient` takes either guard); worker: `ModuleController.java`, `ModuleMetadataProvisioner.java` (plan/provision with ownership), new `ModuleAssertionSigner`, `ModuleJwksController`, `ModuleHttpClient`, `ModuleAccessTokenService`, `ExternalModulePlanner`, `ExternalModuleService`, `ModuleUninstaller`, `PlatformVersion`; `ModuleServicePrincipalService.updatePermissions`; `CollectionDeletionGuardHook.FORCE`; gateway `application.yml` `unauthenticated-paths` += `/api/modules/.well-known/jwks.json` (the file, not the directory) |
+| 9d | (as built) runtime-core: new `ModuleTimeoutException` (extends `ModuleUnavailableException`), `ActionContext.stepName/attempt`, `OutboundHttpClient.Request.deadline`, `ModuleStore.findAllExternal/compareAndSetStatus`, `GlobalExceptionHandler` 503 `ModuleUnavailable`/`ModuleTimeout`; worker: new `ExternalModuleRegistry` (per-pod endpoint registry; registers into `ActionHandlerRegistry`, `BeforeSaveHookRegistry`, `ModuleServiceRegistry` — not `ModuleRegistrar`, which stays JAR-only), `ExternalModuleInvoker`, `ModuleCircuitBreaker`, `ModulePrincipalAccess`, `RemoteActionHandler`, `RemoteBeforeSaveHook`, `RemoteEntitlementProvider` (`ModuleEntitlementService` unchanged), `ExternalModuleProxy`, `ModuleScheduleSync`, `ExternalModuleReconcileScheduler`; `ModuleHttpClient.invoke`; `ModuleHttpController.java`, `ModuleWebhookController.java` (raw bytes), `ModuleController.java` (health), `ModuleEventListener.java`, `ExternalModuleService.java`, `ScheduledJobRepository.java`, `ScheduledJobExecutorService.java` |
+| 9e | new `ModuleEventDeliveryListener` (beside `RecordWebhookPublisher.java`), `NatsSubscriptionConfig.java`; `ModuleController.java` (bundle pin); `kelta-ui/app/src/pages/ModulesPage/` (install by URL, consent, settings form) |
+| 9e.1 | (as built) runtime-core: `ModuleStore.findByConnectedAppId`; runtime-module-integration: `CredentialResolverPort.resolve(…, actorUserId)`; worker: new `ModuleCredentialController`, `ModuleCredentialService`, `ModuleServicePrincipalService.isActivePrincipal`, `JdbcModuleStore`, `CredentialResolverPortAdapter`, `ModuleConfig`; gateway: `HeaderTransformationFilter` + `IdentityHeaderStripFilter` (`X-Connected-App-Id`) |
+| 9f | `kelta-modules/billing/` (Rust, replaces the Java module), new `kelta-modules/sdk-rust/`; homelab-argo manifests (outside this repo) |
+| 9h | (as built) runtime-core: `ActionResult.awaiting`/`Awaiting`, `ActionContext.awaitable`, `StateExecutionResult.awaiting`, new `flow/AwaitedTaskOutcomes`, `FlowExecutionContext` (awaitable, delivered outcome), `TaskStateExecutor` (park, resume with an outcome), `FlowEngine` (`parkAwaitedTask`, `resumeAwaitedTask`, `resumeExecution(id, claim)`, `cancelExecution` abandons tasks), `FlowStore.claimPendingResumeByEvent(tenant, …)`, `claimPendingResumes(…, lease)`, `consumePendingResume`, `releasePendingResume`, `ExternalModuleManifest.Action.maxDurationSeconds`, `ModuleManifestParser`; worker: V223, new `ModuleAsyncTaskStore`, `ModuleTaskService`, `ModuleTaskController`, `ModuleSelfPrincipal` (shared with `ModuleCredentialService`), `RemoteActionHandler` (task + `202`), `ExternalModuleRegistry`, `ModuleAccessTokenService.accessToken(…, minValidity)`, `JdbcFlowStore`, `FlowResumePollerConfig` (claim lease), `ModuleConfig`, `FlowConfig`, `ExternalModulePlanner`; runtime-jsonapi `SensitiveBodyRedactor` (`kmt_…` values); UI `ModulePlanReview.tsx` |
+| 9g | delete `SandboxedModuleClassLoader`, `ModuleLoader`, `ModuleJarService`, `ModuleSignatureVerifier`, `ModuleLoadRetryScheduler`, `ModuleLoadFailureClassifier`, signing-key endpoints, `install-jar`; JAR branches in `RuntimeModuleManager`. Compiled-in `KeltaModule`s (`runtime-module-core`, `runtime-module-integration`) stay |
+
+Pitfalls that apply (CLAUDE.md): map the JWKS endpoint as a literal path, never `/**` under `/api`
+(`DynamicCollectionRouter`); declare every gating property in `application.yml`; register
+`RemoteBeforeSaveHook` instances through the registry API used for tenant hooks today, not as
+beans.
+
+## 6. Test plan
+
+- **Unit (worker, runtime-core):** assertion signing — claims, `body_sha256`, `exp`, `kid`;
+  manifest v2 parser — every rule in §3.1; plan hashing is stable and changes on any grant or
+  metadata change; outcome table in §3.6 for actions, hooks, services, routes (stub HTTP with
+  `MockWebServer`/WireMock, both already test dependencies); §3.4 filtering removes server-only and
+  hidden fields and refuses unwritable `fieldUpdates`; breaker opens, writes `DEGRADED`, recovers.
+- **Unit (auth, gateway):** a client_credentials token for a connected app with `run_as_user_id`
+  resolves to that user and profile; one without keeps today's behavior. (9b: `KeltaTokenCustomizerTest`,
+  `ConnectedAppRegisteredClientRepositoryTest`, `UserIdentityResolutionFilterTest`.)
+- **`kelta-test-harness` scenario** with a WireMock module container: plan → install with
+  `planHash` → collections exist → flow step calls the action → hook vetoes a create and rewrites a
+  field → route proxy → webhook proxy → event delivered and retried after a 500 → entitlements
+  resolve → disable → `ModuleUnavailableException` → uninstall removes unedited `CREATED` resources. Also: a
+  module token cannot read a collection it was not granted (Cerbos), across RLS. 9b ships
+  `ModuleServicePrincipalScenarioTest` (token claims, granted read/write audited as the user, a
+  profile-permission refusal, tenant confinement, plain-app token unchanged, inactive user, seat
+  count, no sign-in). 9c ships `ExternalModuleInstallScenarioTest` (WireMock module: plan →
+  install with `planHash` → owned collection exists → the principal's `Kelta-Access-Token` reads
+  its grant and owned collection and is refused `VIEW_SETUP` → the lifecycle assertion verifies
+  against the anonymous JWKS → uninstall plan + `DELETE` remove the collection and deactivate the
+  principal; a changed manifest is `409 PlanChanged`). 9d adds `invokesTheModule` to it (flow Task →
+  action with `Idempotency-Key` `<executionId>:Ping`; the hook stamps a field and vetoes a create;
+  route proxy with query and `act`; webhook proxy drops `Cookie`; entitlements `maxActiveWatches: 0`
+  refuses a watch with 422; the `MODULE_ACTION` job fires; disable unregisters hook and route and
+  fails the step with `ModuleUnavailableException`; uninstall deletes the job). The harness now runs
+  the worker scheduler (`SCHEDULER_ENABLED=true`, 2 s poll). 9e adds `deliversEventsAndPinsTheUiBundle`
+  (a record event delivered and signed for `/kelta/v1/events`; a `500` retried with the same
+  `eventId`; one failing every attempt dead-lettered with what was sent; the bundle pinned at
+  install and served from Kelta's copy after the module swapped its file; an upgrade plan showing
+  `uiBundle.changed` and re-pinning). The stack gains an S3Mock object store and a `1s,1s` event
+  backoff. 9e.1 adds `readsOnlyDeclaredCredentials` (the principal reads its declared credential
+  with secrets, metadata and `no-store`, audited as the module with its purpose label; it is refused
+  an undeclared one; an admin token is refused, also with a forged `X-Connected-App-Id`; another
+  install's principal reads only its own; a disabled install reads nothing). 9h adds
+  `completesALongRunningAction` (the action call carries a task and answers `202`; the execution is
+  `WAITING` with only the token's hash stored; a user token, a forged app id, another install's
+  principal, an unknown token and a body without one are refused; an invalid body is `400`; the
+  token in the path is no endpoint; a heartbeat renews the principal token; the completion resumes
+  the step with the module's output; a reused token and a late one after expiry are `404`;
+  cancelling a waiting execution expires its task; a task nobody completes fails its step through
+  the resume poller). `JdbcFlowStorePendingResumeIntegrationTest` runs the claim lease, consume and
+  release SQL on Postgres. Unit: `FlowEngineAwaitedTaskTest` (park, resume, Retry, Catch, expiry, early delivery,
+  tenant-scoped claim, branches), `RemoteActionHandlerAsyncTest`, `ModuleAsyncTaskStoreTest`,
+  `ModuleTaskServiceTest`, `ModuleTaskRouteMappingTest`. The stack's Cerbos is allow-all and its gateway runs with
+  `PERMISSIONS_ENABLED=false`, so the object-permission deny is proven on a real PDP by
+  `CerbosGeneratedPolicyIT.moduleServicePrincipalReadsOnlyItsGrant` and the plain-app 403 by
+  `RouteAuthorizationFilterTest.connectedAppTokenShapes`.
+- **Playwright:** Modules page install by URL; the consent screen lists grants, capabilities and
+  the `planHash`; approve. *As built (9e):* `e2e-tests/tests/admin/integrations/modules.spec.ts`
+  mocks the module API at the browser boundary (the E2E stack runs no module); the worker side is
+  the harness scenario. Upgrade re-consent, the uninstall plan and health are Vitest
+  (`ExternalModules.test.tsx`).
+- **9f:** `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt --check`; the harness scenario
+  against the real billing image; on a staging tenant, Stripe test-mode checkout → webhook →
+  subscription row → entitlements, compared with the Java module's answers before cutover.
+
+## 7. Docs to update
+
+| Doc | Change | Part |
+|---|---|---|
+| `.claude/docs/status.md` | Extensibility/modules row: slice 9 state | each part |
+| parent `README.md` | slice table row 9; security model + reuse map rewritten for external modules; deploy hazard 1 retired | 9a (notes), 9g (rewrite) |
+| `.claude/docs/playbooks.md` | "Ship a runtime-installable module" rewritten for external modules | 9e, 9e.1 |
+| `.claude/docs/architecture.md` | module invocation path, JWKS + credentials + task endpoints and their authorization | 9c, 9d, 9e.1, 9h |
+| `.claude/docs/integrations.md` | module protocol, event delivery semantics, credential reads, long-running actions (flow contract) | 9d, 9e, 9e.1, 9h |
+| `.claude/docs/concerns.md` | close the classloader-sandbox and same-JVM items; add the module-host allow-list and hook-in-transaction notes; the credential-read limits; the long-running-action limits | 9d, 9e.1, 9g, 9h |
+| `CLAUDE.md` | Module Map: `kelta-modules/` holds external services | 9f |
+| `README.md` | `KELTA_MODULE_SIGNING_KEY`, `KELTA_MODULE_ALLOWED_HOSTS`; `KELTA_MODULES_EXTERNAL_ASYNC_ACTION_MAX_DURATION_SECONDS`, `KELTA_FLOW_RESUME_CLAIM_LEASE_SECONDS` | 9c, 9h |
+| `kelta-modules/billing/README.md`, `VERIFICATION.md` | rewritten for the Rust service | 9f |
+
+## 8. Risks & open questions
+
+**Risks**
+
+- **Hook latency on the write path.** A remote hook adds a network round trip to every matching
+  write and, inside a transaction, holds a pooled connection. Mitigation: 5 s cap, per-collection
+  registration, `failurePolicy`, breaker. A wildcard (`*`) hook should be rare; the consent screen
+  says "every create of any collection" in words.
+- **Secret exposure by design.** `GET /api/modules/self/credentials/{name}` hands a tenant secret
+  to an external host. It is limited to declared names, audited, and shown on the consent screen,
+  but an admin approving a malicious module gives it the secret. Same trust decision as giving a
+  SaaS vendor an API key. As built (9e.1), the checks run per read, so disabling or uninstalling
+  the module stops further reads at once even though its last token lives up to 15 minutes; a
+  secret it already read cannot be taken back — rotate the credential.
+- **UI bundle is still full-trust code** in the admin origin (unchanged from the JAR world).
+  Pinning prevents later swaps, not a malicious first version. Sandboxing it (iframe + postMessage
+  bridge) is a separate effort.
+- **Event delivery load.** One consumer pod handles all module deliveries per event; a slow module
+  delays others only through its own retries, because deliveries run concurrently with a per-install
+  in-flight cap (default 8).
+- **Cutover (9f).** Billing must never stub-succeed. Order: install the external billing module
+  on a staging tenant, compare entitlements, then on prod disable the JAR install and install the
+  external one in one maintenance step; the merge-train and PreSync hazards in the parent apply.
+
+**Open questions**
+
+1. **`SERVICE` user type vs a separate principal table.** Recommended: the user type, so
+   `profile`, Cerbos and audit (`created_by`) work unchanged. Cost: every place that lists users
+   or counts seats must exclude it (9b enumerates them).
+2. **Metadata allowlist.** `PAGE_LAYOUT`, `LIST_VIEW`, `DASHBOARD`, `REPORT` would let a module
+   ship its whole admin UX. The MCP `apply_layout` / `apply_listview` / `apply_dashboard` tools now
+   key on `collection + name` / `name`; whether `PackageImportService` matches those types on the
+   same natural keys needs checking before they are admitted.
+3. **On-behalf-of tokens.** v1 modules act as their own principal and receive the actor as a
+   signed claim. Acting *as* the user (RFC 8693 token exchange) would let a route read exactly what
+   the caller can. Deferred until a module needs it.
+4. **Async actions (9h) — resolved, built.** `202` + task token, completed via
+   `POST /api/modules/self/tasks/complete`, the token in the body (§3.6.2). No new state type: an
+   awaited Task parks on the existing WAITING / `flow_pending_resume` machinery and resumes in place.
+   `claimPendingResumeByEvent` now filters by tenant and is what a completion calls; every pending
+   resume gained a claim lease (§3.6.2), so a claim whose resume never ran is taken over. Left open:
+   steps inside `Parallel`/`Map` branches and invoked sub-flows cannot wait (their state is not
+   persisted); the flow's own `TaskState.timeoutSeconds` does not cap `expiresAt`; a lost
+   completion answer is not replayed (a retry gets `404`, step 7).
+5. **Rust trial gate (9f).** Billing in Rust is also the measurement for any later Rust work in the
+   platform: clean and incremental build time, image size, RSS, p50/p99 of
+   `entitlements.resolve`, CI failures and agent iterations per PR, bugs after deploy, each
+   compared with the Java module. Record the numbers in the 9f PR.

@@ -24,6 +24,19 @@ and later replicas of the same image skip, provided `GET /admin/policies` still 
 (`kelta.worker.cerbos.seed.force`) forces a full seed. Runtime permission changes never rely on this
 path — they sync through the profile/permission hooks and `CerbosPolicySyncCoalescer`.
 
+**Admin API credentials — no built-in default password.** `kelta.worker.cerbos.admin-username`
+(`KELTA_WORKER_CERBOS_ADMIN_USERNAME`, default `cerbos`) and `kelta.worker.cerbos.admin-password`
+(`KELTA_WORKER_CERBOS_ADMIN_PASSWORD`, blank by default) are declared in the worker's
+`application.yml`. With a blank password `CerbosPolicySyncService` logs one ERROR at startup and
+every push path (tenant sync, base seed, all-tenant sync) logs an ERROR and returns without calling
+the Admin API; the seeder skips without writing its done-marker
+(`cerbos.policy.seed.skipped{reason=admin-password-missing}`), so the next start with a password
+seeds. The worker keeps running and its gRPC authorization checks keep working against the policies
+Cerbos already holds. **Deploy ordering: set `KELTA_WORKER_CERBOS_ADMIN_PASSWORD` to the Cerbos
+server's Admin API password before deploying a worker with this change, or permission changes stop
+reaching Cerbos.** The dev/CI/harness Cerbos (`docker/cerbos/config.yaml`) has no Admin API and
+loads static policies from disk, so those stacks set no password and the ERROR there is expected.
+
 ### Superset (embedded analytics)
 
 On only when `SUPERSET_URL` (`kelta.superset.url`) is non-blank (`SupersetConfig.SupersetUrlConfigured`,
@@ -41,7 +54,8 @@ were created with; change them in Superset if the address moves.
 
 ### Cerbos SDK on native images
 
-`cerbos-sdk-java` is gRPC + protobuf (`protobuf.version` is pinned in the gateway and worker poms).
+`cerbos-sdk-java` is gRPC + protobuf (`protobuf.version` is pinned in the gateway and worker poms,
+as is `guava.version`: gRPC's own Guava 33.6.0 carries GHSA-xxph-c9ww-hj94).
 Both native profiles initialize protobuf and the Cerbos/`build.buf.validate` generated code at build
 time, so descriptor reflection runs on the build host. The gateway's `ProtobufInitOrderFeature`
 fixes the order those classes initialize in, because protobuf fails if `JavaFeaturesProto` goes
@@ -68,6 +82,23 @@ the visual `$CURRENT_USER` condition both compile to `<attr> == P.attr.userId`. 
 to `P.attr.userId` **only** when `<f>` is `createdBy`/`updatedBy` or a LOOKUP/MASTER_DETAIL/
 REFERENCE field of the rule's collection; a comparison with any other field (e.g.
 `R.attr.ownerEmail == P.id`) is left alone. The stored `profile_custom_rules` rows are not changed.
+
+### Cerbos custom rules
+
+A profile custom rule (`/api/admin/profiles/{profileId}/custom-rules`, `MANAGE_USERS`) is stored
+with effect `allow` or `deny` (lower-case; the API refuses anything else) and a condition that is
+either visual (`{field, operator, value}`, operators `equals`, `not_equals`, `in`, `contains`,
+`greater_than`, `less_than`) or raw CEL (`{expression}`). `CustomRuleCel` compiles both, at save and
+at sync, so the API refuses at save (`400 VALIDATION_FAILED`, `source.pointer` such as
+`/condition/value`) what would not compile: an unknown operator, a field name that is not an
+identifier, an `in` with no items (a list, or comma-separated text as the admin UI sends it), a
+non-numeric value for a comparison, or CEL that cel-java cannot parse. Visual values always reach
+the policy as escaped CEL string literals. A matching deny beats every allow of the same tenant,
+including object permissions and `VIEW_ALL_DATA`/`MODIFY_ALL_DATA`, in the record check. That check
+runs on the records a response returns (`CerbosRecordAuthorizationAdvice`): on `create`, `edit` and
+`delete` it runs after the write, so a custom deny filters the response but does not stop the write
+(there is no pre-write record check; see `architecture.md`). Policy shape, collection guard and
+sync-time handling: `architecture.md` → Custom rules.
 
 ### Attachment lifecycle (S3)
 
@@ -360,9 +391,31 @@ scope, so `resumeExecution` resolves the slug itself (`FlowStore.findTenantSlug`
 binds `runWithTenant(id, slug, …)` — an ID-only scope makes `PhysicalTableStorageAdapter`
 fall back to `public`, where tenant collections don't exist (#1577). A missing tenant
 fails the execution with `Cannot resume: tenant … no longer exists`. Event-based waits resume through
-`claimPendingResumeByEvent` when an event source calls it. Waits inside Parallel/Map
+`claimPendingResumeByEvent(tenantId, event, claimedBy)` when an event source calls it — tenant-scoped,
+because `flow_pending_resume` has no RLS. **Claim lease:** every claim (poller cycle or event)
+has its own identifier and stamps `claimed_at`; the resume first consumes the row it holds
+(`FlowStore.consumePendingResume`, a `DELETE … WHERE claimed_by = ?`) and is a no-op if it no
+longer holds it; a resume that fails before it is queued releases its claim and makes the row due
+now; and the poller takes over any claim older than `kelta.flow.resume.claim-lease-seconds`
+(`KELTA_FLOW_RESUME_CLAIM_LEASE_SECONDS`, default 300) — its pod died or its queued resume was
+dropped at shutdown. A takeover racing a slow resume runs the step once. Waits inside Parallel/Map
 branch sub-definitions are **not** resumable (their state ids aren't in the top-level
 definition) — the resume fails the execution with a clear error instead of hanging.
+
+**Awaited Tasks** (external modules part 9h) reuse the same machinery. A handler may return
+`ActionResult.awaiting(resumeKey, expiresAt)` when its `ActionContext.awaitable()` is true (a
+top-level Task; false in Parallel/Map branches and invoked sub-flows, where an awaiting answer
+fails `States.AwaitNotSupported`). The engine parks WAITING **on the Task** with a pending row
+carrying both `resume_event = resumeKey` and `resume_at = expiresAt`. Whoever finishes the work
+records the outcome and calls `FlowEngine.resumeAwaitedTask(tenantId, resumeKey)`, which claims the
+row by event; at `expiresAt` the poller claims it instead. Either way `resumeExecution` re-runs the
+Task with the outcome the `AwaitedTaskOutcomes` bean settles for the key (the worker's is
+`ModuleAsyncTaskStore`): success applies `ResultPath`/`OutputPath`; a failure (the module's
+`ActionFailed`, or `ModuleTimeoutException` at expiry) takes the Task's `Retry` — a new handler
+call, the attempt count continuing — and then its `Catch`. A key no source knows resumes as
+`States.Timeout` with no retry. The park writes its row, then checks `delivered()`; the completer
+records, then claims: an outcome that arrives before the park still resumes exactly once.
+Cancelling the execution calls `AwaitedTaskOutcomes.abandon`, which expires its open tasks.
 
 ### Manual / MCP / HTTP invocation — the double-wrap rule
 
@@ -487,8 +540,13 @@ records a FAILED delivery.
 
 ## Stripe (portal billing — consumer-alerting slice 1)
 
-> **Billing is the `kelta-billing` runtime module only** (`kelta-modules/billing`, see its
-> README). The worker's compiled-in copy was removed on 2026-10-11 (module-platform slice 8).
+> **Billing is the `kelta-billing` module only.** The worker's compiled-in copy was removed on
+> 2026-10-11 (module-platform slice 8). The module ships in two builds with the same module id,
+> collections and behaviour: the **Rust external service** (`kelta-modules/billing`, part 9f —
+> installed by URL, reads the Stripe credential over the module credential endpoint, verifies the
+> webhook itself) and the **legacy Java JAR** (`kelta-modules/billing-jar`, live on prod until the
+> cutover in `kelta-modules/billing/CUTOVER.md`, removed in part 9g). Differences are called out
+> below as *JAR:*.
 > The module keeps its data in its own collections (`billing_plans`, `billing_customers`,
 > `billing_subscriptions`, `billing_passes`, `billing_entitlement_rules`); the V178 platform
 > tables and their `billing-*` system collections were dropped by V209. Platform code reads entitlements through `ModuleEntitlementService`: the tenant's module
@@ -502,7 +560,10 @@ Nothing here computes an amount.
 the platform needs only a handful of calls, so outbound calls use a plain REST client
 (form-encoded, `JsonNode` responses, pinned `Stripe-Version`, `Idempotency-Key` on POSTs).
 
-**Credential.** Type key `stripe`, resolved by the name `stripe` via `CredentialResolver`.
+**Credential.** Type key `stripe`, named `stripe`. The Rust module declares it in
+`permissions.credentials` and reads it per request with its `Kelta-Access-Token`
+(`GET /api/modules/self/credentials/stripe?purpose=…`, audited as the module); *JAR:* resolved
+in-process by name through `CredentialResolver`.
 Secrets `secretKey` (outbound auth) and `webhookSecret` (inbound verification); metadata
 `publishableKey` and `allowedReturnOrigins` (bounds where a checkout/portal return URL may
 point — without it a caller could redirect a paying member to an attacker-controlled page).
@@ -510,7 +571,9 @@ Test connection calls `GET /v1/account`; the webhook secret can only be format-c
 since verifying it needs a real delivery.
 
 **Webhook.** `POST /api/modules/webhooks/{tenantId}/kelta-billing` — a gateway
-`unauthenticated-paths` entry. The compiled-in `/api/billing/webhooks/stripe/{tenantId}` route was
+`unauthenticated-paths` entry; the worker proxies it, signed, to the Rust module's
+`/kelta/v1/webhooks` with the raw bytes and an allowlist of headers, and returns the module's
+status (not its body) to Stripe. The compiled-in `/api/billing/webhooks/stripe/{tenantId}` route was
 deleted once the module served this one; the verification below is now the **module's**, not the
 platform's, and the platform verifies nothing on this path. The `Stripe-Signature` HMAC over the **raw** body is the only
 trust anchor, so the body must be verified before it is parsed: re-serializing JSON changes
@@ -524,17 +587,29 @@ unauthenticated caller cannot enumerate which tenants have billing configured.
 
 Idempotency **converges** rather than claims: a module writes through `QueryEngine` with no
 transaction of its own, so a pass is granted once per checkout session and a subscription is
-upserted by its Stripe id — a redelivery converges instead of duplicating. (The removed
+upserted by its Stripe id — a redelivery converges instead of duplicating. Two concurrent
+deliveries of one checkout cannot both mint a pass: `billing_passes.stripeCheckoutSessionId` is a
+unique field, and the module reads the platform's refusal of the second create (`400` `unique`
+from validation, or `409 UNIQUE_VIOLATION` from the constraint when two creates race) as "already
+granted" (only where the
+install created that field — see `kelta-modules/billing/CUTOVER.md` for collections adopted from
+the JAR). Out-of-order subscription events are ignored by Stripe's event `created` time, stored in
+`billing_subscriptions.lastStripeEventAt`, and a row in a terminal status (`canceled`,
+`incomplete_expired`) is never moved out of it, so a retried old `updated` cannot re-activate a
+deleted subscription. A signed event whose `metadata.tenantId` names a different tenant than the
+assertion's is acknowledged with 200, logged at WARN and not applied. (The removed
 compiled-in webhook claimed each event id in `billing_webhook_event` inside the mutation's
 transaction; that table was dropped in V207.) Answers 200 for duplicates and for event types
 the module ignores, so the processor stops retrying them.
 
 | Event | Action |
 |---|---|
-| `checkout.session.completed` (mode=payment) | upsert customer; grant a pass, idempotent on the session id |
+| `checkout.session.completed` (mode=payment) | upsert customer; grant a pass, idempotent on the session id, **only when `payment_status` is `paid` or `no_payment_required`** |
+| `checkout.session.async_payment_succeeded` | the same grant, for a delayed payment method that completed the session unpaid |
+| `checkout.session.async_payment_failed` | logged; no pass |
 | `checkout.session.completed` (mode=subscription) | upsert customer only — the subscription arrives on its own event |
-| `customer.subscription.created` / `.updated` | upsert `billing_subscription`; plan resolved via the price id |
-| `customer.subscription.deleted` | mark canceled — the member drops to the DEFAULT plan on next resolve |
+| `customer.subscription.created` / `.updated` | upsert `billing_subscription`; plan resolved via the price id; ignored when older than the row's last event or when the row is terminal |
+| `customer.subscription.deleted` | mark canceled — the member drops to the DEFAULT plan on next resolve; with no row yet, create it canceled, so a late older event cannot create it active |
 | anything else | ignored |
 
 **Member resolution** for an event, in order: `client_reference_id` → `metadata.userId`
@@ -546,12 +621,19 @@ base plan is the member's subscription plan while its status is `active`, `trial
 `past_due` (grace while the card is retried), otherwise the tenant's DEFAULT plan; every live
 pass then merges on top — numbers SUM, booleans OR, arrays union — so a pass can add a
 capability but never revoke one. Pass expiry is judged when entitlements are read, not by the
-`billing:expire-passes` action (scheduled by a tenant flow — a module has no scheduler), so a
-member is never over-entitled by a sweep that has not run yet.
+`kelta-billing:expire-passes` action (an hourly manifest schedule the worker scheduler runs;
+*JAR:* `billing:expire-passes`, scheduled by a tenant flow), so a member is never over-entitled
+by a sweep that has not run yet.
 
 Platform callers (`WatchController`, `AlertDispatchService`) ask the worker's
 `ModuleEntitlementService`, which binds `TenantContext` (id **and** slug) and calls the tenant's
-module `EntitlementProvider`, uncached. **No module installed ⇒ `MemberEntitlements.EMPTY`** —
+module `EntitlementProvider`, uncached (for the Rust module: `POST /kelta/v1/services/entitlements/resolve`,
+manifest TTL 0). The module resolves uncached too by default, as the JAR did — a stale
+entitlement is worse than a slow one (`BILLING_ENTITLEMENTS_CACHE_SECONDS` opts into a cache).
+It does cache a tenant's quota rules (`BILLING_RULES_CACHE_SECONDS`, default 60), because every
+create in the tenant asks its hook: they are invalidated by the rules' record events, which reach
+one replica, so a rule change applies once its event arrives and on any other replica within the
+TTL. **No module installed ⇒ `MemberEntitlements.EMPTY`** —
 the same answer a tenant without billing always got: watches uncapped, push/email ungated, SMS
 never sent (billable channels need an affirmative entitlement). A module that throws, returns
 null, or cannot be called safely (unresolvable slug) also resolves `EMPTY`, never anything wider.
@@ -563,14 +645,14 @@ to NATS and caches nothing, so all three are retired. A tenant that wants billin
 reacts to record changes on the module's collections (e.g. a record-triggered flow on
 `billing_subscriptions`).
 
-**Outbound calls** (`StripeApiClient`): create customer, create checkout session, create
-billing-portal session. Idempotency keys are chosen per operation, and the distinction
-matters: customer creation uses a **deterministic** key (`cust:<tenantId>:<userId>`) because a
-member gets exactly one processor customer ever and a racing retry must replay rather than
-create a duplicate that would violate `billing_customer`'s unique constraint. Checkout and
-portal sessions use a **per-attempt** key — a deterministic one would replay the previous
-session for the processor's 24-hour idempotency window, which would stop a member buying a
-second one-time pass of the same plan on the same day.
+**Outbound calls**: create checkout session, create billing-portal session (the customer is
+created by Stripe at checkout and mirrored from the webhook). Each POST carries an
+`Idempotency-Key`. From a flow action the Rust module derives it from the platform's
+`Idempotency-Key` (`kelta-billing:checkout:<executionId>:<state>`), so a retried step replays the
+same session while a new execution gets a new one; from a route it is per attempt (*JAR:* always
+per attempt). A deterministic per-member key would replay the previous session for the
+processor's 24-hour idempotency window, which would stop a member buying a second one-time pass
+of the same plan on the same day.
 
 **Member endpoints.** Served by the module under `/api/modules/kelta-billing/x`:
 `POST .../checkout-sessions {planCode, successUrl, cancelUrl}` → `{url}`;
@@ -584,10 +666,13 @@ that has not configured origins cannot redirect anywhere rather than anywhere at
 
 **Quota enforcement.** The module's `billing_entitlement_rules` rows say "records in collection
 X are capped by entitlement key Y", and the module's wildcard before-save hook enforces them, so
-capping a new collection is configuration rather than code. It **skips `appliesTo=PORTAL`
-rules** (a module cannot read the caller's user type) — use `appliesTo=ALL`. A rule's optional `countFilter` narrows what
-counts (e.g. only ACTIVE rows); its field names are validated against the collection definition
-and its values bound as parameters. At the limit the create is rejected with **HTTP 400**
+capping a new collection is configuration rather than code. An `appliesTo=PORTAL` rule applies
+only when the signed actor's `user_type` is PORTAL (*JAR:* skipped, since a JAR module cannot read
+the caller's user type). The owner counted is the record's `createdBy`, else the signed actor.
+The Rust module counts with `GET /api/<collection>?filter[createdBy][eq]=…&page[size]=1` over its
+token, which is why its manifest asks for `VIEW_ALL_DATA`. A rule's optional `countFilter` narrows
+what counts (e.g. only ACTIVE rows); its field names are validated against the collection
+definition and its values bound as parameters. At the limit the create is rejected with **HTTP 400**
 (JSON:API code `beforeSaveHook`) carrying an upgrade-oriented message. Enforcement **fails
 open** — a billing glitch must not block a tenant's data entry.
 
@@ -725,6 +810,83 @@ response client and the OIDC/OAuth2 user services (set on `oauth2Login` in
 `AuthorizationServerConfig`) and the ID-token `JwtDecoderFactory<ClientRegistration>` bean (picked
 up by type — keep exactly one). The authorization endpoint is a browser redirect, not a server
 fetch, and is not checked.
+
+## External modules — the module protocol (parts 9d, 9e, 9e.1)
+
+An external module is an HTTP service the worker calls; the contract is
+`docs/module-protocol/openapi.yaml`, the design `specs/module-platform/9-external-modules.md`
+§3.6–§3.7, and the call path `architecture.md` → External module invocation. Every call carries
+the ES256 platform assertion (`Authorization: Bearer`, `htm`/`htu`/`body_sha256` bound to the
+exact request, 60 s `exp`), the principal's `Kelta-Access-Token`, and `traceparent` when a span is
+current. A module must verify the assertion against `GET /api/modules/.well-known/jwks.json`
+before acting.
+
+**Rust SDK (part 9f).** `kelta-modules/sdk-rust` (crate `kelta-module`, MIT) implements the
+module side: `AssertionVerifier` (JWKS cache with refetch on an unknown `kid`, `iss`/`aud`/`exp`/
+`iat`, `htm`/`htu`, `body_sha256`, `jti` replay cache), `ModuleService` (an axum router serving the
+manifest and every `/kelta/v1/*` endpoint behind that verification), `Manifest` (a validating v2
+builder), `PlatformClient` (the `Kelta-Access-Token` client) and, behind the `testing` feature, a
+signing key and an in-memory platform for unit tests. Identity — tenant, install, acting user —
+comes only from the signed claims; forwarded webhook headers are exposed as `UntrustedHeaders`.
+`RUST_LOG=kelta_module=debug` logs each request's method, path, status and latency (never the
+query or a header). `kelta-modules/billing` is built on it.
+
+| Call | When | Request → answer | On failure |
+|---|---|---|---|
+| `POST /kelta/v1/actions/{key}` | a flow Task whose `Resource` is `<moduleId>:<key>`, or a manifest schedule | `{tenantId, input, config, collection, recordId, record, previousRecord, changedFields, execution{executionId, flowId, stepName, attempt, triggerDepth}}` + `Idempotency-Key` → `{success, output}` or `{success: false, error{code, message}}` | flow error code `ModuleTimeoutException` / `ModuleUnavailableException` (a `Catch` can match either); `success: false` fails the step with `<code>: <message>` |
+| `POST /kelta/v1/hooks` | before create/update/delete on a hooked collection | `{tenantId, collection, operation, recordId, record, previousRecord, changedFields}` → `{allowed, fieldUpdates, errors[], conflict}` | `failurePolicy`: `fail` → the write is `503`, `ignore` → the write proceeds unchecked |
+| `POST /kelta/v1/services/entitlements/resolve` | `EntitlementService` lookups (watch quota, alert channels) | `{userId}` → `{planCode, subscriptionStatus, values}`, cached per member for `cacheTtlSeconds` | `MemberEntitlements.EMPTY` (restrictive), never cached |
+| `{METHOD} /kelta/v1/routes/{path}` | a caller of `/api/modules/{id}/x/{path}` | the caller's method, query, body and `Content-Type` → any status + JSON | `5xx`/timeout → `502 ModuleUnreachable`; unreachable/breaker open → `503` |
+| `POST /kelta/v1/webhooks` | a sender POSTing `/api/modules/webhooks/{tenantId}/{moduleId}` | raw bytes + allowlisted headers (`x-`, `stripe-`, `signature`, `digest`, `user-agent`, lower-cased; `Content-Type` as sent) → a status the sender sees | `503` so the sender retries |
+| `GET /kelta/v1/health` | `GET /api/modules/{id}/health`, and the 60 s reconcile for a `DEGRADED`/breaker-open install | → `{status, …}` | reported `unreachable` |
+| `POST /kelta/v1/events` | after a write to a collection the manifest's `events` subscribes to (`created`/`updated`/`deleted`), asynchronously | `{eventId, type, tenantId, collection, recordId, timestamp, data, previousData, changedFields}` (`payloadOmitted: true` and no `data` when the change was too large to carry) → any 2xx | retried after `kelta.modules.external.event-backoff` (default 5 s, 30 s, 2 min, 10 min, 1 h), then a `module_event_dead_letter` row; never fails the write |
+| `GET {ui.bundlePath}` | plan time only (install and upgrade): unsigned, no redirects, at most 5 MiB | → the bundle's bytes, which must hash to `ui.sha256` | the plan is blocked (`UI_BUNDLE_UNAVAILABLE`, `UI_BUNDLE_MISMATCH`) |
+
+What a module receives and must handle:
+
+- **`input`** is the step's resolved data — its `input` object when it has one (a manual or
+  HTTP-started flow double-wraps, so `$.input` is the caller's input), else the whole resolved
+  data. **`config`** is the step's action config (`{}` when none).
+- **No `act` claim on flows and schedules** — there is no request caller there. Routes, and
+  hooks on request paths, carry the caller as `act {sub, user_type}` (routes add `profile_id`).
+- **Records are the principal's view** (spec §3.4): server-only and `HIDDEN` fields absent,
+  `MASKED` fields masked, an unreadable collection `{}`. A hook may only set a declared `VISIBLE`
+  field that is neither server-only nor system-maintained, on a collection its principal may
+  create in (create) or edit (update); any other `fieldUpdates` key — the audit fields (`id`,
+  `createdBy`, …) included — fails the hook.
+- **Deduplicate on `Idempotency-Key`.** Flow steps send `<executionId>:<stepName>` (stable across
+  retries of one step), schedules `<jobId>:<fireTime>` — and a scheduled job can fire twice
+  (`concerns.md` → External modules — invocation).
+- **Schedules run in UTC.** A schedule's cron is a 6-field Spring expression evaluated in UTC; a
+  changed cron is a new job.
+- **Verify the webhook sender yourself.** The platform does not authenticate webhook senders; it
+  forwards the bytes the sender signed and returns your status, with no body.
+- **Events: at least once, unordered.** One queue-group consumer, `worker-module-events`, reads
+  `kelta.record.changed.>` from `KELTA_RECORDS` (no new subject or stream). Deduplicate on
+  `eventId`: a retry caused by another subscriber failing redelivers to you as well. Use
+  `timestamp` to drop a stale update of one record. `data` and `previousData` are the principal's
+  view, like every other call (`concerns.md` → External modules — events and UI bundles).
+- **The UI bundle is pinned.** Kelta fetches it once per install or upgrade and serves its own
+  copy from `GET /api/modules/{id}/ui-bundle.js`. Changing the file on your host changes nothing
+  until an upgrade with a new `ui.sha256`, and the upgrade plan shows the admin the change. Object
+  storage (`KELTA_S3_*`) is required for a module that ships a bundle.
+- **Secrets come from declared credentials** (part 9e.1). A module reads a tenant credential named
+  in its manifest's `permissions.credentials` with `GET /api/modules/self/credentials/{name}` and
+  its `Kelta-Access-Token`, per request: `{name, type, secrets, metadata}`, `no-store`, audited as
+  the module (`MODULE:<moduleId>[:<purpose>]`). Not while the install is `INSTALLING`, so not
+  during `lifecycle installed` (`architecture.md` → External module credential read).
+- **Long-running actions answer `202`** (part 9h). An action declaring `maxDurationSeconds`
+  (1–604800, capped by `KELTA_MODULES_EXTERNAL_ASYNC_ACTION_MAX_DURATION_SECONDS`, default one
+  day) gets `task: {token, expiresAt}` in its request when the step can wait. Answer `202` and the
+  flow step parks `WAITING`; send the `ActionResponse` plus `token` to
+  `POST /api/modules/self/tasks/complete` with the principal token (`202`) and the step resumes with
+  it. The token goes in the body, never the URL. A `200` finishes the step at once. Renew the
+  15-minute access token while working with `POST /api/modules/self/tasks/heartbeat` (`{token}`).
+  A task not completed by `expiresAt` fails the step with `ModuleTimeoutException`; cancelling the
+  execution expires it. The call's `Idempotency-Key` is `<executionId>:<stepName>:<attempt>`, as
+  each attempt brings a new task. A `404` to a retried completion may mean the first one landed. Only top-level Task steps wait: in a `Parallel`/`Map` branch,
+  an invoked sub-flow or a manifest schedule there is no `task`, and a `202` is
+  `ModuleUnavailableException` (`architecture.md` → External module task completion).
 
 ## OIDC federation providers (`oidc-providers`)
 

@@ -396,7 +396,8 @@ export interface PlatformUser {
   lastName: string;
   username?: string;
   status: 'ACTIVE' | 'INACTIVE' | 'LOCKED' | 'PENDING_ACTIVATION';
-  userType?: 'INTERNAL' | 'PORTAL';
+  /** SERVICE = a module service principal (machine identity; never signs in). */
+  userType?: 'INTERNAL' | 'PORTAL' | 'SERVICE';
   locale: string;
   timezone: string;
   profileId?: string;

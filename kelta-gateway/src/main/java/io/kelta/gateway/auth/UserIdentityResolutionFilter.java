@@ -23,6 +23,12 @@ import java.util.regex.Pattern;
  * Resolves the user's identity (profileId, profileName) from the worker
  * and enriches the {@link GatewayPrincipal}.
  *
+ * <p>Connected-app (client_credentials) tokens: a plain app's token carries no profile and no
+ * user, so it stays unresolved and {@code RouteAuthorizationFilter} refuses it ("User identity not
+ * resolved"). A run-as app's token (a module service principal) carries its SERVICE user's
+ * profile and email claims, and that user's id as {@code run_as_user_id}, which becomes the
+ * principal's user id here — no worker lookup.
+ *
  * <p>Order: -50 (after JWT authentication at -100, before route authorization at 0).
  */
 @Component
@@ -84,6 +90,14 @@ public class UserIdentityResolutionFilter implements GlobalFilter, Ordered {
         // `sub` and never does.
         if (principal.getProfileId() != null && !principal.getProfileId().isEmpty()) {
             Object sub = principal.getClaims().get("sub");
+            // A module service principal's client_credentials token (a connected app bound to a
+            // SERVICE user) keeps the client id as `sub` and names its user in `run_as_user_id`;
+            // kelta-auth signs it only for an active SERVICE user of the token's tenant.
+            Object runAsUserId = principal.getClaims().get("run_as_user_id");
+            if (principal.getUserId() == null && principal.getConnectedAppId() != null && isUuid(runAsUserId)) {
+                principal = principal.withUserId((String) runAsUserId);
+                exchange.getAttributes().put(PRINCIPAL_ATTRIBUTE, principal);
+            }
             if (principal.getUserId() == null && isUuid(sub)) {
                 principal = principal.withUserId((String) sub);
                 exchange.getAttributes().put(PRINCIPAL_ATTRIBUTE, principal);

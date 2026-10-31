@@ -33,6 +33,31 @@ class LoginTrackingFilterTest {
     }
 
     @Test
+    void shouldNotTrackOrWelcomeAServiceUser() throws ServletException, IOException {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/accounts");
+        request.addHeader("X-User-Id", "billing.ab12@service.kelta.invalid");
+        request.addHeader("X-Tenant-ID", "tenant-123");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        when(jdbcTemplate.queryForObject(
+                eq("SELECT id FROM platform_user WHERE tenant_id = ? AND email = ? LIMIT 1"),
+                eq(String.class), eq("tenant-123"), eq("billing.ab12@service.kelta.invalid")))
+                .thenReturn("svc-uuid-1");
+        when(jdbcTemplate.queryForObject(
+                eq("SELECT user_type FROM platform_user WHERE id = ?"), eq(String.class), eq("svc-uuid-1")))
+                .thenReturn("SERVICE");
+
+        filter.doFilterInternal(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+        verify(jdbcTemplate, never()).update(anyString(), any(Object[].class));
+        verify(jdbcTemplate, never()).queryForList(anyString(), any(Object[].class));
+        // Throttled like a tracked user, so the type is not re-read on every request.
+        assertTrue(throttleCache.containsKey("tenant-123:billing.ab12@service.kelta.invalid"));
+    }
+
+    @Test
     void shouldTrackLoginWhenValidHeadersAndUserFound() throws ServletException, IOException {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/accounts");
         request.addHeader("X-User-Id", "alice@example.com");

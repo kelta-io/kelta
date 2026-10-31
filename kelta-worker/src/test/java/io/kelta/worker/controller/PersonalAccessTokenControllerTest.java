@@ -138,6 +138,18 @@ class PersonalAccessTokenControllerTest {
         }
 
         @Test
+        void shouldRefuseAServiceUserWith403AndMintNothing() {
+            when(userIdResolver.resolve("svc-1", "tenant-1")).thenReturn("svc-1");
+            when(jdbcTemplate.queryForList(contains("platform_user"), eq("svc-1"), eq("tenant-1")))
+                    .thenReturn(List.of(Map.of("email", "billing.ab12@service.kelta.invalid", "user_type", "SERVICE")));
+
+            var response = controller.createToken("svc-1", Map.of("name", "Escape hatch", "expiresInDays", 365));
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            verify(jdbcTemplate, never()).update(contains("INSERT INTO user_api_token"), any(Object[].class));
+        }
+
+        @Test
         void shouldThrowUniqueViolationWhenNameAlreadyExists() {
             when(jdbcTemplate.queryForList(contains("platform_user"), eq("user-1"), eq("tenant-1")))
                     .thenReturn(List.of(Map.of("email", "user@test.com")));

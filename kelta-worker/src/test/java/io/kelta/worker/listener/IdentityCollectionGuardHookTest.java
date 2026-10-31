@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -24,6 +25,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -59,6 +61,48 @@ class IdentityCollectionGuardHookTest {
     private final void stubPermissions(Map<String, Object>... permissions) {
         when(bootstrapRepository.findProfileSystemPermissions("profile-1"))
                 .thenReturn(List.of(permissions));
+    }
+
+    @Nested
+    @DisplayName("SERVICE users (module service principals)")
+    class ServiceUsers {
+
+        @Test
+        @DisplayName("an API caller cannot update a SERVICE user, even with MANAGE_USERS")
+        void updateIsRefusedWhateverThePermission() {
+            bindRequestWithProfile("profile-1");
+
+            BeforeSaveResult result = hook.beforeUpdate("users", "svc-1",
+                    Map.of("profileId", "admin-profile"), Map.of("userType", "SERVICE"), "tenant-1");
+
+            assertThat(result.isSuccess()).isFalse();
+            assertThat(result.getErrors().get(0).message()).contains("managed by their module");
+            verifyNoInteractions(bootstrapRepository);
+        }
+
+        @Test
+        @DisplayName("an API caller with MANAGE_USERS cannot delete a SERVICE user")
+        void deleteIsRefused() {
+            bindRequestWithProfile("profile-1");
+            stubPermissions(Map.of("permission_name", "MANAGE_USERS", "granted", true));
+            JdbcTemplate jdbc = mock(JdbcTemplate.class);
+            when(bootstrapRepository.getJdbcTemplate()).thenReturn(jdbc);
+            when(jdbc.queryForObject("SELECT user_type FROM platform_user WHERE id = ?", String.class, "svc-1"))
+                    .thenReturn("SERVICE");
+
+            BeforeSaveResult result = hook.beforeDelete("users", "svc-1", "tenant-1");
+
+            assertThat(result.isSuccess()).isFalse();
+        }
+
+        @Test
+        @DisplayName("internal paths (no request identity) still maintain a SERVICE user")
+        void internalPathIsAdmitted() {
+            BeforeSaveResult result = hook.beforeUpdate("users", "svc-1",
+                    Map.of("status", "INACTIVE"), Map.of("userType", "SERVICE"), "tenant-1");
+
+            assertThat(result.isSuccess()).isTrue();
+        }
     }
 
     @Nested

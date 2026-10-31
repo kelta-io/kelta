@@ -142,6 +142,32 @@ public interface ModuleStore {
     java.util.Map<String, Object> findLoadDiagnostics(String id);
 
     /**
+     * Writes a status and the error that caused it ({@code null} clears the error), without
+     * touching the load counters. External modules use it for lifecycle outcomes: nothing is
+     * loaded on a pod for them, so {@link #recordLoadOutcome} would misreport a load.
+     */
+    void updateStatusWithError(String id, String status, String error);
+
+    /** Records an external install's service principal (part 9b's connected app and SERVICE user). */
+    void updateServicePrincipal(String id, String connectedAppId, String serviceUserId);
+
+    /**
+     * Rewrites an external module row for an upgrade: version, name, description, manifest and
+     * protocol version. Status, {@code installed_at} and {@code installed_by} are untouched.
+     */
+    void updateExternalManifest(String id, String version, String name, String description,
+                                String manifestJson, int protocolVersion);
+
+    /**
+     * Records an external install's pinned admin UI bundle: its SHA-256 and object-storage key,
+     * or {@code null} for both when the module ships no UI.
+     */
+    void updateUiBundle(String id, String sha256, String key);
+
+    /** Replaces a module's action rows with {@code actions}. */
+    void replaceActions(String moduleRowId, List<TenantModuleData.TenantModuleActionData> actions);
+
+    /**
      * Deletes a module and its associated actions.
      *
      * @param id the module primary key
@@ -154,4 +180,33 @@ public interface ModuleStore {
      * @return all active modules
      */
     List<TenantModuleData> findAllActive();
+
+    /**
+     * Lists every external module install across all tenants, whatever its status, with its
+     * actions — what each pod's endpoint registry reconciles against. Read with no tenant bound
+     * (the RLS bypass), like {@link #findAllActive()}.
+     */
+    default List<TenantModuleData> findAllExternal() {
+        return List.of();
+    }
+
+    /**
+     * The install whose service principal is the connected app {@code connectedAppId}, in
+     * {@code tenantId} — how a module's own call back to the platform names its install. Empty
+     * unless exactly one row matches.
+     */
+    default Optional<TenantModuleData> findByConnectedAppId(String tenantId, String connectedAppId) {
+        return Optional.empty();
+    }
+
+    /**
+     * Writes {@code status} and {@code error} only while the row still holds {@code expected}, so
+     * a pod's circuit breaker (ACTIVE ⇄ DEGRADED) can never overwrite an admin's disable or an
+     * uninstall in flight.
+     *
+     * @return true when the row was changed
+     */
+    default boolean compareAndSetStatus(String id, String expected, String status, String error) {
+        return false;
+    }
 }

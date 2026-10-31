@@ -70,7 +70,8 @@ class ModuleControllerEnableTest {
         bootstrapRepository = mock(BootstrapRepository.class);
         grant(true);
         controller = new ModuleController(
-                manager, publisher, routes, provenance, permissionResolver, bootstrapRepository);
+                manager, publisher, routes, provenance, permissionResolver, bootstrapRepository,
+                mock(ObjectProvider.class), mock(ObjectProvider.class));
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 

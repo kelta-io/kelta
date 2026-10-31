@@ -81,6 +81,7 @@ jobs:
       java_audit: ${{ steps.filter.outputs.java_audit }}
       e2e: ${{ steps.filter.outputs.e2e }}
       runtime_modules: ${{ steps.filter.outputs.runtime_modules }}
+      rust_modules: ${{ steps.filter.outputs.rust_modules }}
       quickstart: ${{ steps.filter.outputs.quickstart }}
       templates: ${{ steps.filter.outputs.templates }}
       mcp_replay: ${{ steps.filter.outputs.mcp_replay }}
@@ -397,6 +398,40 @@ jobs:
           retention-days: 7
 
   # ===========================================================================
+  # Rust external modules (kelta-modules/Cargo.toml workspace: the kelta-module SDK
+  # crate and the kelta-billing service). cargo fmt --check, clippy -D warnings and
+  # cargo test run inside the image's `check` stage, so CI uses exactly the toolchain
+  # rust-toolchain.toml pins and the runner needs nothing but Docker. Nothing is pushed:
+  # Build and Deploy builds and pushes the runtime image after merge.
+  # ===========================================================================
+  test-rust-modules:
+    name: Test Rust Modules
+    needs: changes
+    runs-on: k8s-runner
+    timeout-minutes: 30
+    if: (needs.changes.outputs.rust_modules == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # The action, not a run step: buildx's type=gha cache needs ACTIONS_RUNTIME_TOKEN,
+      # which only an action's environment has. The cached layer that matters is the
+      # dependency build against stub sources (see kelta-modules/Dockerfile).
+      - name: cargo fmt --check, clippy -D warnings, cargo test (Dockerfile check stage)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: kelta-modules/Dockerfile
+          target: check
+          push: false
+          cache-from: type=gha,scope=rust-modules-check
+          cache-to: type=gha,mode=max,scope=rust-modules-check
+          platforms: linux/amd64
+
+  # ===========================================================================
   # Test Frontend (lint, typecheck, unit tests with coverage)
   # Runs when kelta-web or kelta-ui changed (ui depends on web).
   # ===========================================================================
@@ -523,7 +558,9 @@ jobs:
     needs: [changes, test-java]
     if: (needs.changes.outputs.integration == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: k8s-runner-integration
-    timeout-minutes: 20
+    # 25, not 20: a cold kelta-billing image build (release, thin LTO) adds a few minutes
+    # when the kelta-ci builder has no cached dependency layer.
+    timeout-minutes: 25
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -571,6 +608,7 @@ jobs:
           docker pull redis:7-alpine
           docker pull nats:2.10-alpine
           docker pull ghcr.io/cerbos/cerbos:0.40.0
+          docker pull adobe/s3mock:3.12.0
           docker pull eclipse-temurin:25-jre-alpine
 
       - name: Install psql client
@@ -614,6 +652,17 @@ jobs:
             echo "Built ${service}-harness"
           done
 
+      # BillingModuleScenarioTest runs the real kelta-billing image (kelta-modules/Dockerfile),
+      # not a stub. The persistent kelta-ci builder (see the e2e job) keeps the cargo dependency
+      # layer between runs; the label is what ci/docker-reclaim.sh ages loaded images by.
+      - name: Build the kelta-billing module image
+        run: |
+          docker buildx inspect kelta-ci >/dev/null 2>&1 \
+            || docker buildx create --name kelta-ci --driver docker-container
+          docker buildx build --builder kelta-ci --load \
+            --label "io.kelta.ci.loaded-at=$(date +%s)" \
+            -f kelta-modules/Dockerfile -t kelta-billing-harness .
+
       - name: Run cross-service harness
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
@@ -639,9 +688,14 @@ jobs:
   # JVM-mode service Dockerfiles from docker-compose.ci.yml so PR feedback stays
   # under ~25 min instead of the ~50 min a native GraalVM build would cost.
   # Native images are still validated post-merge by build-and-publish-containers.yml.
+  #
+  # Two shards (PLT-868): the serial Playwright step (one worker, ~9.5 min) was the whole
+  # PR critical path. Each shard brings up its own stack and runs `--shard=<n>/2` of the
+  # suite in the same file order; auth-setup, a dependency project, runs in both. A shard's
+  # compose project, cerbos tag, concurrency group and artifact all carry its number.
   # ===========================================================================
   e2e:
-    name: E2E Tests
+    name: E2E Tests (shard ${{ matrix.shard }}/2)
     needs: changes
     if: >-
       (needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
@@ -649,19 +703,28 @@ jobs:
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: k8s-runner-integration
     timeout-minutes: 45
+    # Both shards always finish, so a red run reports every failing spec, as the
+    # single job did.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     # Per-branch concurrency: cancel an in-flight run when the PR is updated.
     # Cross-PR isolation comes from docker-compose.ci.yml dropping host port
     # bindings and COMPOSE_PROJECT_NAME namespacing container names; Playwright
     # runs inside a container on the compose network so no host ports are needed.
+    # Per shard too: without the suffix the two shards share one group and cancel each other.
     concurrency:
-      group: e2e-${{ github.head_ref || github.ref }}${{ inputs.update_snapshots_ref && format('-update-snapshots-{0}', inputs.update_snapshots_ref) || '' }}
+      group: e2e-${{ github.head_ref || github.ref }}-shard-${{ matrix.shard }}${{ inputs.update_snapshots_ref && format('-update-snapshots-{0}', inputs.update_snapshots_ref) || '' }}
       cancel-in-progress: true
     env:
-      COMPOSE_PROJECT_NAME: ci-${{ github.run_id }}-${{ github.run_attempt }}
-      # docker-compose.ci.yml's cerbos `image:` tag. Per run AND job: the four compose jobs
-      # share the node's daemon, and a fixed tag let one job's teardown remove the image
+      COMPOSE_PROJECT_NAME: ci-${{ github.run_id }}-${{ github.run_attempt }}-e2e${{ matrix.shard }}
+      # docker-compose.ci.yml's cerbos `image:` tag. Per run AND job (AND shard): the compose
+      # jobs share the node's daemon, and a fixed tag let one job's teardown remove the image
       # another had just loaded (PLT-618). Spelled out: job env cannot read env.*.
-      CERBOS_CI_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-e2e
+      CERBOS_CI_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-e2e-${{ matrix.shard }}
+      # Playwright's --shard value for this job.
+      E2E_SHARD: ${{ matrix.shard }}/2
       # HEAD, not the pinned release the base file pulls: docker-compose.build.yml restores
       # the from-source build stanzas, docker-compose.ci.yml makes the stack safe on the
       # shared daemon, docker-compose.ci-build.yml swaps in the JVM Dockerfiles + CI UI build.
@@ -751,8 +814,9 @@ jobs:
       # A fresh tenant + PAT, then `kelta mcp serve --source remote --mcp-url
       # http://kelta-mcp:8080 --toolset all` from a container on the compose network: fails
       # unless the authoring tools are listed and a create_collection reads back through
-      # get_collection_schema. See ci/mcp-smoke.sh.
+      # get_collection_schema. See ci/mcp-smoke.sh. Once per run: shard 1 (the shorter one).
       - name: MCP smoke (kelta mcp serve bridging the compose kelta-mcp)
+        if: matrix.shard == 1
         timeout-minutes: 10
         run: ADMIN_PASSWORD="$E2E_ADMIN_PASSWORD" bash ci/mcp-smoke.sh
 
@@ -817,16 +881,19 @@ jobs:
       # runs --update-snapshots, commits the PNGs + the marker deletion to the head branch and
       # exits 1, so `Run Playwright tests` below does not run; the push starts a normal run.
       # ARGOCD_REPO_TOKEN (a PAT), never GITHUB_TOKEN: a GITHUB_TOKEN push triggers no workflow.
+      # Shard 1 only (it regenerates every listed spec, whichever shard holds it): two shards
+      # would push two commits to the same head.
       - name: Regenerate visual baselines (commit + push to the head branch, then fail)
         id: update_snapshots
         if: >-
-          (github.event_name == 'pull_request'
+          matrix.shard == 1
+          && ((github.event_name == 'pull_request'
             && needs.changes.outputs.update_snapshots == 'true'
             && github.event.pull_request.head.repo.full_name == github.repository
             && github.event.pull_request.head.ref != 'main')
           || (github.event_name == 'workflow_dispatch'
             && inputs.update_snapshots_ref != ''
-            && inputs.update_snapshots_ref != 'main')
+            && inputs.update_snapshots_ref != 'main'))
         timeout-minutes: 30
         env:
           SNAPSHOTS_REF: ${{ github.event.pull_request.head.ref || inputs.update_snapshots_ref }}
@@ -850,7 +917,7 @@ jobs:
             --network "$NETWORK" \
             --env-file "$RUNNER_TEMP/e2e-runner.env" \
             kelta-e2e-runner:local \
-            npx playwright test
+            npx playwright test --shard="$E2E_SHARD"
 
       - name: Copy Playwright reports out of container
         if: always() && steps.playwright.outcome != 'skipped'
@@ -876,7 +943,7 @@ jobs:
             {
               echo "### Agent-authoring benchmark (K-9)"
               echo ""
-              echo "No request-count report found (agent-authoring.spec.ts did not run or was skipped)."
+              echo "No request-count report found in shard ${E2E_SHARD} (agent-authoring.spec.ts is in the other shard, or did not run or was skipped)."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -893,7 +960,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-report
+          name: e2e-report-shard-${{ matrix.shard }}
           path: |
             e2e-tests/playwright-report/
             e2e-tests/test-results/
@@ -1955,17 +2022,18 @@ jobs:
 
   quality-gate:
     name: Quality Gate
-    needs: [changes, test-java, test-runtime, test-runtime-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, templates, mcp-replay, upgrade, worker-image-is-jvm, dependency-audit, dependency-audit-java, lint-workflows, test-ci-scripts, test-dora]
+    needs: [changes, test-java, test-runtime, test-runtime-modules, test-rust-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, templates, mcp-replay, upgrade, worker-image-is-jvm, dependency-audit, dependency-audit-java, lint-workflows, test-ci-scripts, test-dora]
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: k8s-runner
     steps:
       - name: Check job results
         run: |
-          for job in test-java test-runtime test-runtime-modules test-frontend test-marketing integration-tests e2e quickstart templates mcp-replay upgrade worker-image-is-jvm dependency-audit dependency-audit-java lint-workflows test-ci-scripts test-dora; do
+          for job in test-java test-runtime test-runtime-modules test-rust-modules test-frontend test-marketing integration-tests e2e quickstart templates mcp-replay upgrade worker-image-is-jvm dependency-audit dependency-audit-java lint-workflows test-ci-scripts test-dora; do
             case "${job}" in
               test-java)         result="${{ needs.test-java.result }}" ;;
               test-runtime)      result="${{ needs.test-runtime.result }}" ;;
               test-runtime-modules) result="${{ needs.test-runtime-modules.result }}" ;;
+              test-rust-modules) result="${{ needs.test-rust-modules.result }}" ;;
               test-frontend)     result="${{ needs.test-frontend.result }}" ;;
               test-marketing)    result="${{ needs.test-marketing.result }}" ;;
               integration-tests) result="${{ needs.integration-tests.result }}" ;;

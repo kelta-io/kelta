@@ -1,10 +1,14 @@
 package io.kelta.worker.controller;
 
 import io.kelta.runtime.workflow.ActionResult;
+import io.kelta.runtime.workflow.ModuleUnavailableException;
+import io.kelta.worker.module.ExternalModuleProxy;
 import io.kelta.worker.module.RuntimeModuleManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,10 +18,10 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.Locale;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * Inbound webhooks for runtime-installed modules.
@@ -48,30 +52,39 @@ public class ModuleWebhookController {
 
     private static final Logger log = LoggerFactory.getLogger(ModuleWebhookController.class);
 
-    /**
-     * Headers forwarded to the handler. An allowlist rather than the whole header map: everything
-     * a signature scheme needs travels in a purpose-specific header, while the rest carries
-     * gateway and infrastructure detail a module has no business reading.
-     */
-    private static final Set<String> FORWARDED_HEADER_PREFIXES = Set.of(
-            "x-", "stripe-", "signature", "digest", "content-type", "user-agent");
-
     private final RuntimeModuleManager runtimeModuleManager;
+
+    /** External modules (part 9d); null when module support is switched off. */
+    private ExternalModuleProxy externalModules;
 
     public ModuleWebhookController(RuntimeModuleManager runtimeModuleManager) {
         this.runtimeModuleManager = runtimeModuleManager;
     }
 
-    /** UNAUTHENTICATED path — the dispatched module handler owns verification. */
+    /** Injected via setter so the existing constructor stays as it is. */
+    @Autowired(required = false)
+    public void setExternalModules(ExternalModuleProxy externalModules) {
+        this.externalModules = externalModules;
+    }
+
+    /**
+     * UNAUTHENTICATED path — the module owns verification. The body arrives as bytes so an
+     * external module receives exactly what the sender signed; a JAR handler gets it decoded with
+     * the request's charset (UTF-8 when it names none).
+     */
     @PostMapping("/{tenantId}/{moduleId}")
     public ResponseEntity<Void> receive(@PathVariable String tenantId,
                                         @PathVariable String moduleId,
                                         @RequestHeader Map<String, String> headers,
-                                        @RequestBody(required = false) String rawBody) {
+                                        @RequestBody(required = false) byte[] rawBody) {
+        if (externalModules != null && externalModules.isExternal(tenantId, moduleId)) {
+            return forward(tenantId, moduleId, rawBody, headers);
+        }
         Optional<ActionResult> result;
         try {
-            result = runtimeModuleManager.dispatchWebhook(
-                    tenantId, moduleId, rawBody, forwardableHeaders(headers));
+            result = runtimeModuleManager.dispatchWebhook(tenantId, moduleId,
+                    rawBody == null ? null : new String(rawBody, charset(headers)),
+                    ExternalModuleProxy.forwardableHeaders(headers));
         } catch (RuntimeException e) {
             // Module code threw rather than returning a failure result. 500 asks the sender to
             // retry, which is the right answer for an unexpected fault.
@@ -95,20 +108,37 @@ public class ModuleWebhookController {
     }
 
     /**
-     * Header names are case-insensitive on the wire; lower-case them so a module can look one up
-     * by a known key instead of guessing the sender's capitalization.
+     * An external module's webhook: the raw bytes and the allowlisted headers forwarded to
+     * {@code {baseUrl}/kelta/v1/webhooks}, and the module's status handed back so the sender
+     * retries what the module did not accept. 503 when the module cannot be called, so it retries.
      */
-    private Map<String, String> forwardableHeaders(Map<String, String> headers) {
-        if (headers == null) {
-            return Map.of();
+    private ResponseEntity<Void> forward(String tenantId, String moduleId, byte[] rawBody,
+                                         Map<String, String> headers) {
+        Optional<ExternalModuleProxy.Forwarded> forwarded;
+        try {
+            forwarded = externalModules.webhook(tenantId, moduleId, rawBody, headers);
+        } catch (ModuleUnavailableException e) {
+            log.warn("External module '{}' of tenant {} could not take a webhook: {}", moduleId, tenantId,
+                    e.getMessage());
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
         }
-        Map<String, String> forwarded = new java.util.LinkedHashMap<>();
-        headers.forEach((name, value) -> {
-            String lower = name.toLowerCase(Locale.ROOT);
-            if (FORWARDED_HEADER_PREFIXES.stream().anyMatch(lower::startsWith)) {
-                forwarded.put(lower, value);
-            }
-        });
-        return Map.copyOf(forwarded);
+        return forwarded.map(f -> ResponseEntity.status(f.status()).<Void>build())
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /** The request body's charset, UTF-8 when the {@code Content-Type} names none (or a bad one). */
+    private static Charset charset(Map<String, String> headers) {
+        String contentType = headers == null ? null : headers.entrySet().stream()
+                .filter(e -> "content-type".equalsIgnoreCase(e.getKey())).map(Map.Entry::getValue)
+                .findFirst().orElse(null);
+        if (contentType == null) {
+            return StandardCharsets.UTF_8;
+        }
+        try {
+            Charset charset = MediaType.parseMediaType(contentType).getCharset();
+            return charset == null ? StandardCharsets.UTF_8 : charset;
+        } catch (RuntimeException e) {
+            return StandardCharsets.UTF_8;
+        }
     }
 }

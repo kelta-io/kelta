@@ -1,6 +1,6 @@
 ---
 title: Email, SMS and push configuration
-description: Platform SMTP and per-tenant overrides, email templates and the transactional send endpoint, SMS via Twilio, and push through FCM, APNs and browser Web Push.
+description: Platform SMTP and per-tenant overrides, email templates and the transactional send endpoint, SMS via Twilio, push through FCM, APNs and browser Web Push, and availability-alert channels including webhooks.
 section: platform
 order: 50
 ---
@@ -88,3 +88,101 @@ subscribers can coexist:
 
 Web Push is implemented on JDK cryptography (RFC 8291/8188/8292) without third-party libraries. Live verification
 against real browsers is owed; treat it as functional-but-unproven in production until you have tested it.
+
+## Availability alert channels
+
+An availability alert is delivered over each channel its watch asks for, narrowed to the member's `channels`
+entitlement when the tenant gates channels (a tenant that gates must list every channel it offers, including
+`webhook`). With no `channels` entitlement the tenant is not gating, and every free channel is delivered.
+
+| Channel | Delivery | Billable |
+|---|---|---|
+| `push` | the member's registered devices (see Push) | no |
+| `email` | the `availability.alert` email template to the member's address | no |
+| `sms` | the member's phone number (see SMS); only ever sent on an affirmative entitlement | yes |
+| `webhook` | a JSON `POST` to the tenant's webhook URL | no |
+
+Each delivery is recorded as `SENT` or `FAILED` with a reason; there are no retries. `GET /api/alerts/latency`
+accepts `?channel=push|email|sms|webhook`.
+
+### Webhook
+
+The body is:
+
+```json
+{
+  "alertId": "…",
+  "watchId": "…",
+  "targetId": "…",
+  "slotKey": "2026-08-14",
+  "eventTime": "2026-08-01T12:00:00Z",
+  "dispatchTime": "2026-08-01T12:00:01.234Z"
+}
+```
+
+`eventTime` is when the alert was created (the opening was detected); `dispatchTime` is when the worker sent the
+request. Any `2xx` answer records the delivery `SENT`; anything else records `FAILED` with the HTTP status.
+
+| | |
+|---|---|
+| Tenant setting | `alerts.webhookUrl` in the tenant's `settings` JSON, e.g. `{"alerts": {"webhookUrl": "https://hooks.example.com/alerts"}}` |
+| Fallback | `KELTA_ALERTS_WEBHOOK_URL` (worker), used for every tenant without its own URL — for self-hosted installs |
+| No URL | the delivery records `FAILED` with `webhook URL not configured`; watches are still accepted |
+| Timeouts | 3 s to connect, 5 s for the whole request; redirects are not followed |
+
+The URL is checked by the same outbound guard as other tenant-supplied URLs: it must resolve to a public address.
+A receiver on a private network (an in-cluster service, an RFC 1918 host) is refused — recorded `FAILED` with
+`webhook URL refused: the host resolves to a non-public address` — unless the operator lists its range in
+`KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` on the worker (comma-separated CIDRs).
+
+### Synthetic events
+
+To test the alert path end to end (an E2E suite, a scheduled canary) without a provider poll, mark a watch target
+`synthetic` and inject an observation for it. The injected observation goes through the same matcher and delivery
+code as a polled one, so it creates the same alert and delivery rows, records the same latency metric, and sends
+the same `availability` flow trigger. That trigger's summary carries `"synthetic": true`, so flows can ignore it.
+
+**The `synthetic` flag.** `synthetic` is a boolean field on `watch-targets` (default `false`). A synthetic target
+can only be driven by the injector:
+
+- the poller work list (active targets for a source) leaves synthetic targets out;
+- an event a poller publishes on `kelta.availability.event.<tenantId>.<source>` for a synthetic target is dropped
+  before anything is recorded;
+- the injector refuses a target that is not synthetic.
+
+A poller that lists its targets over JSON:API should add `filter[synthetic][eq]=false` so it never polls a
+synthetic target.
+
+**The endpoint.** `POST /api/admin/availability/synthetic-events` requires an internal user whose profile holds
+`MANAGE_DATA`. The body:
+
+```json
+{
+  "targetId": "…",
+  "slotKey": "2026-08-14",
+  "window": { "start": "2026-08-14T00:00:00Z", "end": "2026-08-16T00:00:00Z" },
+  "quantity": 2
+}
+```
+
+Only `targetId` is required. The endpoint records one `OPEN` observation and answers `201`:
+
+```json
+{ "data": { "targetId": "…", "slotKey": "synthetic-…", "status": "OPEN", "alerts": 2, "alertIds": ["…", "…"] } }
+```
+
+`alerts` is the number of watches alerted. Each one was delivered over its channels before the response returned.
+
+**Repeat injections.** An alert is sent once per opening of a slot. Without a `slotKey`, each injection uses a new
+`synthetic-<uuid>` slot, so every call is a new opening and alerts each matching `ACTIVE` watch again. This is the
+mode for a canary. With an explicit `slotKey`, the slot follows the normal rules: injecting again while it is still
+`OPEN` alerts no one (`alerts: 0`). Each fresh slot leaves one `availability_state` row behind.
+
+Refusals use the JSON:API error envelope:
+
+| Status | `code` | When |
+|---|---|---|
+| `403` | `FORBIDDEN` | the caller is a portal user, or an internal user without `MANAGE_DATA`. The gateway also refuses portal users on every `/api/admin/**` path. |
+| `400` | `INVALID_PAYLOAD` | `targetId` is missing, `window.start`/`window.end` is not an ISO-8601 instant, or `quantity` is not an integer |
+| `404` | `TARGET_NOT_FOUND` | no watch target with that id in the tenant |
+| `422` | `TARGET_NOT_SYNTHETIC` | the target is a real, polled target |

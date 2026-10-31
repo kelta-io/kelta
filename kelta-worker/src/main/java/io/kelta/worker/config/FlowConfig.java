@@ -98,14 +98,22 @@ public class FlowConfig {
         return new JdbcFlowStore(jdbcTemplate, objectMapper, maxSnapshotBytes, meterRegistry.getIfAvailable());
     }
 
+    /**
+     * @param awaitedTaskOutcomes where a parked Task reads its outcome: the long-running external
+     *                            module actions' {@code ModuleAsyncTaskStore} (part 9h), absent when
+     *                            runtime modules are off
+     */
     @Bean
     public FlowEngine flowEngine(FlowStore flowStore,
                                   ActionHandlerRegistry actionHandlerRegistry,
                                   ObjectMapper objectMapper,
                                   FlowMetricsConfig flowMetricsConfig,
+                                  ObjectProvider<AwaitedTaskOutcomes> awaitedTaskOutcomes,
                                   @Value("${kelta.flow.executor.pool-size:10}") int poolSize) {
         log.info("Creating FlowEngine with thread pool size {}", poolSize);
-        return new FlowEngine(flowStore, actionHandlerRegistry, objectMapper, poolSize, flowMetricsConfig);
+        FlowEngine engine = new FlowEngine(flowStore, actionHandlerRegistry, objectMapper, poolSize, flowMetricsConfig);
+        engine.setAwaitedTaskOutcomes(awaitedTaskOutcomes.getIfAvailable());
+        return engine;
     }
 
     @Bean

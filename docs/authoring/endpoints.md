@@ -49,7 +49,7 @@ it before routing.
 `internal` marks an endpoint only the platform's own admin UI or services call; it is reachable, but
 not a supported integration surface and may change without notice.
 
-**404** public endpoints: **312** linked to docs, **29** internal,
+**412** public endpoints: **320** linked to docs, **29** internal,
 **63** not yet documented.
 
 ## Endpoints
@@ -58,6 +58,7 @@ not a supported integration surface and may change without notice.
 | --- | --- | --- | --- | --- |
 | GET | `/api/_search` | worker | API_ACCESS | [api/querying](/docs/api/querying/#full-text-and-semantic-search) |
 | POST | `/api/admin/authorization/test` | worker | API_ACCESS; handler checks MANAGE_USERS | internal — Backs the admin console's authorization tester, which asks Cerbos whether a user/resource/action would be allowed; it changes nothing. |
+| POST | `/api/admin/availability/synthetic-events` | worker | API_ACCESS; handler checks MANAGE_DATA | [platform/messaging](/docs/platform/messaging/#synthetic-events) |
 | GET | `/api/admin/campaigns` | worker | API_ACCESS; handler checks MANAGE_CAMPAIGNS | [platform/messaging](/docs/platform/messaging/#campaigns) |
 | POST | `/api/admin/campaigns` | worker | API_ACCESS; handler checks MANAGE_CAMPAIGNS | [platform/messaging](/docs/platform/messaging/#campaigns) |
 | GET | `/api/admin/campaigns/suppressions` | worker | API_ACCESS; handler checks MANAGE_CAMPAIGNS | [platform/messaging](/docs/platform/messaging/#campaigns) |
@@ -138,7 +139,7 @@ not a supported integration surface and may change without notice.
 | POST | `/api/ai/chat` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#the-panel) |
 | POST | `/api/ai/chat/stream` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#the-panel) |
 | GET | `/api/ai/config` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#requirements) |
-| PUT | `/api/ai/config` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#requirements) |
+| PUT | `/api/ai/config` | ai | API_ACCESS + MANAGE_TENANTS | [console/ai-assistant](/docs/console/ai-assistant/#requirements) |
 | GET | `/api/ai/conversations` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#the-panel) |
 | GET | `/api/ai/conversations/{id}` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#the-panel) |
 | GET | `/api/ai/conversations/{id}/messages` | ai | API_ACCESS | [console/ai-assistant](/docs/console/ai-assistant/#the-panel) |
@@ -272,8 +273,13 @@ not a supported integration surface and may change without notice.
 | GET | `/api/migrations/versions` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/environments-and-promotion](/docs/platform/environments-and-promotion/#schema-migrations) |
 | POST | `/api/migrations/{runId}/rollback` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/environments-and-promotion](/docs/platform/environments-and-promotion/#schema-migrations) |
 | GET | `/api/modules` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#installing) |
+| GET | `/api/modules/.well-known/jwks.json` | worker | none (unauthenticated) | [platform/modules](/docs/platform/modules/#external-modules-installed-by-url) |
 | POST | `/api/modules/install` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#installing) |
 | POST | `/api/modules/install-jar` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#installing) |
+| POST | `/api/modules/plan` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#external-modules-installed-by-url) |
+| GET | `/api/modules/self/credentials/{name}` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#reading-tenant-credentials) |
+| POST | `/api/modules/self/tasks/complete` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#long-running-actions) |
+| POST | `/api/modules/self/tasks/heartbeat` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#long-running-actions) |
 | GET | `/api/modules/signing-keys` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#signing) |
 | POST | `/api/modules/signing-keys` | worker | API_ACCESS + MANAGE_CREDENTIALS | [platform/modules](/docs/platform/modules/#signing) |
 | DELETE | `/api/modules/signing-keys/{id}` | worker | API_ACCESS + MANAGE_CREDENTIALS | [platform/modules](/docs/platform/modules/#signing) |
@@ -287,6 +293,8 @@ not a supported integration surface and may change without notice.
 | GET | `/api/modules/{moduleId}/health` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#installing) |
 | GET | `/api/modules/{moduleId}/provisioned-resources` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#installing) |
 | GET | `/api/modules/{moduleId}/ui-bundle.js` | worker | API_ACCESS | [sdk/plugin-sdk](/docs/sdk/plugin-sdk/#how-plugins-load-in-the-app) |
+| GET | `/api/modules/{moduleId}/uninstall-plan` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#installing) |
+| POST | `/api/modules/{moduleId}/upgrade` | worker | API_ACCESS; handler checks CUSTOMIZE_APPLICATION | [platform/modules](/docs/platform/modules/#installing) |
 | GET | `/api/modules/{moduleId}/x/**` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#what-a-module-can-contribute) |
 | POST | `/api/modules/{moduleId}/x/**` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#what-a-module-can-contribute) |
 | PUT | `/api/modules/{moduleId}/x/**` | worker | API_ACCESS | [platform/modules](/docs/platform/modules/#what-a-module-can-contribute) |

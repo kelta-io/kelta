@@ -25,6 +25,8 @@ const list = defineCommand({
     params.set('page[size]', String(input.size));
     if (input.search) params.set('filter[search][contains]', input.search);
     if (input.status) params.set('filter[status][eq]', input.status);
+    // SERVICE users are module service principals, not people.
+    params.set('filter[userType][neq]', 'SERVICE');
     const response = await ctx.client
       .getAxiosInstance()
       .get<unknown>(`/api/users?${params.toString()}`);

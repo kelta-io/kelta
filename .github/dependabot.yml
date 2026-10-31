@@ -20,7 +20,7 @@ updates:
       - /kelta-ai
       - /kelta-mcp
       - /kelta-test-harness
-      - /kelta-modules/billing
+      - /kelta-modules/billing-jar
     schedule:
       interval: weekly
     # Platform upgrades are planned work, not Dependabot batches: a Spring Boot bump (even
@@ -113,6 +113,7 @@ updates:
       - /kelta-gateway
       - /kelta-marketing
       - /kelta-mcp
+      - /kelta-modules
       - /kelta-ui
       - /kelta-web
       - /kelta-worker
@@ -129,6 +130,29 @@ updates:
           - minor
           - patch
       docker-major:
+        group-by: dependency-name
+        patterns:
+          - "*"
+        update-types:
+          - major
+
+  # The Rust external modules (kelta-modules/Cargo.toml workspace: the kelta-module SDK and
+  # kelta-billing). One lockfile covers both crates.
+  - package-ecosystem: cargo
+    directory: /kelta-modules
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      cargo-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      cargo-major:
         group-by: dependency-name
         patterns:
           - "*"

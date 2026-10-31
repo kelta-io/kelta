@@ -125,7 +125,7 @@ public class PasswordResetService {
                 "SELECT pu.id, pu.tenant_id, pu.first_name, t.name AS tenant_name, t.slug AS tenant_slug "
                         + "FROM platform_user pu JOIN user_credential uc ON uc.user_id = pu.id "
                         + "JOIN tenant t ON t.id = pu.tenant_id "
-                        + "WHERE pu.email = ? AND pu.status = 'ACTIVE'",
+                        + "WHERE pu.email = ? AND pu.status = 'ACTIVE' AND pu.user_type <> 'SERVICE'",
                 email.trim());
 
         // Resolved whether or not an account matched, so a custom-domain lookup does not make a

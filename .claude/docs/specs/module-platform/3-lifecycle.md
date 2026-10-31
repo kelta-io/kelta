@@ -6,6 +6,11 @@
 > V206** (`kelta-worker/src/main/resources/db/migration/V206__collection_ownership.sql`, the
 > output of `ls kelta-worker/src/main/resources/db/migration | sort -V | tail -1`). This slice
 > needs **no migration** (§4).
+>
+> **2026-10-30:** part **3a (manifest v2) is superseded** by slice 9's external manifest
+> ([`9-external-modules.md`](9-external-modules.md) §3.1) and will not be built for JARs. The
+> install plan / `planHash` / upgrade (3b) and uninstall (3c) contracts carry over to slice 9's
+> install-by-URL flow.
 
 > Child of [`.claude/docs/specs/module-platform/README.md`](README.md). Implements the parent's
 > **Idempotent / destructive / consent** contract (the `planHash` install consent, downgrade,

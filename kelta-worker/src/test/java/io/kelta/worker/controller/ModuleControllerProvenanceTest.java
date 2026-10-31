@@ -56,7 +56,8 @@ class ModuleControllerProvenanceTest {
 
         mvc = MockMvcBuilders.standaloneSetup(new ModuleController(
                 manager, mock(ModuleConfigEventPublisher.class), routes, provenance,
-                mock(CerbosPermissionResolver.class), mock(BootstrapRepository.class))).build();
+                mock(CerbosPermissionResolver.class), mock(BootstrapRepository.class),
+                mock(ObjectProvider.class), mock(ObjectProvider.class))).build();
     }
 
     private static Map<String, Object> row(String id, String type, String key, String ownership,

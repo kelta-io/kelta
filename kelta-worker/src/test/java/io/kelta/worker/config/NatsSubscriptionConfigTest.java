@@ -79,4 +79,22 @@ class NatsSubscriptionConfigTest {
 
         verify(subscriptionManager, times(16)).register(any(EventSubscription.class));
     }
+
+    @Test
+    @DisplayName("registerSubscriptions registers the external-module event consumer when modules are on")
+    void registerSubscriptions_withModuleEventDelivery_registersQueueGroupWithRedelivery() {
+        io.kelta.worker.module.ModuleEventDeliveryListener delivery =
+                mock(io.kelta.worker.module.ModuleEventDeliveryListener.class);
+        EventSubscription moduleEvents = EventSubscription.queueGroupWithRedelivery("worker-module-events",
+                "kelta.record.changed.>", "worker-module-events", new EventSubscription.Redelivery(
+                        java.util.List.of(java.time.Duration.ofSeconds(5)), java.time.Duration.ofSeconds(60),
+                        (subject, body, attempt) -> { }));
+        org.mockito.Mockito.when(delivery.subscription()).thenReturn(moduleEvents);
+        ReflectionTestUtils.setField(config, "moduleEventDeliveryListener", delivery);
+
+        config.registerSubscriptions();
+
+        verify(subscriptionManager, times(16)).register(any(EventSubscription.class));
+        verify(subscriptionManager).register(moduleEvents);
+    }
 }

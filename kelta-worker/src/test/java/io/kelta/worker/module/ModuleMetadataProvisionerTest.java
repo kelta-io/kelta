@@ -64,7 +64,9 @@ class ModuleMetadataProvisionerTest {
             calls.add(options);
             return fakeImport(pkg, options);
         });
-        provisioner = new ModuleMetadataProvisioner(importService, slugResolver, new ObjectMapper());
+        provisioner = new ModuleMetadataProvisioner(importService, slugResolver, new ObjectMapper(),
+                mock(io.kelta.runtime.query.QueryEngine.class),
+                mock(io.kelta.runtime.registry.CollectionRegistry.class));
     }
 
     /** SKIP-mode importer: existing collections skip, the key filter excludes, failing keys fail. */

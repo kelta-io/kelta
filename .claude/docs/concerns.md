@@ -66,7 +66,7 @@ Raw `JdbcTemplate` SQL issued with no tenant bound still relies on its own `WHER
 
 ### RLS invariants
 
-RLS is enforced in production (`NOBYPASSRLS` app role, V200–V202, V205). Rules that keep it working:
+RLS is enforced in production (`NOBYPASSRLS` app role, V200–V202, V205, V224). Rules that keep it working:
 - **Bind a tenant only with a `ScopedValue` helper** — `runWithTenant`/`callWithTenant(id, slug, …)`
   to act for a given tenant (shadows any outer binding), or `runWithTenantIfUnbound`/
   `callWithTenantIfUnbound` in shared code that must let an outer request binding win. There
@@ -84,7 +84,9 @@ RLS is enforced in production (`NOBYPASSRLS` app role, V200–V202, V205). Rules
   `field_version`, whose policies key strictly on the parent's `tenant_id`.
 - **Superset logins** are granted table by table on RLS-enforced `tenant_id` tables only
   (`supersetRoleIsGrantedOnlyTenantScopedTables`); pinned roles cannot hop tenants via the GUC
-  (V201). Tenant roles hold **no privilege on `tenant_db_role`** (it has no RLS — reading it lists
+  (V201) — but only on policies written with `kelta_pinned_tenant()`, so a new migration copies
+  the pinned expressions from `conventions.md`, never an older plain one
+  (`everyGucPolicyIsPinned` fails on any unpinned policy). Tenant roles hold **no privilege on `tenant_db_role`** (it has no RLS — reading it lists
   every tenant's id and DB role): the pin works through `kelta_pinned_tenant()`, SECURITY
   DEFINER with a fixed `search_path`. V215 revoked it from every pinned and `superset_%` role and
   applied the narrowing to roles provisioned before it (blanket public grant until next rotation);
@@ -129,6 +131,10 @@ inbound routing by `email_from_address`, and kelta-auth slug→id lookups (`Tena
   outside GHSA-j95f-988m-3j2f's revised `< 3.30.5` range). Any new high/critical production
   advisory now fails CI. **The baseline is debt, not an allowlist** — fix rather than re-add, and
   refresh this note if an entry ever lands (the `ci.yml` comment above the job still says 33).
+  Transitive fixes ride npm `overrides`: `protobufjs` in `kelta-ui/app` (#1472) and
+  `follow-redirects` `^1.16.2` in both packages (GHSA-mrwp-f3q8-3g9p, 2026-10-30 — `axios`
+  1.21.0 still accepts the vulnerable `^1.16.0`). Drop each once its parent's range excludes
+  the vulnerable versions.
 - **FIXED — Java dependencies were unscanned.** OWASP dependency-check never ran (blocked on an
   `NVD_API_KEY` the NVD API rejects). `dependency-audit-java` now scans each service's shipped
   classpath — a Maven-resolved CycloneDX SBOM — and the OpenTelemetry Java agent version pinned in
@@ -327,12 +333,13 @@ request logs and audit, register custom domains, and push a notification to ever
 | `DelegatedAdminScopeController` | `/api/admin/delegated-admin-scopes/**` | `MANAGE_DELEGATED_ADMINS` |
 | `DelegatedUserAdminController` | `/api/admin/delegated/**` | the caller's delegated-admin scope (`DelegatedAdminService.effectiveScope`, re-read per request); `GET /me` answers any caller with its own summary |
 | `CampaignAdminController` | `/api/admin/campaigns/**` | `MANAGE_CAMPAIGNS` |
+| `SyntheticAvailabilityController` | `POST /api/admin/availability/synthetic-events` | `MANAGE_DATA`, via `SupportPermissions.internalHoldsAny` (a PORTAL caller is refused before the profile lookup). It sends **real** alerts to every ACTIVE watch on the synthetic target, so a canary should own the only watches on its target |
 
 Residuals: the permission is read from the caller's **profile** system permissions
 (`BootstrapRepository.findProfileSystemPermissions`), as every older admin controller already
 did — a grant held only through a permission set does not open these endpoints.
-`CustomRuleController` still takes the rule's `tenantId` from the body when present (unchanged
-here; review separately).
+`CustomRuleController` works only in the request's bound tenant and ignores a body `tenantId`
+(custom-rule-policy-generation).
 
 ### Authorization gaps still open
 
@@ -505,6 +512,229 @@ deletes the credential/MFA/preference/device rows, but personal data about the u
   refresh tokens issued under the old email alive, as for any deactivation. An SSO sign-in with the
   old email later JIT-provisions a new, unrelated user.
 
+### Module service principals — what still sees a SERVICE user (part 9b, accepted)
+
+A module's `SERVICE` user (`architecture.md` → Run-as connected-app tokens) is kept out of sign-in,
+mail, seat counts, SCIM, PATs, the delegated-admin list and API writes to `users`, but:
+
+- **Generic reads of `users` still return it.** `GET /api/users` without
+  `filter[userType][neq]=SERVICE` (the SDK's `users.list` and `kelta users list` add it), lookup
+  pickers on a `users` LOOKUP (`useLookupOptions`), reports and exports over `users` list it. It is
+  hidden only from the default Users list.
+- **Its profile is editable through the API.** The generated profile is `is_system`, which only makes
+  the admin UI read-only; an admin with the permission collections can still change its
+  `profile-object/field/system-permissions` rows, and the module then runs with the edited grants.
+- **A module can be granted anything in `TenantProvisioningHook.ALL_PERMISSIONS`**, including
+  `MANAGE_USERS` or `MODIFY_ALL_DATA`, if the admin approves it; the plan the admin approves by its
+  `planHash` (part 9c; the consent screen over it is 9e) is the only check. `API_ACCESS` is always
+  granted.
+- **Mail by recipient id.** `AlertDispatchService`, the support mailbox and appointment reminders
+  resolve a recipient's email from a user id; for a SERVICE user they hit `DefaultEmailService`'s
+  `.invalid` guard and the `email_log` row ends `FAILED`. Nothing is delivered.
+- **Its connected app is an ordinary `connected-apps` row.** An admin can deactivate or delete it
+  through the API (the module then gets no token); `run_as_user_id` and `client_secret_enc` are
+  JDBC-only and never served.
+
+### External modules — install-time trust (part 9c, accepted)
+
+`architecture.md` → External modules installed by URL. What the 9c install path trusts, and what
+it does not check:
+
+- **`KELTA_MODULE_ALLOWED_HOSTS` is platform-wide.** A listed host may be `http` and private for
+  every tenant's admin, so any tenant admin can point a plan at it. List module services only —
+  never shared infrastructure (databases, kelta-auth, the worker itself); a plan fetches
+  `{baseUrl}/.well-known/kelta-module.json` without credentials, and an install then POSTs signed
+  lifecycle calls with the module's own access token to that host. It is deliberately separate from
+  `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS`, which also opens flow `HTTP_CALLOUT`/`CALL_API`.
+- **The manifest is not signed.** Its integrity is TLS to the module host (none for an allow-listed
+  `http` host). `planHash` binds what the admin reviewed: the apply re-fetches and re-plans, and any
+  change in grants, metadata, version or installed state is a `409`. The JAR path's publisher
+  signature has no 9c equivalent; whoever controls the module host controls what it declares.
+- **The JWKS is public by design** (`/api/modules/.well-known/jwks.json`, listed in
+  `unauthenticated-paths` as the exact file). It is public key material with no tenant. The signing
+  key (`KELTA_MODULE_SIGNING_KEY`) is one platform-wide key: a leak lets the holder forge requests
+  to every tenant's modules until it is rotated (put a new key first, drop the old one after 5 min).
+- **Uninstall removes provisioned resources after the module row is gone.** A delete that fails is
+  reported under `failed` with its provenance row kept, and there is no endpoint to retry it — the
+  admin removes it by hand. `?force` on `DELETE /api/modules/{id}` never reaches collection deletes;
+  only `purgeData` does (`CollectionDeletionGuardHook.FORCE`).
+
+### External modules — invocation (part 9d, accepted)
+
+`architecture.md` → External module invocation. What calling a module out of process costs, and
+what it does not guard against:
+
+- **A remote hook inside a transaction holds a pooled connection.** The query engine opens no
+  transaction itself, but `AtomicOperationsController` and `PackageImportService` run writes in
+  one, and a `RemoteBeforeSaveHook` there keeps that connection (`DB_POOL_MAX`, default 10) for up
+  to its `timeoutMs`. That is why hook timeouts cap at 5 s. A few slow modules behind concurrent
+  atomic requests can still exhaust the pool for the whole pod.
+- **A wildcard hook (`collection: "*"`) is one HTTP round trip on every write** to every collection
+  of the tenant for as long as the install is callable. The plan shows the hook; nothing prices it.
+- **A hook must not call back into the same write.** A module that reads or writes the record
+  being saved, with its own token, from inside its hook can wait on a row lock the hooked
+  transaction holds, until the hook times out and `failurePolicy` decides.
+- **The breaker is per pod.** With N worker pods a dead module takes up to 5 × N failed calls
+  before every pod stops calling it, and each pod probes it again after 30 s. The `DEGRADED` /
+  `ACTIVE` status writes are compare-and-set, so pods do not fight over them, but a pod whose own
+  breaker is closed keeps calling a module another pod marked `DEGRADED`.
+- **Disabling a module drops its hooks.** A disabled (or `FAILED`) install's hooks and
+  entitlements port are unregistered, so its vetoes stop applying and entitlements resolve
+  `EMPTY` — deliberate (disable stops all invocations), but a module enforcing a policy is not a
+  safety net once disabled.
+- **Scheduled jobs can fire twice.** `ScheduledJobRepository.findDueJobs` takes
+  `FOR UPDATE SKIP LOCKED` without a transaction (pre-existing, every job type), so the lock ends
+  with the statement and two pods polling together can both run a due job. Module calls carry
+  `Idempotency-Key: <jobId>:<fireTime>` so a module can drop the duplicate; it must.
+- **Route bodies are text.** The route proxy receives the request body as a UTF-8 string (the JAR
+  path's signature), so a binary or non-UTF-8 body is re-encoded on the way to the module. Module
+  answers are always served as `application/json` with `nosniff` and `no-store`, never as the
+  module's own content type.
+
+### External modules — events and UI bundles (part 9e, accepted)
+
+`architecture.md` → External module events and UI bundles. What record-event delivery and bundle
+pinning do not guarantee:
+
+- **A retry redelivers to every subscriber.** One JetStream message carries one record change for
+  all the installs subscribed to it. If one install fails, the message is redelivered and the
+  installs that already took it get it again. Delivery is at least once by contract; a module
+  must deduplicate on `eventId`.
+- **A pod with a stale registry drops the event.** The consuming pod finds subscribers in its own
+  `ExternalModuleRegistry`, which follows `kelta.config.module.changed` and the 60 s reconcile. A
+  change written in the moment between an install committing and that pod refreshing is acked
+  with no subscriber, and is not delivered.
+- **Event failures trip the breaker.** A failing `/kelta/v1/events` counts toward the per-pod
+  breaker like any other call. A module whose events endpoint is broken goes `DEGRADED` and its
+  actions and hooks fail fast too.
+- **Dead letters have no replay yet.** `module_event_dead_letter` keeps what was sent, filtered
+  for the module, and goes with its install. Nothing lists or replays it: no endpoint, no UI.
+- **8 deliveries in flight per install per pod.** A delivery over that limit waits up to 10 s,
+  then counts as a failed attempt and is retried.
+- **A pinned bundle is approved by hash, not reviewed.** The admin approves the SHA-256 the plan
+  shows. That stops the module changing the bundle afterwards; it says nothing about what the code
+  does. The bundle runs same-origin with the admin's session (`moduleUiBundles.ts`).
+- **No object store, no UI.** A module that ships a bundle cannot be installed while
+  `KELTA_S3_ENABLED` is off (`UI_BUNDLE_STORAGE_UNAVAILABLE`). A pinned object that went missing
+  or no longer matches its hash is answered `404`, never served.
+- **Replaced bundles can be orphaned.** Upgrade and uninstall delete the old object best-effort,
+  after the new pin is written. A failed delete is logged and leaves the object in the bucket.
+
+### External modules — credential read (part 9e.1, accepted)
+
+`architecture.md` → External module credential read. What
+`GET /api/modules/self/credentials/{name}` does not guarantee:
+
+- **The secret leaves the platform by design.** A declared credential is decrypted and sent to the
+  module's host. The admin approved the name on the consent screen; nothing stops a malicious or
+  compromised module from misusing a secret it read. Disabling or uninstalling stops further reads
+  at once (the checks run per read, not per token), but a secret already read cannot be recalled —
+  rotate the credential.
+- **The worker trusts the gateway's `X-Connected-App-Id`.** Like `X-User-Id`, it is stripped from
+  client requests at the gateway head and stamped only from a verified token. A caller that reaches
+  the worker directly, bypassing the gateway, could forge it. The worker also requires the resolved
+  caller to be the install's `service_user_id`, so a forged header alone, without that user's
+  identity, reads nothing.
+- **The purpose label is the module's.** `?purpose=` is appended to the platform's
+  `MODULE:<moduleId>` prefix in the audit row. A module can mislabel why it read a secret, never
+  which module read it.
+- **No read while installing.** The install is `INSTALLING` until the `installed` lifecycle call
+  returns, so a module cannot read a credential during that call (`403 MODULE_NOT_ACTIVE`). It
+  can read one on its first action, hook or event after install.
+- **Names only.** The resolver looks a UUID up as a credential id first, so UUID-shaped names are
+  refused even when declared. A credential named like a UUID cannot be granted to a module.
+
+### External modules — long-running actions (part 9h, accepted)
+
+`architecture.md` → External module task completion; `integrations.md` → Wait states (Awaited
+Tasks). What the task-token design does not guarantee:
+
+- **The task token is redacted from recorded bodies, not encrypted in transit beyond TLS.** It
+  rides the request body (`POST /api/modules/self/tasks/complete` / `heartbeat`), never the path,
+  so access logs and span names do not carry it; `SensitiveBodyRedactor` replaces the `token`
+  member and any `kmt_…` value before a body becomes span data. The module receives it in the
+  action request body, which the platform does not record. It is stored only as a hash, works once,
+  expires, and is useless without the same install's principal token.
+- **A lost completion answer looks like a dead token.** A module whose completion `202` was lost
+  and that retries gets `404 TASK_NOT_FOUND`, exactly as for an unknown token: the platform keeps
+  no outcome to replay and does not say which. Modules must treat a `404` after a completion
+  attempt as possibly delivered (spec §3.6.2 step 7).
+- **A stuck resume claim waits out its lease.** A completion (or the poller) claims the
+  `flow_pending_resume` row before it resumes. If the claiming pod dies, or its queued resume is
+  dropped at shutdown, the poller takes the claim over once it is older than
+  `kelta.flow.resume.claim-lease-seconds` (300 s default) — so such a step resumes up to that late.
+  A lease shorter than a resume's wait in the engine's queue cannot run a step twice (only the
+  current claim consumes the row) but makes the slow resume a no-op. Rows claimed before V223 have
+  no `claimed_at` and stay as they were.
+- **A hard kill mid-resume strands the execution in `WAITING`.** The resume consumes (deletes) its
+  `flow_pending_resume` row first, then loads the execution and definition and only then marks it
+  `RUNNING`. A pod killed in that window (SIGKILL, OOM, node loss — a graceful shutdown interrupts
+  the thread and ends `FAILED`) leaves the execution `WAITING` with no row, so neither the poller
+  nor the lease recovers it. Same class as a pod dying mid-flow (left `RUNNING`); the fix is one
+  transaction for consume + mark-running, or a reaper for `WAITING` executions with no pending row.
+  Separately, `JdbcFlowStore.releasePendingResume` matches on the execution id and the random
+  per-claim id without a `tenant_id` filter (not exploitable — the claim id is unguessable — but
+  unlike every other pending-resume statement).
+- **Only top-level Task steps can wait.** `Parallel`/`Map` branch states and invoked sub-flows run
+  in memory and are not persisted, so they cannot park; a long-running action there gets no task
+  and its `202` fails the step (`ModuleUnavailableException`).
+- **Expiry is the poller's interval late.** A task past `expiresAt` fails on the next resume poll
+  (`kelta.flow.resume.poll-interval-ms`, 10 s default), and a completion racing it wins only if it
+  commits first: both move the task out of `PENDING` with one conditional update, so exactly one
+  takes effect.
+- **The flow's `TaskState.timeoutSeconds` does not cap the wait.** As for synchronous calls, the
+  field is parsed but not enforced; the wait is bounded by the manifest's `maxDurationSeconds` and
+  the platform cap (`KELTA_MODULES_EXTERNAL_ASYNC_ACTION_MAX_DURATION_SECONDS`, one day default).
+- **A heartbeat hands out a fresh principal token for as long as the task lives.** That is its
+  purpose: the 15-minute token cannot outlive an hours-long task. A disabled install, a deactivated
+  principal or an expired task gets none.
+
+### External modules — in-cluster modules and the Rust billing module (part 9f, accepted)
+
+`kelta-modules/billing` is the first external module the platform runs itself, as a pod in the
+homelab cluster (`ci-cd.md` → Rust external modules). What that does not guarantee:
+
+- **The worker trusts identity headers.** `X-Tenant-ID`, `X-User-Id`, `X-User-Type` and
+  `X-Connected-App-Id` are stripped from client requests by the gateway (`IdentityHeaderStripFilter`)
+  and stamped only from a verified token; the worker believes them as sent. Anything that can open
+  a connection to a worker pod can therefore act as any user of any tenant. An external module is
+  untrusted code by design, so an in-cluster module must never reach the worker directly: the
+  billing module runs in its own namespace (`kelta-billing`) whose egress NetworkPolicy allows only
+  DNS, the gateway pods and public HTTPS (private ranges excluded), and whose ingress admits only
+  the worker pods. That policy is the control — a module deployed without one, or into the `emf`
+  namespace, reopens it. The residual risk is any other path to the worker: a pod in a namespace
+  without such a policy, or a node-level process. Closing it for good needs the worker to verify
+  the gateway's identity (mTLS or a signed identity header) rather than trusting the network.
+- **A flow action may have no member.** The platform sends `act` only when a caller context is
+  bound (an HTTP request), not on a scheduled or async flow. `kelta-billing:create-checkout-session`,
+  `create-portal-session`, `me` and `resolve-entitlements` then fail with "No calling member"; the
+  module never takes the member from the input, which any flow author controls. Routes always carry
+  `act`. *JAR:* read the member from the in-process caller context the same way.
+- **The quota hook reads every collection.** Counting a member's records in an arbitrary collection
+  needs read access to it, so the manifest asks for `VIEW_ALL_DATA` — shown on the consent screen,
+  and narrower than the JAR's in-process access, but still a read grant on all of the tenant's data
+  for a module whose job is billing. A rule's `countFilter` field names go to the platform as query
+  filters; a bad one fails open.
+- **Billing quotas are soft limits.** The `*` beforeCreate hook has 2 s and
+  `failurePolicy: ignore`, so a slow, restarting or unreachable billing module lets every create
+  through. Counting and creating are separate steps with no lock, so N concurrent creates for one
+  member all see the same count and can land N − 1 over the cap. A hard limit would need the
+  platform to enforce it inside the create's transaction; no module can. Documented to tenants in
+  `kelta-modules/billing/README.md` → Per-member quotas.
+- **Install never changes an existing field.** The provisioner adopts an existing collection and
+  writes nothing under it, and keeps an existing field as it is. A module upgrade or a cutover onto
+  collections another build created therefore gets no new field and no changed flag (unique,
+  required) from its manifest. The billing cutover adds `lastStripeEventAt` and the unique
+  `stripeCheckoutSessionId` by hand (`kelta-modules/billing/CUTOVER.md` step 4b); until then two
+  concurrent deliveries of one checkout can mint two passes, and only the terminal-status rule
+  orders subscription events.
+- **Caches are per replica.** A record event reaches one replica of a module (the Service picks
+  one). The billing module's rules cache (60 s) therefore lags on any other replica by up to its
+  TTL after a rule change; its entitlements cache is off by default for that reason.
+- **`appliesTo=PORTAL` rules now apply.** The JAR module skipped them (it could not read the
+  caller's user type); the Rust module reads the signed actor's `user_type`. A tenant with active
+  PORTAL rules sees them enforced from the cutover on (`kelta-modules/billing/CUTOVER.md`).
+
 ### Outbound requests to tenant-supplied URLs
 
 `OutboundUrlGuard` + `OutboundHttpClient` (runtime-core `io.kelta.runtime.outbound`) refuse
@@ -512,7 +742,10 @@ non-public targets (loopback, RFC 1918, link-local/metadata, CGNAT, ULA, embedde
 unless `KELTA_OUTBOUND_ALLOWED_PRIVATE_CIDRS` lists them, re-validate every redirect hop, and bound
 each fetch with deadlines and a body cap. Used by OIDC discovery (worker and kelta-auth), OpenAPI
 spec import/validate, the `HTTP_CALLOUT` / `CALL_API` / `OUTBOUND_MESSAGE` flow handlers,
-external-rest collections, OAuth 2.0 credential token URLs and Web Push delivery; kelta-auth's
+external-rest collections, OAuth 2.0 credential token URLs, Web Push delivery and the
+availability-alert `webhook` channel (`WebhookAlertSender` — the URL is tenant-supplied via
+`settings.alerts.webhookUrl`, so an in-cluster receiver is refused until its CIDR is
+allow-listed; never loosen the guard for it); kelta-auth's
 federated login applies the same guard through `OidcLoginHttp` (table in `integrations.md`). New
 code that fetches a tenant- or admin-supplied URL from inside the cluster should go through
 `OutboundHttpClient`.
@@ -601,6 +834,11 @@ between history rows and an under-privileged caller; treat changes to either as 
   cycle. Per-run volume is bounded by `kelta.flow.step-log.max-snapshot-bytes` (64 KiB; larger
   snapshots are stored as a `_truncated` marker — `flow_execution.state_data` is never capped) and
   the flow's `stepLogging` (`FULL|ERRORS_ONLY|NONE`, V211).
+- **`availability_state` — one row per synthetic injection without a `slotKey`.** The admin
+  injector (`SyntheticAvailabilityService`) mints a fresh `synthetic-<uuid>` slot each call so a
+  canary alerts every time. Nothing prunes `availability_state` or `alert`, so a daily canary adds
+  a state row, plus an alert and delivery row per watch, each day. Synthetic alerts also count in
+  `kelta_alert_delivery_latency_seconds` and `GET /api/alerts/latency`; nothing excludes them yet.
 - **`analytics_event` — `AnalyticsRetentionSweep` is DRY-RUN by default**
   (`kelta.analytics.retention.dry-run`, 90 days). Same posture as the flow sweep. Batch ingest /
   partition by `occurred_at` only when volume justifies it. `member_id` erasure on account close is
@@ -636,6 +874,13 @@ reconcile adds duplicates — `buildBoundedIdentifier` names them after the tabl
 `field.reference_target`, `ui_menu_item.path` and `search_index.collection_name`; then restart the
 worker and gateway, since direct SQL skips the `collection.changed` broadcast. A real rename
 feature would do this and publish the event.
+
+**Two sources for a tenant's AI token quota (open).** kelta-ai enforces `aiTokensPerMonth` and
+`aiEnabled` from its own `ai_config` rows (`TokenTrackingService`, `TokenLimitFilter`), written by
+`PUT /api/ai/config`. The worker's governor limits (`TenantTierQuotas`, `GovernorLimitsController`)
+carry tier `aiTokensPerMonth` / `aiEnabled` values of their own that kelta-ai never reads. Both writes need `MANAGE_TENANTS`, so
+neither is a tenant administrator's to raise, but the two values can disagree; the `ai_config` one
+is the one enforced. Folding one into the other is a design decision (which service owns quotas).
 
 **Feature flags that look dead but are not (2026-07-02 audit) — do not inline:**
 - `kelta.scheduler.enabled`, `kelta.bulk.processor.enabled` are `false` in
@@ -790,7 +1035,7 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 
 - **Static routes that share a path with a collection must be in
   `RouteRegistry.AUTHORITATIVE_STATIC_PATHS`** — member controllers (`/api/watches|wins|devices/**`)
-  and platform prefixes (`/api/modules|files|images|alerts/**`) — or a same-named collection's
+  and platform prefixes (`/api/modules|files|images|alerts|ai/**`) — or a same-named collection's
   generic route overwrites the `static-` route (portal members get 403; a tenant collection named
   `modules` captures the prefix). Not a blanket "static wins": config collections rely on their
   generic route's per-resource Cerbos.
@@ -813,6 +1058,17 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 - **Error bodies are built from `JsonApiError.toMap()`**, never the bean — on native images the
   bean serializes as `{"errors":[{}]}` (runtime-core `GlobalExceptionHandler`, gateway
   `GlobalErrorHandler`).
+- **Path-prefix rules must test the decoded path.** Routing is on the raw path, while the Spring
+  MVC service behind a route matches percent-decoded segments. A prefix rule therefore tests the
+  matched form: `MatchedPath.of(path)` in the static-route special cases of
+  `RouteAuthorizationFilter`, and the same normalization in kelta-ai's `TokenLimitFilter`. Open:
+  `RouteRegistry.findByPath` and the `StaticCollectionCheck` exemptions still match the raw path;
+  move them to the matched form too.
+- **Gateway routes registered outside `RouteConfigService` need the same reservation.** `static-ai`
+  is registered by `RouteInitializer`; `/api/ai/**` is in `RouteRegistry.AUTHORITATIVE_STATIC_PATHS`
+  and `ai` in the worker's `GatewayStaticRoutes.SEGMENTS` (reserved collection name). Without both,
+  a tenant collection named `ai` would replace the static route for that tenant's authorization
+  while forwarding still went to kelta-ai. `GatewayStaticRoutesSyncTest.segments` reads both files.
 
 ### Storage, DDL and collection deletion
 
@@ -903,6 +1159,23 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
 - **Cerbos `collectionId` keying:** the `collection` policy is UUID-keyed (gateway passes the
   route id); the `record` policy keys on the collection **name** (`architecture.md`). Mixing them
   silently denies every record to non-admin profiles.
+- **The Cerbos Admin API password has no built-in default** (2026-10-31). The worker pushes
+  policies with `kelta.worker.cerbos.admin-password` (`KELTA_WORKER_CERBOS_ADMIN_PASSWORD`, declared
+  blank in `application.yml`). Blank: the worker still starts and gRPC checks keep answering from
+  what Cerbos already holds, but it logs one ERROR at startup, every tenant sync and base seed logs
+  an ERROR and pushes nothing, and `CerbosPolicySeeder` skips without writing its done-marker
+  (counter `cerbos.policy.seed.skipped{reason=admin-password-missing}`), so a later start with the
+  password seeds. Permission, profile and collection changes do not reach Cerbos until it is set.
+  **Deploy ordering: set `KELTA_WORKER_CERBOS_ADMIN_PASSWORD` in every environment whose Cerbos runs
+  the Admin API before deploying a worker with this change.** The dev, CI and harness Cerbos
+  (`docker/cerbos/config.yaml`, disk store, no Admin API) push nothing either way; there the ERROR is
+  expected.
+- **Direct login and MFA must agree with the browser sign-in.** `POST /auth/direct-login` refuses
+  (`401 mfa_required`) every account the browser flow would send to an MFA step, by calling the same
+  `LoginMfaPolicy` as `AuthorizationServerConfig`'s success handler. A new MFA trigger (a per-profile
+  policy, say) goes into `LoginMfaPolicy`, or direct login becomes a way around it. A direct login
+  for a user with no profile fails building the token (a null `profile_id` claim → 500); seeded and
+  invited users always have one.
 - **Every Cerbos decision cache key must carry `:geo:<country>`** wherever geo can influence a
   decision (gateway system/object caches, worker field-access + collection-wide record caches) —
   dropping it reintroduces cross-location stale allows. New caches too.
@@ -1122,6 +1395,11 @@ its own change with a full compose run.
 One line each; full write-ups are in git history.
 
 **Security**
+- 2026-10-31 (auth-config-hardening) — direct login now refuses accounts that require MFA: `POST /auth/direct-login` answers `401 mfa_required` for a verified TOTP enrollment or a tenant policy that requires MFA (`LoginMfaPolicy`, shared with the browser success handler); failed attempts and lockout were already shared with the browser form (global `AuthenticationManager` events). `DirectLoginControllerTest`, `LoginMfaPolicyTest`, `FailedSignInLockoutIntegrationTest`.
+- 2026-10-31 (auth-config-hardening) — AI config writes now require `MANAGE_TENANTS` and accept only known keys: the gateway gates writes on `/api/ai/config` (decoded path, `MatchedPath`), `/api/ai/**` is an authoritative static path and `ai` a reserved collection name, and `AiConfigController` accepts `model`, `maxTokens`, `temperature`, `aiTokensPerMonth`, `aiEnabled` with type and range checks (`400 VALIDATION_FAILED` otherwise, nothing written). The module signing-key rule uses the decoded path too. `RouteAuthorizationFilterTest`, `MatchedPathTest`, `RouteRegistryTest`, `AiConfigControllerTest`.
+- 2026-10-31 (auth-config-hardening) — the Cerbos admin password has no built-in default: `KELTA_WORKER_CERBOS_ADMIN_PASSWORD` must be set (deploy ordering above, Auth and Cerbos); blank skips every policy push with an ERROR instead. `CerbosPolicySyncAdminPasswordTest`, `CerbosPolicySeederTest`.
+- 2026-10-31 (custom-rule-policy-generation) — profile custom rules: a stored `deny` compiles to `EFFECT_DENY`, the rule's CEL sits in parentheses under its collection guard, visual values are escaped CEL literals and `in` becomes a list; `CustomRuleController` validates effect, action, operator, value shape and CEL syntax at save (`400 VALIDATION_FAILED`) and writes only into the bound tenant (`architecture.md` → Custom rules). `CustomRuleCelTest`, `CustomRuleControllerTest`, `CerbosPolicyGeneratorTest`, `CerbosGeneratedPolicyIT`.
+- 2026-10-31 (rls-pin-late-policies) — the policies of three tables created after V201 (`notification`, `module_event_dead_letter`, `module_async_task`) lacked the pinned-role check; V224 re-pins every such policy generically; `RowLevelSecurityIntegrationTest` now fails on any unpinned policy (`everyGucPolicyIsPinned`, `pinnedRoleCannotHopTenantsOnTablesCreatedAfterV201`).
 - 2026-10-26 (PLT-826) — validation-rule reloads failed open: a DB error while loading a collection's rules registered an empty set (validation off until the next reload), deleting a rule broadcast nothing (other pods kept enforcing it), and a system collection first loaded inside one tenant's request registered only that tenant's rules (the rest went unvalidated until an unbound reload). Now a failed load keeps the previous rules (`ValidationRuleRegistry.markLoadFailed`/`markSystemCollectionLoadFailed`) and a collection whose rules never loaded refuses writes with 503 (`RulesUnavailableException`) until a load succeeds; `ValidationRuleRefreshHook` captures the rule's `collection_id` in `beforeDelete` and publishes the same `collection.changed` event on delete; `CollectionLifecycleManager` initialize (and a refresh of a never-fully-loaded system collection) reads every tenant's rules, off the bound `ScopedValue` scope on a fresh virtual thread so RLS selects `admin_bypass`, while a tenant-bound refresh still replaces only that tenant's set; a tenant-owned collection loaded while another tenant is bound reads its owner's rules the same way instead of skipping the load. `CollectionLifecycleManagerValidationRuleLoadFailureTest`, `ValidationRuleRefreshHookTest`, `ValidationRuleRegistryTest`. Still open: a delete whose `beforeDelete` lookup fails is logged and not broadcast (other pods keep the rule until the collection's next refresh).
 - 2026-10-25 (KLT-790) — deleting a collection unregistered it from each pod's `ConcurrentCollectionRegistry` by bare name, whose fallback removes the first entry with that name in any tenant: deleting tenant A's `orders` could drop tenant B's, so B's `/api/orders` 404'd on that pod until restart (the likely cause of the PR #2011 `ChildResourceScopingScenarioTest` failure: `/orders` never answered 200 in its 20 s wait). `CollectionLifecycleManager.teardownCollection` now unregisters the definition's `registryKey()`. `CollectionLifecycleManagerTeardownTest`. `ValidationRuleRegistry` was keyed by bare name too; resolved by kelta#2046 (keyed by tenant).
 - 2026-10-12 (password-change-sign-out) — changing a password in kelta-auth (`/auth/password/change`, email-link `/auth/password/reset`, forced `/change-password`) now ends the user's other HTTP sessions and revokes their OAuth2 authorizations (refresh tokens), scoped by tenant + user id (`UserSessionRevoker`); `/auth/password/change` resolves the signed-in user by tenant + id instead of by email. `PasswordChangeSignOutFlowTest`, `SharedHttpSessionIntegrationTest`.

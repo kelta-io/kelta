@@ -13,6 +13,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.AdditionalMatchers.and;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -134,6 +135,35 @@ class ScimUserServiceTest {
                 .satisfies(ex -> assertThat(((ScimException) ex).getHttpStatus()).isEqualTo(HttpStatus.NOT_FOUND));
         verify(jdbcTemplate, never()).update(contains("SET status = ?"), any(), any(), any());
         verify(jdbcTemplate, never()).update(contains("COALESCE"), any(Object[].class));
+    }
+
+    @Test
+    @DisplayName("a SERVICE user is absent from SCIM: 404 on get/PUT/PATCH/DELETE, excluded from list and count")
+    @SuppressWarnings("unchecked")
+    void serviceUserIsNotADirectoryUser() {
+        when(jdbcTemplate.query(contains("pu.user_type <> 'SERVICE'"), any(RowMapper.class), eq(TENANT_ID),
+                eq("svc-1"))).thenReturn(Collections.emptyList());
+        when(jdbcTemplate.update(contains("user_type <> 'SERVICE'"), eq(TENANT_ID), eq("svc-1"))).thenReturn(0);
+
+        assertThatThrownBy(() -> service.getUser(TENANT_ID, "svc-1", BASE_URL))
+                .isInstanceOf(ScimException.class)
+                .satisfies(ex -> assertThat(((ScimException) ex).getHttpStatus()).isEqualTo(HttpStatus.NOT_FOUND));
+        assertThatThrownBy(() -> service.patchUser(TENANT_ID, "svc-1", patch("active", false), BASE_URL))
+                .isInstanceOf(ScimException.class);
+        assertThatThrownBy(() -> service.replaceUser(TENANT_ID, "svc-1", new ScimUser(), BASE_URL))
+                .isInstanceOf(ScimException.class);
+        assertThatThrownBy(() -> service.deleteUser(TENANT_ID, "svc-1"))
+                .isInstanceOf(ScimException.class)
+                .satisfies(ex -> assertThat(((ScimException) ex).getHttpStatus()).isEqualTo(HttpStatus.NOT_FOUND));
+        verify(jdbcTemplate, never()).update(contains("SET status = ?"), any(), any(), any());
+
+        when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(0);
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class)))
+                .thenReturn(Collections.emptyList());
+        service.listUsers(TENANT_ID, null, 1, 10, BASE_URL);
+        verify(jdbcTemplate).queryForObject(contains("pu.user_type <> 'SERVICE'"), eq(Integer.class), any(Object[].class));
+        verify(jdbcTemplate).query(and(contains("pu.user_type <> 'SERVICE'"), contains("LIMIT ? OFFSET ?")),
+                any(RowMapper.class), any(Object[].class));
     }
 
     @Test

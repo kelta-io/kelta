@@ -34,6 +34,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -42,6 +43,7 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -284,6 +286,87 @@ class RouteAuthorizationFilterTest {
             assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
             verifyNoInteractions(cerbosService);
             verify(filterChain, never()).filter(any());
+        }
+
+        @Test
+        @DisplayName("Should deny a plain connected-app token (no profile) but authorize a run-as one as its user")
+        void connectedAppTokenShapes() {
+            Map<String, Object> appClaims = Map.of("sub", "kelta_app_client", "tenant_id", "tenant-1",
+                    "connected_app_id", "app-1", "auth_method", "api_key");
+            GatewayPrincipal plain = connectedAppPrincipal(appClaims);
+            MockServerWebExchange plainExchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.get("/api/users").build());
+            plainExchange.getAttributes().put(PRINCIPAL_ATTR, plain);
+
+            StepVerifier.create(filter.filter(plainExchange, filterChain)).expectComplete().verify();
+
+            assertThat(plainExchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            verifyNoInteractions(cerbosService);
+
+            Map<String, Object> runAsClaims = new java.util.HashMap<>(appClaims);
+            runAsClaims.putAll(Map.of("run_as_user_id", "22222222-2222-2222-2222-222222222222",
+                    "user_type", "SERVICE", "profile_id", "module-profile",
+                    "email", "acme-sync.1a2b3c4d@service.kelta.invalid"));
+            GatewayPrincipal runAs = connectedAppPrincipal(runAsClaims);
+            MockServerWebExchange runAsExchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.get("/api/users").build());
+            runAsExchange.getAttributes().put(PRINCIPAL_ATTR, runAs);
+            when(cerbosService.checkSystemPermission(runAs, "API_ACCESS")).thenReturn(Mono.just(false));
+
+            StepVerifier.create(filter.filter(runAsExchange, filterChain)).expectComplete().verify();
+
+            // Past the identity gate: the decision is Cerbos's (API_ACCESS), not "identity not resolved".
+            verify(cerbosService).checkSystemPermission(runAs, "API_ACCESS");
+        }
+
+        @Test
+        @DisplayName("A module principal with only API_ACCESS reaches its credential endpoint; nothing wider opens")
+        void modulePrincipalReachesOnlyTheCredentialEndpoint() {
+            // External modules: GET /api/modules/self/credentials/{name} rides the static-modules
+            // route, so API_ACCESS is the whole gateway check and the worker decides who may read.
+            RouteDefinition modulesRoute = new RouteDefinition("static-modules", "/api/modules/**",
+                    "http://worker:80", "modules");
+            when(routeRegistry.findByPath(eq("/api/modules/self/credentials/stripe"), any()))
+                    .thenReturn(Optional.of(modulesRoute));
+            when(routeRegistry.findByPath(eq("/api/modules/signing-keys"), any()))
+                    .thenReturn(Optional.of(modulesRoute));
+            // A tenant collection named "credentials" must not turn the path into a child read.
+            lenient().when(routeRegistry.findTenantVisibleByPath(eq("/api/credentials/stripe"), any()))
+                    .thenReturn(Optional.of(new RouteDefinition("coll-credentials", "/api/credentials/**",
+                            "http://worker:80", "credentials")));
+
+            Map<String, Object> claims = Map.of("sub", "kmod_client", "tenant_id", "tenant-1",
+                    "connected_app_id", "app-1", "auth_method", "api_key",
+                    "run_as_user_id", "22222222-2222-2222-2222-222222222222", "user_type", "SERVICE",
+                    "profile_id", "module-profile", "email", "acme-sync.1a2b3c4d@service.kelta.invalid");
+            GatewayPrincipal module = connectedAppPrincipal(claims);
+            when(cerbosService.checkSystemPermission(module, "API_ACCESS")).thenReturn(Mono.just(true));
+            when(cerbosService.checkSystemPermission(module, "MANAGE_CREDENTIALS")).thenReturn(Mono.just(false));
+
+            MockServerWebExchange read = MockServerWebExchange.from(
+                    MockServerHttpRequest.get("/api/modules/self/credentials/stripe").build());
+            read.getAttributes().put(PRINCIPAL_ATTR, module);
+            StepVerifier.create(filter.filter(read, filterChain)).expectComplete().verify();
+
+            verify(filterChain).filter(any());
+            verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
+            verify(cerbosService, never()).checkSystemPermission(module, "MANAGE_CREDENTIALS");
+
+            // The same principal is still held to the stricter rules elsewhere under /api/modules.
+            MockServerWebExchange write = MockServerWebExchange.from(
+                    MockServerHttpRequest.post("/api/modules/signing-keys").build());
+            write.getAttributes().put(PRINCIPAL_ATTR, module);
+            StepVerifier.create(filter.filter(write, filterChain)).expectComplete().verify();
+
+            assertThat(write.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            verify(filterChain).filter(any());
+        }
+
+        private GatewayPrincipal connectedAppPrincipal(Map<String, Object> claims) {
+            org.springframework.security.oauth2.jwt.Jwt.Builder jwt =
+                    org.springframework.security.oauth2.jwt.Jwt.withTokenValue("token").header("alg", "RS256");
+            claims.forEach(jwt::claim);
+            return new io.kelta.gateway.auth.PrincipalExtractor().extractPrincipal(jwt.build());
         }
 
         @Test
@@ -696,6 +779,95 @@ class RouteAuthorizationFilterTest {
                         && "tenant-1".equals(mutated.getRequest().getHeaders().getFirst("X-Cerbos-Scope"));
             }));
         }
+        @Nested
+        @DisplayName("AI settings writes on /api/ai/config")
+        class AiConfigWriteTests {
+
+            private final RouteDefinition aiRoute = new RouteDefinition("static-ai", "/api/ai/**",
+                    "http://kelta-ai:8080", "ai");
+
+            private MockServerWebExchange exchange(HttpMethod method, String rawPath, GatewayPrincipal principal) {
+                MockServerWebExchange exchange = MockServerWebExchange.from(
+                        MockServerHttpRequest.method(method, URI.create(rawPath)).build());
+                exchange.getAttributes().put(PRINCIPAL_ATTR, principal);
+                return exchange;
+            }
+
+            private void routeAndApiAccess(GatewayPrincipal principal) {
+                when(routeRegistry.findByPath(anyString(), any())).thenReturn(Optional.of(aiRoute));
+                when(cerbosService.checkSystemPermission(principal, "API_ACCESS")).thenReturn(Mono.just(true));
+            }
+
+            @Test
+            @DisplayName("a PUT without MANAGE_TENANTS is a 403 and never reaches kelta-ai")
+            void writeWithoutPermissionIsDenied() {
+                GatewayPrincipal principal = principalWithIdentity("admin@test.com");
+                routeAndApiAccess(principal);
+                when(cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")).thenReturn(Mono.just(false));
+                MockServerWebExchange exchange = exchange(HttpMethod.PUT, "/api/ai/config", principal);
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+                verify(filterChain, never()).filter(any());
+            }
+
+            @Test
+            @DisplayName("a PUT with MANAGE_TENANTS is forwarded")
+            void writeWithPermissionIsForwarded() {
+                GatewayPrincipal principal = principalWithIdentity("admin@test.com");
+                routeAndApiAccess(principal);
+                when(cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")).thenReturn(Mono.just(true));
+                MockServerWebExchange exchange = exchange(HttpMethod.PUT, "/api/ai/config", principal);
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                verify(filterChain).filter(any());
+                verify(cerbosService, never()).checkObjectPermission(any(), any(), any());
+            }
+
+            @ParameterizedTest(name = "{0}")
+            @ValueSource(strings = {"/api/ai/%63onfig", "/api/ai/config/", "/api/%61i/config", "/api/ai;v=1/config"})
+            @DisplayName("an encoded or decorated spelling of the path is gated the same way")
+            void encodedSpellingIsDenied(String rawPath) {
+                GatewayPrincipal principal = principalWithIdentity("admin@test.com");
+                routeAndApiAccess(principal);
+                when(cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")).thenReturn(Mono.just(false));
+                MockServerWebExchange exchange = exchange(HttpMethod.PUT, rawPath, principal);
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+                verify(filterChain, never()).filter(any());
+            }
+
+            @Test
+            @DisplayName("a GET stays at API_ACCESS")
+            void readNeedsOnlyApiAccess() {
+                GatewayPrincipal principal = principalWithIdentity("user@test.com");
+                routeAndApiAccess(principal);
+                MockServerWebExchange exchange = exchange(HttpMethod.GET, "/api/ai/config", principal);
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                verify(filterChain).filter(any());
+                verify(cerbosService, never()).checkSystemPermission(principal, "MANAGE_TENANTS");
+            }
+
+            @Test
+            @DisplayName("other AI writes (chat) are not gated on MANAGE_TENANTS")
+            void chatIsNotGated() {
+                GatewayPrincipal principal = principalWithIdentity("user@test.com");
+                routeAndApiAccess(principal);
+                MockServerWebExchange exchange = exchange(HttpMethod.POST, "/api/ai/chat/stream", principal);
+
+                StepVerifier.create(filter.filter(exchange, filterChain)).expectComplete().verify();
+
+                verify(filterChain).filter(any());
+                verify(cerbosService, never()).checkSystemPermission(principal, "MANAGE_TENANTS");
+            }
+        }
+
         @Nested
         @DisplayName("Reads of /api/tenants")
         class TenantsReadScopingTests {
