@@ -159,15 +159,15 @@ class DefaultQueryEngineEventUserTest {
     }
 
     @Nested
-    @DisplayName("with nobody bound (a platform writer)")
+    @DisplayName("with nobody bound (a platform writer): never a value the data carries")
     class NobodyBound {
 
         @Test
-        @DisplayName("an update publishes as the patch's own updatedBy stamp")
-        void updatePublishesAsPatchStamp() {
+        @DisplayName("an update publishes as system, whatever updatedBy the patch carries")
+        void stampedUpdatePublishesAsSystem() {
             engine.update(products, RECORD_ID, patchBy(USER_B));
 
-            assertThat(publishedUser()).isEqualTo(USER_B);
+            assertThat(publishedUser()).isEqualTo("system");
         }
 
         @Test
@@ -187,11 +187,11 @@ class DefaultQueryEngineEventUserTest {
         }
 
         @Test
-        @DisplayName("a create publishes as the data's createdBy stamp")
-        void createPublishesAsCreatedByStamp() {
+        @DisplayName("a create publishes as system, whatever createdBy the data carries")
+        void stampedCreatePublishesAsSystem() {
             engine.create(products, new HashMap<>(Map.of("name", "New", "createdBy", USER_A)));
 
-            assertThat(publishedUser()).isEqualTo(USER_A);
+            assertThat(publishedUser()).isEqualTo("system");
         }
     }
 }

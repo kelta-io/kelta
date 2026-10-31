@@ -332,13 +332,17 @@ to `FlowEngine.startExecution` as the execution user, so:
   **server-controlled**: a `createdBy`/`updatedBy` field mapping or update is
   dropped, never stored — `createdBy` is the default owner field, so a mapping
   that won let any flow author create a record owned by, or attributed to, any
-  user. With no stampable actor the fields stay unset. Before this, all
-  flow-written records had null audit users.
+  user. With no stampable actor the fields stay unset, so a `CREATE_RECORD`
+  into a collection whose `created_by` is `NOT NULL` (`notes`, `scripts`,
+  connected apps, flow versions) then fails — only a flow with neither a
+  run-as user nor an owner has no actor. Before this, all flow-written
+  records had null audit users.
 - **A record-change run starts as the user who made the change.** The record
   event's `userId` is the acting user of that write (`ActingUser` —
   `architecture.md` → Acting user): the request caller for an API write, the
-  run's actor for a flow step's write, else the write's own audit stamp, else
-  `"system"` (not a UUID, so the resolver falls back to run-as, then owner).
+  run's actor for a flow step's write, the job's creator for a bulk job, else
+  `"system"` (not a UUID, so the resolver falls back to run-as, then owner) —
+  never a `createdBy`/`updatedBy` the written data carries.
   An update or delete by B on a record A created starts its runs as B. A flow
   step's write publishes as the run's actor, so the record-triggered run it
   starts takes that actor as its initiator — even one that was itself a run-as

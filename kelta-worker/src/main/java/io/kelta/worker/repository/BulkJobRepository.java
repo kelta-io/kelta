@@ -74,7 +74,7 @@ public class BulkJobRepository {
         return jdbcTemplate.queryForList("""
                 SELECT id, tenant_id, collection_id, operation, batch_size,
                        external_id_field, content_type, data_payload, file_storage_key,
-                       total_records
+                       total_records, created_by
                 FROM bulk_job
                 WHERE status = 'QUEUED'
                 ORDER BY created_at ASC

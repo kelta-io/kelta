@@ -83,7 +83,7 @@ class BulkOperationServiceTest {
                     .thenReturn(Map.of("id", "new-2"))
                     .thenReturn(Map.of("id", "new-3"));
 
-            service.processJob(JOB_ID, COLLECTION_ID, "INSERT", records, 200, null);
+            service.processJob(JOB_ID, COLLECTION_ID, "INSERT", records, 200, null, null);
 
             verify(bulkJobRepository).markProcessing(JOB_ID);
             verify(bulkJobRepository).markCompleted(JOB_ID, 3, 3, 0);
@@ -104,7 +104,7 @@ class BulkOperationServiceTest {
                     .thenReturn(Map.of("id", "new-1"))
                     .thenThrow(new RuntimeException("Validation failed"));
 
-            service.processJob(JOB_ID, COLLECTION_ID, "INSERT", records, 200, null);
+            service.processJob(JOB_ID, COLLECTION_ID, "INSERT", records, 200, null, null);
 
             verify(bulkJobRepository).markCompleted(JOB_ID, 2, 1, 1);
 
@@ -115,6 +115,64 @@ class BulkOperationServiceTest {
             assertThat(results.get(0).status()).isEqualTo("SUCCESS");
             assertThat(results.get(1).status()).isEqualTo("FAILURE");
             assertThat(results.get(1).errorMessage()).isEqualTo("Validation failed");
+        }
+    }
+
+    // ==================== Audit fields ====================
+
+    @Nested
+    @DisplayName("audit fields")
+    class AuditFields {
+
+        private static final String CREATOR = "cccccccc-0000-4000-8000-00000000000c";
+        private static final String MEMBER = "aaaaaaaa-0000-4000-8000-00000000000a";
+
+        @Test
+        @DisplayName("an INSERT replaces uploaded createdBy/updatedBy with the job creator")
+        @SuppressWarnings("unchecked")
+        void insertStampsCreator() {
+            mockCollectionResolution();
+            when(queryEngine.create(eq(collectionDefinition), any())).thenReturn(Map.of("id", "new-1"));
+
+            service.processJob(JOB_ID, COLLECTION_ID, "INSERT",
+                    List.of(Map.of("name", "R", "createdBy", MEMBER, "updatedBy", MEMBER)), 200, null, CREATOR);
+
+            ArgumentCaptor<Map<String, Object>> data = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).create(eq(collectionDefinition), data.capture());
+            assertThat(data.getValue()).containsEntry("createdBy", CREATOR).containsEntry("updatedBy", CREATOR)
+                    .containsEntry("name", "R");
+        }
+
+        @Test
+        @DisplayName("an UPDATE replaces an uploaded updatedBy with the job creator")
+        @SuppressWarnings("unchecked")
+        void updateStampsCreator() {
+            mockCollectionResolution();
+            when(queryEngine.update(eq(collectionDefinition), eq("rec-1"), any()))
+                    .thenReturn(Optional.of(Map.of("id", "rec-1")));
+
+            service.processJob(JOB_ID, COLLECTION_ID, "UPDATE",
+                    List.of(Map.of("id", "rec-1", "name", "R", "updatedBy", MEMBER, "createdBy", MEMBER)),
+                    200, null, CREATOR);
+
+            ArgumentCaptor<Map<String, Object>> patch = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).update(eq(collectionDefinition), eq("rec-1"), patch.capture());
+            assertThat(patch.getValue()).containsEntry("updatedBy", CREATOR).doesNotContainKeys("createdBy", "id");
+        }
+
+        @Test
+        @DisplayName("with no resolvable creator, uploaded audit fields are dropped, not stored")
+        @SuppressWarnings("unchecked")
+        void noCreatorDropsAuditFields() {
+            mockCollectionResolution();
+            when(queryEngine.create(eq(collectionDefinition), any())).thenReturn(Map.of("id", "new-1"));
+
+            service.processJob(JOB_ID, COLLECTION_ID, "INSERT",
+                    List.of(Map.of("name", "R", "createdBy", MEMBER, "updatedBy", MEMBER)), 200, null, null);
+
+            ArgumentCaptor<Map<String, Object>> data = ArgumentCaptor.forClass(Map.class);
+            verify(queryEngine).create(eq(collectionDefinition), data.capture());
+            assertThat(data.getValue()).doesNotContainKeys("createdBy", "updatedBy");
         }
     }
 
@@ -137,7 +195,7 @@ class BulkOperationServiceTest {
                     .thenReturn(Optional.of(Map.of("id", "rec-1")))
                     .thenReturn(Optional.of(Map.of("id", "rec-2")));
 
-            service.processJob(JOB_ID, COLLECTION_ID, "UPDATE", records, 200, null);
+            service.processJob(JOB_ID, COLLECTION_ID, "UPDATE", records, 200, null, null);
 
             verify(bulkJobRepository).markCompleted(JOB_ID, 2, 2, 0);
             verify(queryEngine).update(eq(collectionDefinition), eq("rec-1"), any());
@@ -153,7 +211,7 @@ class BulkOperationServiceTest {
                     Map.of("name", "No ID record")
             );
 
-            service.processJob(JOB_ID, COLLECTION_ID, "UPDATE", records, 200, null);
+            service.processJob(JOB_ID, COLLECTION_ID, "UPDATE", records, 200, null, null);
 
             verify(bulkJobRepository).markCompleted(JOB_ID, 1, 0, 1);
 
@@ -182,7 +240,7 @@ class BulkOperationServiceTest {
             when(queryEngine.delete(collectionDefinition, "rec-1")).thenReturn(true);
             when(queryEngine.delete(collectionDefinition, "rec-2")).thenReturn(true);
 
-            service.processJob(JOB_ID, COLLECTION_ID, "DELETE", records, 200, null);
+            service.processJob(JOB_ID, COLLECTION_ID, "DELETE", records, 200, null, null);
 
             verify(bulkJobRepository).markCompleted(JOB_ID, 2, 2, 0);
         }
@@ -197,7 +255,7 @@ class BulkOperationServiceTest {
 
             when(queryEngine.delete(collectionDefinition, "non-existent")).thenReturn(false);
 
-            service.processJob(JOB_ID, COLLECTION_ID, "DELETE", records, 200, null);
+            service.processJob(JOB_ID, COLLECTION_ID, "DELETE", records, 200, null, null);
 
             verify(bulkJobRepository).markCompleted(JOB_ID, 1, 0, 1);
         }
@@ -221,7 +279,7 @@ class BulkOperationServiceTest {
             when(queryEngine.create(eq(collectionDefinition), any()))
                     .thenReturn(Map.of("id", "new-rec"));
 
-            service.processJob(JOB_ID, COLLECTION_ID, "UPSERT", records, 200, null);
+            service.processJob(JOB_ID, COLLECTION_ID, "UPSERT", records, 200, null, null);
 
             verify(bulkJobRepository).markCompleted(JOB_ID, 1, 1, 0);
             verify(queryEngine).create(eq(collectionDefinition), any());
@@ -240,7 +298,7 @@ class BulkOperationServiceTest {
             when(queryEngine.update(eq(collectionDefinition), eq("existing-rec"), any()))
                     .thenReturn(Optional.of(Map.of("id", "existing-rec")));
 
-            service.processJob(JOB_ID, COLLECTION_ID, "UPSERT", records, 200, null);
+            service.processJob(JOB_ID, COLLECTION_ID, "UPSERT", records, 200, null, null);
 
             verify(bulkJobRepository).markCompleted(JOB_ID, 1, 1, 0);
             verify(queryEngine).update(eq(collectionDefinition), eq("existing-rec"), any());
@@ -260,7 +318,7 @@ class BulkOperationServiceTest {
             when(queryEngine.create(eq(collectionDefinition), any()))
                     .thenReturn(Map.of("id", "created-1"));
 
-            service.processJob(JOB_ID, COLLECTION_ID, "UPSERT", records, 200, "externalCode");
+            service.processJob(JOB_ID, COLLECTION_ID, "UPSERT", records, 200, "externalCode", null);
 
             verify(bulkJobRepository).markCompleted(JOB_ID, 1, 1, 0);
             verify(queryEngine).create(eq(collectionDefinition), any());
@@ -285,7 +343,7 @@ class BulkOperationServiceTest {
             when(queryEngine.create(eq(collectionDefinition), any()))
                     .thenReturn(Map.of("id", "new-id"));
 
-            service.processJob(JOB_ID, COLLECTION_ID, "INSERT", records, 2, null);
+            service.processJob(JOB_ID, COLLECTION_ID, "INSERT", records, 2, null, null);
 
             // 5 records / batch size 2 = 3 batches
             verify(bulkJobRepository, times(3)).insertResults(eq(JOB_ID), any());
@@ -306,7 +364,7 @@ class BulkOperationServiceTest {
             when(jdbcTemplate.queryForList(anyString(), eq(COLLECTION_ID)))
                     .thenReturn(List.of());
 
-            service.processJob(JOB_ID, COLLECTION_ID, "INSERT", List.of(Map.of("name", "test")), 200, null);
+            service.processJob(JOB_ID, COLLECTION_ID, "INSERT", List.of(Map.of("name", "test")), 200, null, null);
 
             verify(bulkJobRepository).markFailed(eq(JOB_ID), contains("Collection not found"));
             verify(bulkJobRepository, never()).markProcessing(anyString());

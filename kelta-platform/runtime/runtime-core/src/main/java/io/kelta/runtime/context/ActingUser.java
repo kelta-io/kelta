@@ -12,13 +12,15 @@ import java.util.Optional;
  * <p>{@link #current()} resolves, innermost first:
  * <ol>
  *   <li>a {@link #CURRENT} binding — a flow step binds its execution actor here
- *       ({@code FlowEngine}), and a write made on someone's behalf under a re-bound
- *       {@link CallerContext} binds the real actor here so the re-binding does not move the
- *       attribution;</li>
+ *       ({@code FlowEngine}), a background job its owner ({@code BulkJobProcessorService}), and a
+ *       write made on someone's behalf under a re-bound {@link CallerContext} binds the real actor
+ *       here so the re-binding does not move the attribution;</li>
  *   <li>the request {@link CallerContext} — the authenticated caller.</li>
  * </ol>
- * Empty when neither is bound: a platform path (bootstrap, package import, a NATS listener) with
- * no user behind it, which the write's own audit stamp — or {@code "system"} — stands in for.
+ * Empty when neither is bound: a platform path (bootstrap, package import, a NATS listener), whose
+ * writes are {@code "system"}'s. Nothing a written record carries stands in — an unbound writer's
+ * {@code createdBy}/{@code updatedBy} may come from its own input. A platform path that writes
+ * for a user binds it here.
  *
  * <p>Kept apart from {@link CallerContext} on purpose. Binding a flow actor as the caller would
  * owner-scope the flow's reads and writes and subject them to the caller-only write rules;
