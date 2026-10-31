@@ -135,7 +135,7 @@ A presence-gated hook (secret/integration configured) uses `@ConditionalOnProper
 | NATS subscription wiring | `config/NatsSubscriptionConfig.java` |
 | JDBC repository | `repository/ApprovalRepository.java` |
 | Owner-scoped writes (don't write a per-collection owner-guard hook — declare `ownerField`/`ownerScope`/`ownerScopeReads` on the collection: `ConsumerAlertingSystemCollections.watches()` for a system collection, collection metadata via the API for a tenant one; the wildcard guard enforces it) | `listener/OwnerScopeGuardHook.java` |
-| Support staff acting on a member's owner-scoped rows (re-bind `CallerContext` to the member for the write, add the `viewAll` bypass for a tenant-wide read) | `controller/SupportPermissions.java` (`writeAs`/`readAll`) |
+| Support staff acting on a member's owner-scoped rows (re-bind `CallerContext` to the member for the write while `ActingUser` keeps the staff as the write's author; add the `viewAll` bypass for a tenant-wide read) | `controller/SupportPermissions.java` (`writeAs`/`readAll`) |
 | Service with event publishing | `service/CollectionLifecycleManager.java` |
 | Unit test | `scim/service/ScimUserServiceTest.java` |
 | Controller test | `scim/controller/ScimUserControllerTest.java` |

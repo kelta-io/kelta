@@ -660,6 +660,26 @@ Cerbos enforcement is **collection/record-scoped, not blanket**. Concretely:
   Both Cerbos principals (`CerbosPrincipalBuilder`, worker `CerbosAuthorizationService`) carry
   the UUID as **`P.attr.userId`**; `P.id` stays the email (integrations.md → Cerbos principal
   attributes).
+- **Acting user — `ActingUser`** (runtime-core `context/`). Who a record write is *attributed*
+  to, apart from who it is *authorized* as: the `userId` of the `record.changed` event
+  `DefaultQueryEngine` publishes (`actingUserId`), and so the initiator `FlowEventListener` hands
+  `FlowActorResolver` for every record-triggered run (`flow_execution.started_by`,
+  `$.context.userId`, an external module's `act`). `ActingUser.current()` is an explicit
+  `ActingUser.CURRENT` binding, else `CallerContext.current().userId()`. The explicit binders:
+  `FlowEngine` binds the run's actor around each state, so a flow step's writes are the actor's;
+  `BulkJobProcessorService` binds the job's creator (`bulk_job.created_by` resolved to a UUID; the
+  uploaded records' `createdBy`/`updatedBy` are dropped and the creator stamped);
+  `SupportPermissions.writeAs` binds the support actor while it re-binds `CallerContext` to the
+  member, so an on-behalf write stays the staff's. With neither bound — bootstrap, package import
+  run off a request, NATS listeners, schedulers, a connected app's machine identity — the event
+  names `"system"`. It **never** names a value the written data carries: not the stored row's
+  `createdBy`/`updatedBy` (until 2026-10-31 an update or delete by B on A's record published as A,
+  so its runs started as A), and not the payload's, which an unbound writer may have copied from
+  its own input. A platform path that writes for a user binds `ActingUser` for it.
+  `RecordVersionHook` and `FieldHistoryHook` credit the same user — a delete stamps nothing on the
+  row, so the row alone names the last updater. The binding changes attribution only: owner
+  scoping, the system-maintained write rule and Cerbos read `CallerContext`, so never bind a flow
+  actor as the caller.
 - **Run-as connected-app tokens — module service principals** (external modules part 9b,
   V220). `connected_app.run_as_user_id` binds a `client_credentials` app to a `SERVICE`
   `platform_user`; both it and `connected_app.client_secret_enc` are JDBC-only (not fields of the

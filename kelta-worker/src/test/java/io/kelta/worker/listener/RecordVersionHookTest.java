@@ -1,5 +1,6 @@
 package io.kelta.worker.listener;
 
+import io.kelta.runtime.context.ActingUser;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
 import io.kelta.runtime.query.QueryEngine;
@@ -152,6 +153,24 @@ class RecordVersionHookTest {
         assertThat(version.changedFieldsJson()).isEqualTo("[]");
         assertThat(version.snapshotJson()).contains("\"status\":\"DONE\"");
         assertThat(version.changedBy()).isEqualTo("user-3");
+    }
+
+    @Test
+    @DisplayName("a delete is credited to the user doing it, not the record's last updater")
+    void deleteCreditedToActingUser() {
+        CollectionDefinition def = trackedCollection();
+        when(queryEngine.getById(def, "rec-1")).thenReturn(Optional.of(new HashMap<>(Map.of(
+                "id", "rec-1", "status", "DONE", "updated_by", "user-3"))));
+
+        ActingUser.runAs("user-7", () -> {
+            hook.beforeDelete("orders", "rec-1", "tenant-1");
+            hook.afterDelete("orders", "rec-1", "tenant-1");
+        });
+
+        CapturedVersion version = captureVersion();
+        assertThat(version.changeType()).isEqualTo("DELETED");
+        assertThat(version.changedBy()).isEqualTo("user-7");
+        assertThat(version.changeSource()).isEqualTo("UI");
     }
 
     @Test

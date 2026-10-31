@@ -157,6 +157,50 @@ class CreateRecordActionHandlerTest {
     }
 
     @Test
+    @DisplayName("Should replace a createdBy/updatedBy field mapping with the execution actor")
+    void shouldReplaceMappedAuditUsersWithActor() {
+        when(registry.get("orders")).thenReturn(mock(CollectionDefinition.class));
+        String actor = "3f2b6c1e-9d4a-4f0b-8e2d-1a2b3c4d5e6f";
+        String someoneElse = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+
+        String config = """
+            {"targetCollectionName": "orders", "fieldMappings": [
+                {"targetField": "name", "value": "New Order"},
+                {"targetField": "createdBy", "value": "%s"},
+                {"targetField": "updatedBy", "sourceField": "ownerId"}
+            ]}
+            """.formatted(someoneElse);
+        ActionResult result = handler.execute(makeContext(config, actor));
+        assertTrue(result.successful());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> recordData = (Map<String, Object>) result.outputData().get("recordData");
+        assertEquals(actor, recordData.get("createdBy"));
+        assertEquals(actor, recordData.get("updatedBy"));
+        assertEquals("New Order", recordData.get("name"));
+    }
+
+    @Test
+    @DisplayName("Should drop a createdBy field mapping when the execution has no stampable actor")
+    void shouldDropMappedAuditUsersWithoutActor() {
+        when(registry.get("orders")).thenReturn(mock(CollectionDefinition.class));
+
+        String config = """
+            {"targetCollectionName": "orders", "fieldMappings": [
+                {"targetField": "name", "value": "New Order"},
+                {"targetField": "createdBy", "value": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"}
+            ]}
+            """;
+        ActionResult result = handler.execute(makeContext(config, "webhook"));
+        assertTrue(result.successful());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> recordData = (Map<String, Object>) result.outputData().get("recordData");
+        assertFalse(recordData.containsKey("createdBy"));
+        assertFalse(recordData.containsKey("updatedBy"));
+    }
+
+    @Test
     @DisplayName("Should not stamp audit users from a non-UUID actor (legacy 'webhook')")
     void shouldNotStampNonUuidActor() {
         when(registry.get("orders")).thenReturn(mock(CollectionDefinition.class));

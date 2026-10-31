@@ -1,5 +1,6 @@
 package io.kelta.worker.controller;
 
+import io.kelta.runtime.context.ActingUser;
 import io.kelta.runtime.context.CallerContext;
 import io.kelta.runtime.context.CallerContext.UserType;
 import io.kelta.worker.repository.BootstrapRepository;
@@ -79,12 +80,15 @@ final class SupportPermissions {
      * Runs a write on {@code subject}'s rows. When a support actor (already checked for
      * {@link #WRITE}) names another member, the write runs as that member, so the owner guard
      * stamps and compares the member as the owner. The actor's own bypasses are not carried over.
+     * The write stays attributed to the support actor ({@link ActingUser}): its record-changed
+     * event, the flows it triggers and its history entries name who did it, not the member.
      */
     static <T> T writeAs(String subject, ScopedValue.CallableOp<T, RuntimeException> write) {
         CallerContext caller = CallerContext.current().orElse(null);
         if (caller == null || subject.equals(caller.userId())) {
             return write.call();
         }
-        return CallerContext.callAs(new CallerContext(subject, UserType.PORTAL, false, false), write);
+        return ActingUser.callAs(caller.userId(), () ->
+                CallerContext.callAs(new CallerContext(subject, UserType.PORTAL, false, false), write));
     }
 }

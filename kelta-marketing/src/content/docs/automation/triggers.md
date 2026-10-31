@@ -15,9 +15,10 @@ the run begins with a [state envelope](/docs/automation/flow-data/) whose `trigg
 | `NATS_TRIGGERED` | a message arrives on a topic | `NATS_MESSAGE` |
 | `AUTOLAUNCHED` | called explicitly — API, CLI, MCP, page action, inbound webhook | `API_INVOCATION` or `WEBHOOK` |
 
-Only **active** flows start. Every start resolves an **actor** — the initiating user for manual runs, else the
-flow's `runAsUserId`, else the flow's owner — and the run acts with that user's permissions; records it writes are
-stamped with that user.
+Only **active** flows start. Every start resolves an **actor** — the initiating user (who started a manual run, or
+who made the record change that triggered it), else the flow's `runAsUserId`, else the flow's owner — and the run
+acts with that user's permissions; records it writes are stamped with that user. `createdBy` and `updatedBy` are
+always the actor: a step's field mapping cannot set them.
 
 ## Record triggers
 

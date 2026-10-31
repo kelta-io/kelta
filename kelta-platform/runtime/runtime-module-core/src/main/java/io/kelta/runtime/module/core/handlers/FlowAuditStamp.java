@@ -13,10 +13,15 @@ import java.util.regex.Pattern;
  * resolve an actor (initiating user → flow {@code runAsUserId} → flow owner)
  * into {@code ActionContext.userId}; this helper applies it.
  *
+ * <p>The audit fields are server-controlled: a {@code createdBy} /
+ * {@code updatedBy} field mapping in the step's config is dropped, never
+ * stored. {@code createdBy} is the default owner field of owner-scoped
+ * collections, so a mapping that won would let any flow author create a record
+ * owned by — or attributed to — any user.
+ *
  * <p>Only UUID-shaped actors are stamped: legacy provenance markers (the
  * webhook path historically passed the literal {@code "webhook"}) must never
- * reach a UUID column. Explicit field mappings win — an already-present key is
- * left untouched.
+ * reach a UUID column. With no stampable actor the fields stay unset.
  */
 final class FlowAuditStamp {
 
@@ -31,20 +36,27 @@ final class FlowAuditStamp {
         return userId != null && UUID_PATTERN.matcher(userId).matches();
     }
 
-    /** Stamps both audit fields for a newly created record. */
+    /** Replaces any mapped audit fields with the actor for a newly created record. */
     static void stampCreate(Map<String, Object> recordData, String userId) {
+        dropMappedAuditFields(recordData);
         if (!isStampable(userId)) {
             return;
         }
-        recordData.putIfAbsent("createdBy", userId);
-        recordData.putIfAbsent("updatedBy", userId);
+        recordData.put("createdBy", userId);
+        recordData.put("updatedBy", userId);
     }
 
-    /** Stamps the updater for a record update. */
+    /** Replaces any mapped audit fields with the actor as the updater for a record update. */
     static void stampUpdate(Map<String, Object> updateData, String userId) {
+        dropMappedAuditFields(updateData);
         if (!isStampable(userId)) {
             return;
         }
-        updateData.putIfAbsent("updatedBy", userId);
+        updateData.put("updatedBy", userId);
+    }
+
+    private static void dropMappedAuditFields(Map<String, Object> data) {
+        data.remove("createdBy");
+        data.remove("updatedBy");
     }
 }

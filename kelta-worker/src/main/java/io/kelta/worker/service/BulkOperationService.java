@@ -20,6 +20,10 @@ import java.util.*;
  * <p>Processes records in configurable batch sizes, tracking per-record results
  * for partial success support. Uses the existing {@link QueryEngine} CRUD infrastructure.
  *
+ * <p>The audit fields are the job creator's, whatever the uploaded records carry: a record's
+ * {@code createdBy}/{@code updatedBy} is dropped and the creator stamped, as
+ * {@code RecordWritePipeline} does for a single write. Without a creator they stay unset.
+ *
  * @since 1.0.0
  */
 @Service
@@ -54,11 +58,13 @@ public class BulkOperationService {
      * @param records         the records to process
      * @param batchSize       number of records per batch
      * @param externalIdField the field used for UPSERT matching (nullable)
+     * @param creatorId       the job creator's {@code platform_user} UUID, stamped as the
+     *                        records' {@code createdBy}/{@code updatedBy} (nullable)
      */
     @SuppressWarnings("unchecked")
     public void processJob(String jobId, String collectionId, String operation,
                            List<Map<String, Object>> records, int batchSize,
-                           String externalIdField) {
+                           String externalIdField, String creatorId) {
         CollectionDefinition definition = resolveCollection(collectionId);
         if (definition == null) {
             bulkJobRepository.markFailed(jobId, "Collection not found or inactive: " + collectionId);
@@ -82,7 +88,7 @@ public class BulkOperationService {
                 Map<String, Object> record = batch.get(i);
 
                 try {
-                    String recordId = executeOperation(definition, operation, record, externalIdField);
+                    String recordId = executeOperation(definition, operation, record, externalIdField, creatorId);
                     batchResults.add(new BulkJobResultRecord(recordIndex, recordId, "SUCCESS", null));
                     success++;
                 } catch (Exception e) {
@@ -108,10 +114,10 @@ public class BulkOperationService {
     }
 
     private String executeOperation(CollectionDefinition definition, String operation,
-                                     Map<String, Object> record, String externalIdField) {
+                                     Map<String, Object> record, String externalIdField, String creatorId) {
         return switch (operation) {
             case "INSERT" -> {
-                Map<String, Object> created = queryEngine.create(definition, record);
+                Map<String, Object> created = queryEngine.create(definition, forCreate(record, creatorId));
                 yield (String) created.get("id");
             }
             case "UPDATE" -> {
@@ -119,14 +125,12 @@ public class BulkOperationService {
                 if (id == null) {
                     throw new IllegalArgumentException("Record 'id' is required for UPDATE operations");
                 }
-                Map<String, Object> data = new LinkedHashMap<>(record);
-                data.remove("id");
-                queryEngine.update(definition, id, data)
+                queryEngine.update(definition, id, forUpdate(record, creatorId))
                         .orElseThrow(() -> new IllegalArgumentException("Record not found: " + id));
                 yield id;
             }
             case "UPSERT" -> {
-                yield executeUpsert(definition, record, externalIdField);
+                yield executeUpsert(definition, record, externalIdField, creatorId);
             }
             case "DELETE" -> {
                 String id = extractRecordId(record);
@@ -144,20 +148,18 @@ public class BulkOperationService {
     }
 
     private String executeUpsert(CollectionDefinition definition, Map<String, Object> record,
-                                  String externalIdField) {
+                                  String externalIdField, String creatorId) {
         if (externalIdField == null || externalIdField.isBlank()) {
             // Fall back to 'id' field for matching
             String id = extractRecordId(record);
             if (id != null) {
                 Optional<Map<String, Object>> existing = queryEngine.getById(definition, id);
                 if (existing.isPresent()) {
-                    Map<String, Object> data = new LinkedHashMap<>(record);
-                    data.remove("id");
-                    queryEngine.update(definition, id, data);
+                    queryEngine.update(definition, id, forUpdate(record, creatorId));
                     return id;
                 }
             }
-            Map<String, Object> created = queryEngine.create(definition, record);
+            Map<String, Object> created = queryEngine.create(definition, forCreate(record, creatorId));
             return (String) created.get("id");
         }
 
@@ -179,15 +181,40 @@ public class BulkOperationService {
             // Update existing
             Map<String, Object> existing = result.data().get(0);
             String existingId = (String) existing.get("id");
-            Map<String, Object> data = new LinkedHashMap<>(record);
-            data.remove("id");
-            queryEngine.update(definition, existingId, data);
+            queryEngine.update(definition, existingId, forUpdate(record, creatorId));
             return existingId;
         } else {
             // Insert new
-            Map<String, Object> created = queryEngine.create(definition, record);
+            Map<String, Object> created = queryEngine.create(definition, forCreate(record, creatorId));
             return (String) created.get("id");
         }
+    }
+
+    /** An uploaded record as create data: its audit fields replaced by the creator's. */
+    private static Map<String, Object> forCreate(Map<String, Object> record, String creatorId) {
+        Map<String, Object> data = withoutAuditFields(record);
+        if (creatorId != null) {
+            data.put("createdBy", creatorId);
+            data.put("updatedBy", creatorId);
+        }
+        return data;
+    }
+
+    /** An uploaded record as an update patch: no id, its audit fields replaced by the creator's. */
+    private static Map<String, Object> forUpdate(Map<String, Object> record, String creatorId) {
+        Map<String, Object> data = withoutAuditFields(record);
+        data.remove("id");
+        if (creatorId != null) {
+            data.put("updatedBy", creatorId);
+        }
+        return data;
+    }
+
+    private static Map<String, Object> withoutAuditFields(Map<String, Object> record) {
+        Map<String, Object> data = new LinkedHashMap<>(record);
+        data.remove("createdBy");
+        data.remove("updatedBy");
+        return data;
     }
 
     private String extractRecordId(Map<String, Object> record) {
