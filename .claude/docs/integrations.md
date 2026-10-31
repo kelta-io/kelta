@@ -359,10 +359,15 @@ to `FlowEngine.startExecution` as the execution user, so:
   the user, `flow_execution.started_by_source` (V227) records it, and
   `ActionContext.actorSource` carries it to every Task (Parallel/Map/InvokeFlow
   branches, `DECISION` children and `TRIGGER_FLOW` hops inherit it; a resumed
-  run reads it back; a retry keeps the original's). Only `INITIATOR` is a person
-  who acted. An external module action sends it as `act.source` (`initiator`,
-  `run_as`, `owner`) so a member-only action can refuse a fallback; a run whose
-  source is unknown (`null`: started before V227) sends no `act`.
+  run reads it back; a retry re-asserts the original's user and source, whoever
+  asked for it — `resolveRetry`, `FlowExecutionController` retry). `INITIATOR` is
+  the user the trigger names; for a record trigger that is the record's creator,
+  not necessarily its editor, and a flow's own record write can set it
+  (`concerns.md` → record-triggered `initiator`). An external module action sends
+  it as `act.source` (`initiator`, `run_as`, `owner`; an open set) so a
+  member-only action can accept only `initiator`; a run whose source is unknown
+  (`null`: started before V227, including one still waiting when it deployed)
+  sends no `act`.
 
 ### NATS-triggered flows
 
@@ -876,9 +881,11 @@ What a module receives and must handle:
 - **`act` is the caller, or a flow run's user.** Routes, and hooks on request paths, carry the
   caller as `act {sub, user_type}` (routes add `profile_id`), with no `source`. A flow step
   carries the run's user with `act.source` = `initiator`, `run_as` or `owner` (see *Execution
-  actor & audit stamping* above); `run_as` and `owner` are fallbacks for a run no one started, so
-  a member-only action must refuse them (`Actor::is_fallback()` in the Rust SDK). Module
-  schedules carry no `act`.
+  actor & audit stamping* above); `run_as` and `owner` are fallbacks for a run whose trigger
+  names no user. A member-only **action** accepts only `initiator` (`Actor::is_initiator()` in the
+  Rust SDK), so it also refuses an unknown source and an action call with no source, whatever
+  platform version signed it; a route checks `!Actor::is_fallback()`, since its caller carries no
+  source. Module schedules carry no `act`.
 - **Records are the principal's view** (spec §3.4): server-only and `HIDDEN` fields absent,
   `MASKED` fields masked, an unreadable collection `{}`. A hook may only set a declared `VISIBLE`
   field that is neither server-only nor system-maintained, on a collection its principal may

@@ -149,7 +149,7 @@ this service.
 | `appliesTo=PORTAL` rules **skipped** | **Enforced** for portal members | The JAR could not read the caller's user type. The assertion's `act.user_type` carries it. |
 | `expire-passes` scheduled by a tenant flow | Manifest schedule, hourly | External modules can declare schedules. Delete the tenant's old flow at cutover: once the JAR is gone, its `billing:expire-passes` step fails. |
 | Reads every collection in-process | Asks for `VIEW_ALL_DATA` | Counting goes through the platform API as the module's service user. |
-| Member from the in-process caller context | Member from the signed `act` claim only | Never from the input or a header. A flow step's `act` is the run's user, as the JAR saw it, but checkout and portal refuse a run-as or owner fallback (`act.source`) with "No calling member": no member started that run. A run with no user gets "No calling member" from every member action. |
+| Member from the in-process caller context | Member from the signed `act` claim only | Never from the input or a header. A flow step's `act` is the run's user, as the JAR saw it, but a checkout or portal **action** acts only for an `act.source: initiator` actor (`Actor::is_initiator()`): a run-as or owner fallback, an unknown source and an actor with no source get "No calling member", whatever platform version signed the call. Routes still accept their caller, which carries no source. A run with no user gets "No calling member" from every member action. For a record-triggered run the initiator is the record's creator, not necessarily its editor (platform `.claude/docs/concerns.md`). |
 | Stripe `Idempotency-Key`: a random UUID | `kelta-billing:<operation>:<platform Idempotency-Key>` when the platform sends one | A retried flow step does not create a second checkout session. Routes have no platform key and still use a random UUID. |
 | Credential resolved in-process | `GET /api/modules/self/credentials/stripe?purpose=…` | Per request, audited as the module. Never stored or logged. |
 
@@ -213,6 +213,7 @@ Stricter than the JAR build was, in the webhook:
   `created` has one-second resolution, so ties are not ordered.
 - **Caches are per replica.** A record event reaches one replica. Run one replica, or accept that
   a rule change reaches the others within `BILLING_RULES_CACHE_SECONDS`.
-- **A flow run no member started cannot act for a member.** Checkout and portal refuse a
-  run-as or owner actor (`act.source`, `Actor::is_fallback()`). `me` and `resolve-entitlements`
+- **A flow run no member started cannot act for a member.** The checkout and portal actions
+  require an `act.source: initiator` actor (`Actor::is_initiator()`), so they refuse a run-as or
+  owner fallback, an unknown source and an actor with no source. `me` and `resolve-entitlements`
   read that user's own billing. All four need the signed actor.

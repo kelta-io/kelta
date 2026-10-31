@@ -30,8 +30,9 @@ pub struct Actor {
     /// The caller's profile; sent on routes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
-    /// How a flow step's actor was chosen (`act.source`). `None` means the request's caller: the
-    /// platform sends no source for a route, hook or entitlements lookup.
+    /// How a flow step's actor was chosen (`act.source`). The platform sends none for a route,
+    /// hook or entitlements lookup, where the actor is the request's caller; on an action call,
+    /// `None` is not known to be a member (see [`is_initiator`](Self::is_initiator)).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<ActorSource>,
 }
@@ -42,29 +43,48 @@ impl Actor {
         self.user_type.as_deref() == Some("PORTAL")
     }
 
-    /// True when the actor is a flow run's fallback identity rather than a person who acted: the
-    /// flow's run-as user or owner, sent because no one started the run (a schedule, a webhook, a
-    /// record change with no acting user). A source this SDK does not know counts as a fallback,
-    /// so an older module fails closed. A member-only action (one that acts for "the calling
-    /// member") refuses such an actor.
+    /// True when the actor is a flow run's fallback identity rather than the user its trigger
+    /// named: the flow's run-as user or owner, sent because the trigger named no user (a
+    /// schedule, a webhook, a record that names no user). A source this SDK does not know counts
+    /// as a fallback, so an older module fails closed. False for an actor with no source.
     pub fn is_fallback(&self) -> bool {
         self.source.as_ref().is_some_and(ActorSource::is_fallback)
+    }
+
+    /// True only when a flow step's actor is its run's [`Initiator`](ActorSource::Initiator).
+    /// False for a fallback, for a source this SDK does not know, and for an actor with no
+    /// source.
+    ///
+    /// A module **action** that acts for "the calling member" (a checkout, a billing portal)
+    /// should require this rather than `!is_fallback()`: an action call is a flow step, and one
+    /// whose actor carries no source came from a platform that does not say how it chose the
+    /// actor, so it is not known to be a member. A route's caller carries no source by design:
+    /// check routes with `!is_fallback()`.
+    ///
+    /// For a record-triggered run the initiator is the record's creator, not necessarily the user
+    /// who changed it (see [`ActorSource::Initiator`]).
+    pub fn is_initiator(&self) -> bool {
+        matches!(self.source, Some(ActorSource::Initiator))
     }
 }
 
 /// How the platform chose a flow step's actor (`act.source`).
 ///
-/// Unknown values are kept as [`Other`](Self::Other), so a newer platform never breaks an older
-/// module; [`is_fallback`](Self::is_fallback) treats them as fallbacks.
+/// An open set: unknown values are kept as [`Other`](Self::Other), so a newer platform never
+/// breaks an older module; [`is_fallback`](Self::is_fallback) treats them as fallbacks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ActorSource {
-    /// The user who started the run, or whose record change triggered it.
+    /// The user the run's trigger names: a manual or API run's caller, or for a record-triggered
+    /// run the record's **creator** (`createdBy`, else `updatedBy`). That is not necessarily the
+    /// user who changed the record, and a flow's own record write can set `createdBy`, so read it
+    /// as "the record's author" (the platform's `.claude/docs/concerns.md` tracks the fix). A
+    /// retry re-runs as the original run's initiator, whoever asked for it.
     Initiator,
-    /// The flow's configured run-as user: no one started the run.
+    /// The flow's configured run-as user: the trigger named no user.
     RunAs,
-    /// The flow's owner: no one started the run and the flow names no run-as user.
+    /// The flow's owner: the trigger named no user and the flow names no run-as user.
     Owner,
     /// A value this SDK does not know, as sent.
     #[serde(untagged)]
@@ -527,6 +547,7 @@ mod tests {
             serde_json::from_value(json!({ "sub": "u1", "user_type": "PORTAL", "profile_id": "p1" })).unwrap();
         assert_eq!(actor.source, None);
         assert!(!actor.is_fallback());
+        assert!(!actor.is_initiator(), "no source is not known to be an initiator");
         assert!(actor.is_portal());
         assert_eq!(
             serde_json::to_value(&actor).unwrap(),
@@ -545,6 +566,9 @@ mod tests {
         assert!(!read("initiator").is_fallback());
         assert!(read("run_as").is_fallback());
         assert!(read("owner").is_fallback());
+        assert!(read("initiator").is_initiator());
+        assert!(!read("run_as").is_initiator());
+        assert!(!read("owner").is_initiator());
         for source in ["initiator", "run_as", "owner"] {
             assert_eq!(serde_json::to_value(read(source)).unwrap()["source"], source);
         }
@@ -555,6 +579,7 @@ mod tests {
         let actor: Actor = serde_json::from_value(json!({ "sub": "u1", "source": "delegate" })).unwrap();
         assert_eq!(actor.source, Some(ActorSource::Other("delegate".into())));
         assert!(actor.is_fallback());
+        assert!(!actor.is_initiator());
         assert_eq!(serde_json::to_value(&actor).unwrap()["source"], "delegate");
     }
 

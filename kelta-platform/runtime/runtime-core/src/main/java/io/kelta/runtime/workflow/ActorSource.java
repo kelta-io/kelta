@@ -4,12 +4,16 @@ package io.kelta.runtime.workflow;
  * How a flow run's user ({@link ActionContext#userId()}) was chosen, in the precedence the worker's
  * {@code FlowActorResolver} applies.
  *
- * <p>Only {@link #INITIATOR} is a person who acted: they started the run, or made the record change
- * that triggered it. {@link #RUN_AS} and {@link #OWNER} are fallback identities for a run nobody
- * started (a schedule, a webhook, a NATS trigger, a record change with no acting user). Code that
- * acts <em>for</em> the run's user, rather than only attributing work to them, must tell the two
- * apart: an external module receives the source as {@code act.source} and refuses a member-only
- * action for a fallback identity.
+ * <p>{@link #INITIATOR} is the user the run's trigger names: a manual or API run's caller, or the
+ * user a record-change event names. {@link #RUN_AS} and {@link #OWNER} are fallback identities for a
+ * run whose trigger names no user (a schedule, a webhook, a NATS trigger, a record that names no
+ * user). Code that acts <em>for</em> the run's user, rather than only attributing work to them, must
+ * tell them apart: an external module receives the source as {@code act.source} and refuses a
+ * member-only action for a fallback identity.
+ *
+ * <p>For a record-triggered run, {@link #INITIATOR} is the record's creator ({@code createdBy}, else
+ * {@code updatedBy}), not necessarily the user who changed it, and a flow's own record write can set
+ * {@code createdBy}: see {@code .claude/docs/concerns.md} (record-triggered {@code initiator}).
  *
  * <p>Recorded with the execution ({@code flow_execution.started_by_source}), so a resumed or
  * retried run keeps it. {@code null} where it is unknown: a run started before it was recorded, or
@@ -19,7 +23,11 @@ package io.kelta.runtime.workflow;
  */
 public enum ActorSource {
 
-    /** The user who started the run: a manual run's caller, or the record change's acting user. */
+    /**
+     * The user the run's trigger names: a manual or API run's caller, or, for a record trigger, the
+     * user the record-change event names. That is the record's creator, not necessarily the user who
+     * changed it, and a flow's own record write can set it (see the class comment).
+     */
     INITIATOR,
 
     /** The flow's configured run-as user ({@code flow.run_as_user_id}): no person started the run. */

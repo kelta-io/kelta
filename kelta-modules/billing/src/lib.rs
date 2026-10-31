@@ -149,7 +149,9 @@ impl<S: PlatformSource> ModuleHandlers for Billing<S> {
             tenant: &tenant,
             stripe: &self.stripe,
             user_id: call.actor().map(|a| a.sub.as_str()),
-            fallback_actor: call.actor().is_some_and(Actor::is_fallback),
+            // A flow step: only its run's initiator is a member who acted. A fallback, an unknown
+            // source and an actor with no source are not, whatever the platform version.
+            member_acted: call.actor().is_some_and(Actor::is_initiator),
             input: &request.input,
             idempotency_key: call.idempotency_key(),
         };
@@ -213,7 +215,8 @@ impl<S: PlatformSource> ModuleHandlers for Billing<S> {
             tenant: &tenant,
             stripe: &self.stripe,
             user_id: call.actor().map(|a| a.sub.as_str()),
-            fallback_actor: call.actor().is_some_and(Actor::is_fallback),
+            // A route's caller carries no source by design; refuse only a flow fallback.
+            member_acted: call.actor().is_some_and(|a| !a.is_fallback()),
             input: &input,
             idempotency_key: None,
         };

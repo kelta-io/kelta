@@ -213,10 +213,10 @@ public class ModuleAssertionSigner {
     }
 
     /**
-     * The {@code act.source} value of a flow step's actor: {@code initiator} (the user who started
-     * the run, or whose record change triggered it), {@code run_as} (the flow's run-as user) or
-     * {@code owner} (the flow's owner). The last two are fallback identities, not a person who
-     * acted; a module refuses a member-only action for them.
+     * The {@code act.source} value of a flow step's actor: {@code initiator} (the user the trigger
+     * names; for a record trigger the record's creator, see {@link ActorSource}), {@code run_as}
+     * (the flow's run-as user) or {@code owner} (the flow's owner). The last two are fallback
+     * identities, not a person who acted; a module refuses a member-only action for them.
      */
     static String claimSource(ActorSource source) {
         return switch (source) {

@@ -680,10 +680,11 @@ components:
       description: |
         The user whose action caused this call (RFC 8693 `act` claim). On a route, hook or
         entitlements lookup it is the request's caller, with no `source`. On a flow action it is
-        the run's user (the caller, the record's changer, or the flow's run-as user or owner), sent
-        only when that is an active INTERNAL or PORTAL user, with `source` saying which. Absent on
-        module schedules, webhooks and events, and on a flow action whose run did not record its
-        source; `profile_id` is sent on routes.
+        the run's user (the user the trigger names, or the flow's run-as user or owner), sent only
+        when that is an active INTERNAL or PORTAL user, with `source` saying which. Absent on module
+        schedules, webhooks and events, and on a flow action whose run did not record its source
+        (including a run still waiting when the platform began recording it); `profile_id` is sent
+        on routes.
       type: object
       required: [sub, user_type]
       properties:
@@ -698,13 +699,23 @@ components:
         source:
           type: string
           description: |
-            How a flow action's actor was chosen. `initiator`: the user who started the run, or
-            whose record change triggered it. `run_as`: the flow's run-as user. `owner`: the
-            flow's owner. `run_as` and `owner` are fallback identities for a run no one started,
-            not a person who acted: an action that acts for the calling member (a checkout, a
-            billing portal) refuses them, as it refuses a call with no actor. Absent means the
-            request's caller. Treat a value you do not know as a fallback; more may be added.
-          enum: [initiator, run_as, owner]
+            How a flow action's actor was chosen. An open set: the values today are listed below,
+            more may be added, and a module must treat a value it does not know as a fallback.
+
+            - `initiator`: the user the run's trigger names. For a manual or API run that is the
+              caller. For a record-triggered run it is the record's **creator** (`createdBy`, else
+              `updatedBy`), not necessarily the user who made the change, and a flow's own record
+              write can set `createdBy`, so treat it as "the record's author", not "the editor"
+              (see `.claude/docs/concerns.md`). A retry re-runs as the original run's user and
+              source, whoever asked for the retry.
+            - `run_as`: the flow's run-as user.
+            - `owner`: the flow's owner.
+
+            `run_as` and `owner` are fallback identities for a run whose trigger names no user,
+            not a person who acted. An action that acts for the calling member (a checkout, a
+            billing portal) should accept only `initiator` and refuse everything else, including
+            an action call whose actor has no `source`, as it refuses a call with no actor. Absent
+            on a route, hook or entitlements lookup, where the actor is the request's caller.
     Settings:
       description: The install's settings, validated against the manifest's `settings` schema. Never contains secrets.
       type: object

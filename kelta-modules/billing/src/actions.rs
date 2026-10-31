@@ -34,9 +34,11 @@ pub struct ActionCall<'a, P> {
     pub stripe: &'a StripeClient,
     /// The verified acting user, if any.
     pub user_id: Option<&'a str>,
-    /// True when that user is a flow run's fallback identity (its run-as user or owner), not a
-    /// member who acted ([`kelta_module::protocol::Actor::is_fallback`]).
-    pub fallback_actor: bool,
+    /// True when that user is known to be a member who acted, so an action may act *for* them:
+    /// on a route, a caller that is not a flow fallback
+    /// ([`kelta_module::protocol::Actor::is_fallback`]); on an action call (a flow step), only an
+    /// actor whose `act.source` is `initiator` ([`kelta_module::protocol::Actor::is_initiator`]).
+    pub member_acted: bool,
     pub input: &'a Map<String, Value>,
     /// The platform's `Idempotency-Key`, reused for Stripe so a retried step does not repeat.
     pub idempotency_key: Option<&'a str>,
@@ -63,9 +65,10 @@ fn member<'a, P>(call: &ActionCall<'a, P>) -> Result<&'a str, String> {
 }
 
 /// The member an action acts for (a checkout, a billing portal session). A flow run's fallback
-/// identity is not one: no member started that run, so it gets the same refusal as no actor.
+/// identity is not one (no member started that run), nor is a flow step's actor that does not say
+/// how it was chosen, so both get the same refusal as no actor.
 fn acting_member<'a, P>(call: &ActionCall<'a, P>) -> Result<&'a str, String> {
-    if call.fallback_actor {
+    if !call.member_acted {
         return Err(NO_CALLING_MEMBER.to_string());
     }
     member(call)

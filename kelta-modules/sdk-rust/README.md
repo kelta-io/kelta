@@ -26,11 +26,21 @@ License: **MIT** (the same as the `@kelta/*` SDK packages in `kelta-web`).
 
 The actor of a route, hook or entitlements lookup is the request's caller and carries no
 `source`. On a flow step it is the run's user, and `Actor::source` says how the platform chose
-it: `Initiator` (the user who started the run, or whose record change triggered it), `RunAs` (the
-flow's run-as user) or `Owner` (the flow's owner). The last two are fallbacks for a run no one
-started. `Actor::is_fallback()` is true for them, and for a source this SDK does not know. An
-action that acts for "the calling member" (a checkout, a billing portal) should refuse a
-fallback actor, as it refuses a call with no actor.
+it: `Initiator` (the user the run's trigger names), `RunAs` (the flow's run-as user) or `Owner`
+(the flow's owner). The last two are fallbacks for a run whose trigger names no user.
+`Actor::is_fallback()` is true for them, and for a source this SDK does not know.
+
+An **action** that acts for "the calling member" (a checkout, a billing portal) should require
+`Actor::is_initiator()`, which is true only for `source: initiator`. It is false for a fallback,
+an unknown source and an action call with no source, so the module does not depend on which
+platform version signed the call. A **route** that does the same checks `!is_fallback()`: its
+caller carries no source by design.
+
+For a record-triggered run, `Initiator` is the record's **creator** (`createdBy`, else
+`updatedBy`), not necessarily the user who changed the record, and a flow's own record write can
+set `createdBy`. Read it as "the record's author" until the platform puts the editor on the
+event (tracked in `.claude/docs/concerns.md`). A retry re-runs as the original run's initiator,
+whoever asked for the retry.
 
 Headers that a third party forwards through the platform, such as a webhook provider's
 signature headers, arrive as `UntrustedHeaders`. The sender controls them, including

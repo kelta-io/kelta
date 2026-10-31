@@ -335,6 +335,8 @@ public class FlowExecutionController {
             initialState = exec.initialInput() != null ? exec.initialInput() : Map.of();
         }
 
+        // The retry runs as the original run's user and source, not as whoever asked for it: an
+        // admin's retry of a member's run re-asserts that member as act.source "initiator".
         FlowActorResolver.Resolved actor = flowActorResolver.resolveRetry(
                 exec.tenantId(), exec.flowId(), exec.startedBy(), exec.startedBySource());
         String newExecutionId = flowEngine.startExecution(

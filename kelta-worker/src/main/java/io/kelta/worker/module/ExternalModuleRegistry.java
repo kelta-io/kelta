@@ -284,10 +284,10 @@ public class ExternalModuleRegistry {
 
     /**
      * The acting user of a flow step: the run's user ({@link ActionContext#userId()}, which
-     * {@code FlowActorResolver} resolved to the caller, the record's changer, or the flow's run-as
-     * user or owner), with how it was chosen ({@link ActionContext#actorSource()}) as
-     * {@code act.source}. A run-as or owner fallback is sent too, marked, so a module can refuse a
-     * member-only action for it.
+     * {@code FlowActorResolver} resolved to the caller, the user whose write produced the
+     * record-change event (see {@link ActorSource}), or the flow's run-as user or owner), with how
+     * it was chosen ({@link ActionContext#actorSource()}) as {@code act.source}. A run-as or owner
+     * fallback is sent too, marked, so a module can refuse a member-only action for it.
      *
      * <p>Sent only when it is an {@code ACTIVE} {@code INTERNAL} or {@code PORTAL} user of the
      * tenant, read from {@code platform_user} (never from a request header, which maps a missing or

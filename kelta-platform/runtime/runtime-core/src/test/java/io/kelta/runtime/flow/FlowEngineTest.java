@@ -1124,6 +1124,55 @@ class FlowEngineTest {
         }
 
         @Test
+        @DisplayName("the actor source reaches the Tasks of every Map iteration and of an InvokeFlow target")
+        void actorSourceReachesMapIterationsAndInvokedFlows() throws Exception {
+            List<String> seen = Collections.synchronizedList(new ArrayList<>());
+            handlerRegistry.register(new ActionHandler() {
+                @Override
+                public String getActionTypeKey() { return "ACTOR_PROBE"; }
+
+                @Override
+                public ActionResult execute(ActionContext context) {
+                    seen.add(context.userId() + "/" + context.actorSource());
+                    return ActionResult.success(Map.of());
+                }
+            });
+            String targetFlow = """
+                {
+                    "StartAt": "InTarget",
+                    "States": { "InTarget": { "Type": "Task", "Resource": "ACTOR_PROBE", "End": true } }
+                }
+                """;
+            flowStore.registerFlow("t1", "flow-target", "Target", targetFlow);
+            String fanFlow = """
+                {
+                    "StartAt": "Each",
+                    "States": {
+                        "Each": {
+                            "Type": "Map",
+                            "ItemsPath": "$.items",
+                            "ResultPath": null,
+                            "Iterator": {
+                                "StartAt": "InItem",
+                                "States": { "InItem": { "Type": "Task", "Resource": "ACTOR_PROBE", "End": true } }
+                            },
+                            "Next": "Call"
+                        },
+                        "Call": { "Type": "InvokeFlow", "FlowId": "flow-target", "ResultPath": null, "End": true }
+                    }
+                }
+                """;
+            flowStore.registerFlow("t1", "flow-fan", "Fan", fanFlow);
+
+            String executionId = engine.startExecution("t1", "flow-fan", fanFlow,
+                    Map.of("items", List.of("a", "b")), "runas-1", ActorSource.RUN_AS, null, false);
+            awaitStatus(executionId, FlowExecutionData.STATUS_COMPLETED);
+
+            // Two Map iterations, then the invoked flow's Task: none turns the fallback into an initiator.
+            assertEquals(List.of("runas-1/RUN_AS", "runas-1/RUN_AS", "runas-1/RUN_AS"), seen);
+        }
+
+        @Test
         @DisplayName("startTriggeredExecution returns empty for an unknown flow")
         void triggeredExecutionOfUnknownFlowIsEmpty() {
             assertTrue(engine.startTriggeredExecution("t1", "ghost", Map.of(), "u1", null, 1).isEmpty());

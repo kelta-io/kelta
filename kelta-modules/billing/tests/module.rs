@@ -145,8 +145,9 @@ impl Fixture {
         .await
     }
 
+    /// Runs action `key` as a flow step: with `actor`, the member who started the run.
     async fn action(&self, key: &str, input: Value, idempotency_key: Option<&str>, actor: bool) -> Value {
-        let act = actor.then(|| json!({"sub": MEMBER, "user_type": "PORTAL"}));
+        let act = actor.then(|| json!({"sub": MEMBER, "user_type": "PORTAL", "source": "initiator"}));
         self.action_as(key, input, idempotency_key, act).await
     }
 
@@ -317,6 +318,39 @@ async fn checkout_and_portal_refuse_a_flow_runs_fallback_actor() {
     let initiator = json!({"sub": MEMBER, "user_type": "PORTAL", "source": "initiator"});
     let answer = f.action_as("create-checkout-session", checkout, Some("exec-2:Checkout"), Some(initiator)).await;
     assert_eq!(answer, json!({"success": true, "output": {"url": "https://checkout.stripe.test/c/cs_test_1"}}));
+}
+
+#[tokio::test]
+async fn an_action_calls_actor_without_a_source_is_not_a_member_but_a_routes_caller_is() {
+    let f = fixture().await;
+    let checkout = json!({"planCode": "day", "successUrl": "https://app.example.test/ok",
+                          "cancelUrl": "https://app.example.test/cancel"});
+    let portal = json!({"returnUrl": "https://app.example.test/account"});
+    let no_member = json!({"success": false, "error": {"code": "BILLING_ERROR", "message": "No calling member"}});
+    f.platform.insert("billing_customers", json!({"userId": MEMBER, "stripeCustomerId": "cus_1"}));
+
+    // An action call is a flow step. One whose actor does not say how it was chosen (a platform
+    // that signs no `act.source`) is not known to be a member, so the module does not depend on
+    // the platform's deploy order.
+    let unmarked = json!({"sub": MEMBER, "user_type": "PORTAL"});
+    let answer =
+        f.action_as("create-checkout-session", checkout.clone(), Some("exec-1:Checkout"), Some(unmarked.clone())).await;
+    assert_eq!(answer, no_member, "checkout");
+    let answer =
+        f.action_as("create-portal-session", portal.clone(), Some("exec-1:Portal"), Some(unmarked.clone())).await;
+    assert_eq!(answer, no_member, "portal");
+    assert!(f.stripe.0.lock().unwrap().is_empty(), "nothing reached Stripe");
+    // Reading that user's own billing still works.
+    let answer = f.action_as("me", json!({}), None, Some(unmarked)).await;
+    assert_eq!(answer["success"], true, "{answer}");
+
+    // A route's caller carries no source by design, and acts.
+    let (status, body) = f.as_member("POST", "/kelta/v1/routes/checkout-sessions", checkout).await;
+    assert_eq!((status, body), (StatusCode::OK, json!({"url": "https://checkout.stripe.test/c/cs_test_1"})));
+    let (status, body) = f.as_member("POST", "/kelta/v1/routes/portal-sessions", portal).await;
+    assert_eq!((status, body), (StatusCode::OK, json!({"url": "https://billing.stripe.test/p/1"})));
+    let (status, _) = f.as_member("GET", "/kelta/v1/routes/me", Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]

@@ -79,7 +79,8 @@ impl Call {
     }
 
     /// The user whose action caused this call (`act` claim): the request's caller, or on a flow
-    /// step the run's user (check [`Actor::is_fallback`] before acting for them as a member).
+    /// step the run's user (an action that acts for them as a member requires
+    /// [`Actor::is_initiator`]; a route checks [`Actor::is_fallback`]).
     /// `None` for a flow run with no user, module schedules, webhooks, events and lifecycle calls.
     pub fn actor(&self) -> Option<&Actor> {
         self.assertion.actor.as_ref()

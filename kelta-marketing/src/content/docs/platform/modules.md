@@ -118,10 +118,16 @@ A module is called only while its install is `ACTIVE` or `DEGRADED`:
   [long-running action](#long-running-actions).
 
   The signed assertion's `act` names the run's user, with `act.source` saying how the platform chose it:
-  `initiator` (the user who started the run, or whose record change triggered it), `run_as` (the flow's
-  run-as user) or `owner` (the flow's owner). The last two are fallbacks for a run no one started, so an
-  action that acts for the calling member should refuse them. A route's or hook's `act` is the caller
-  and has no `source`.
+  `initiator` (the user the run's trigger names), `run_as` (the flow's run-as user) or `owner` (the
+  flow's owner). The last two are fallbacks for a run whose trigger names no user. An action that acts
+  for the calling member should accept only `initiator` (the Rust SDK's `Actor::is_initiator()`) and
+  refuse anything else, including an actor with no `source`. More values may be added, so treat an
+  unknown one as a fallback. A route's or hook's `act` is the caller and has no `source`.
+
+  For a record-triggered run, `initiator` is the record's **creator**, not necessarily the user who
+  changed the record, and a flow's own record write can set the creator. A retry runs as the original
+  run's initiator, whoever asked for it. A run that was still waiting when the platform began recording
+  the source sends no `act` when it resumes, so a member-only action refuses it.
 - **Before-save hooks.** `POST /kelta/v1/hooks` answers `{ allowed, fieldUpdates, errors, conflict }`:
   - `errors` reject the write with `400`;
   - `conflict` rejects it with `409`;
