@@ -2803,6 +2803,15 @@ that user-facing config to the `scheduled_job` table (which the
   endpoints route through the same `CronExpressions.normalize`, so legacy
   5-field rows in `scheduled_job` resume cleanly and the UI's pre-save
   validation endpoint accepts the same input as the write path.
+- **Execution (every worker pod polls)**: `SchedulerConfig` runs
+  `ScheduledJobExecutorService.executeAll` on each pod (`kelta.scheduler.poll-interval-ms`,
+  default 60 s). `findDueJobs` only lists candidates — every pod may list the same rows. Before
+  running a job, a pod claims its slot with `ScheduledJobRepository.claim`: one conditional
+  `UPDATE` that moves `next_run_at` from the slot it read to the next one, which only one pod can
+  win (a schedule edit or pause in between makes it fail too). The claim is the only write of
+  `next_run_at` on this path; `updateAfterExecution` records `last_run_at`/`last_status` only. Each
+  slot therefore runs at most once: a pod that dies after the claim skips that slot, and a job
+  that runs longer than its period can overlap its next slot on another pod.
 - **Status surface (per-flow)**: `FlowScheduleStatusController` exposes
   `GET /api/flows/{id}/schedule` and `GET /api/flows/{id}/runs` so the UI can
   show whether the flow is actually wired to the executor without `psql`

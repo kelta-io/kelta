@@ -593,10 +593,10 @@ what it does not guard against:
   entitlements port are unregistered, so its vetoes stop applying and entitlements resolve
   `EMPTY` — deliberate (disable stops all invocations), but a module enforcing a policy is not a
   safety net once disabled.
-- **Scheduled jobs can fire twice.** `ScheduledJobRepository.findDueJobs` takes
-  `FOR UPDATE SKIP LOCKED` without a transaction (pre-existing, every job type), so the lock ends
-  with the statement and two pods polling together can both run a due job. Module calls carry
-  `Idempotency-Key: <jobId>:<fireTime>` so a module can drop the duplicate; it must.
+- **Scheduled actions run at most once per slot, not exactly once.** The scheduler claims each
+  slot before running it (`ScheduledJobRepository.claim`), so two pods no longer both run it, and
+  a pod that dies after the claim skips that slot rather than repeating it. Module calls still
+  carry `Idempotency-Key: <jobId>:<fireTime>`; an action that must not repeat should honour it.
 - **Route bodies are text.** The route proxy receives the request body as a UTF-8 string (the JAR
   path's signature), so a binary or non-UTF-8 body is re-encoded on the way to the module. Module
   answers are always served as `application/json` with `nosniff` and `no-store`, never as the
@@ -1257,6 +1257,21 @@ stand-in for the router's nested GET mapping (`ModuleHttpControllerMvcTest`,
   doesn't mean every Service endpoint accepts connections — the marketing pod has a `preStop`
   `sleep 5`, and docs probes retry **only** `000` for ≤30 s (don't widen to other codes, PLT-477).
 
+### Claiming rows across worker pods
+
+A `SELECT … FOR UPDATE SKIP LOCKED` run through a bare `JdbcTemplate` call with no tenant bound
+(every scheduler and poller thread) runs in **autocommit**: its row locks end when the statement
+returns, so it elects nothing. Two pods polling a few milliseconds apart both get the same rows.
+This is what ran scheduled flows twice per slot until 2026-10-31 (archive below).
+**Rule:** the claim must be the write itself — a conditional `UPDATE … WHERE <still claimable>`
+whose row count says who won (`ScheduledJobRepository.claim`, `CampaignRepository.claim`), or one
+`UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING` (`JdbcFlowStore`), or a
+`SKIP LOCKED` select inside a real transaction that also writes the claim. Prove it with a
+real-DB test that holds every "pod" at a barrier after listing (`ScheduledJobClaimIntegrationTest`).
+**Still open:** `BulkJobRepository.findQueuedJobs` is followed by an unconditional
+`markProcessing`, so two pods can both process one bulk job; `DataExportRepository.findPendingExport`
+has the same lockless select (it is only reached once per export today).
+
 ## Dependency Risks
 
 - **Native images — reflection.** Production ships gateway and auth native; the worker's
@@ -1463,6 +1478,7 @@ One line each; full write-ups are in git history.
 - 2026-10-24 (#1933) — PLT-689: deactivating or deleting a user left its PATs live and there was no admin revoke; `UserSessionRevocationHook` revokes them, and `GET /api/admin/users/{id}/tokens` / `DELETE /api/admin/users/{id}/tokens/{tokenId}` (`MANAGE_USERS`, audited `PAT_ADMIN_REVOKED`) list and revoke a user's tokens (Redis residual above). `UserSessionRevocationHookTest`, `AdminPersonalAccessTokenControllerTest`.
 
 **Bugs**
+- 2026-10-31 (scheduler-atomic-claim) — scheduled jobs of every type could run twice for one slot: `findDueJobs` relied on `FOR UPDATE SKIP LOCKED` in autocommit (no lock past the statement) and `next_run_at` advanced only after the run, so worker pods whose polls landed within milliseconds of each other each ran every due job (seen in production: two pods ran the same four flows each poll for 30 minutes, and a monthly flow ran twice on two tenants). Each pod now claims a slot before running it with a conditional `UPDATE` that moves `next_run_at` off the slot it read (`ScheduledJobRepository.claim`); recording the outcome no longer writes `next_run_at`. `ScheduledJobClaimIntegrationTest`, `ScheduledJobExecutorServiceTest$Claiming`. Same pattern still open in bulk jobs (Fragile Areas → Claiming rows across worker pods).
 - KLT-745 (2026-10-24) — a collection turning `active=false` kept its gateway route until the next bootstrap (`CollectionChangedPayload.active` was a primitive, so hooks that never set it sent `false`); the flag is now a nullable `Boolean` omitted when unset, `CollectionConfigEventPublisher` no longer defaults it to `true`, and `ConfigEventListener` removes the route on UPDATED with `active:false`. `ConfigEventListenerTest` (`shouldRemoveRouteWhenCollectionDeactivated`, `deactivationRemovesRouteFromRegistry`, `routeStaysRegisteredWhenUpdatedEventCarriesNoActiveKey`), `CollectionChangedPayloadTest$ActiveJson`, `CollectionConfigEventPublisherTest` (`deactivatedCollectionPublishesActiveFalse`, `otherPublishersSendNoActiveKey`).
 - KLT-700 / KLT-740 (2026-10-24) — the router divergences `DynamicCollectionRouterGoldenTest` had pinned as-is are fixed (KLT-700): the read-only `403` carries `code` + `meta.requestId`, a cached system-collection get-by-id and the child get-by-id send `ETag`, and child update/delete enforce `If-Match`. `POST /api/operations` now geo-stamps `captureGeo` collections like the router (KLT-740, shared `GeoStamping`), its last behavioural divergence. `RouterGoldenErrorShapeTest`, `AtomicOperationExecutorTest`, `AtomicOperationsControllerTest`. (#1876, #1894)
 - KLT-739 (2026-10-24) — adding a VECTOR field to an existing collection failed with `type "vector" does not exist`: only table creation enabled pgvector. `SchemaMigrationEngine.ensureVectorExtension` is now shared by `CollectionTableDdl` and the `migrateSchema`/destructive add-or-retype paths (same actionable error when `CREATE EXTENSION` is refused). `SchemaMigrationEngineVectorIntegrationTest`.
