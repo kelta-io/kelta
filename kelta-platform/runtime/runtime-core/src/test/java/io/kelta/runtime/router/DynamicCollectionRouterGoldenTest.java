@@ -493,9 +493,21 @@ class DynamicCollectionRouterGoldenTest {
                     """)));
         }
 
-        @Test void systemCollectionKeepsExplicitTenant() throws Exception {
-            golden("create_system_explicit_tenant", json(tenantA(post("/api/ui-menus")), """
+        @Test void systemCollectionRefusesForeignTenant() throws Exception {
+            golden("create_system_foreign_tenant", json(tenantA(post("/api/ui-menus")), """
                     {"data":{"type":"ui-menus","attributes":{"name":"New","tenantId":"tenant-x"}}}
+                    """));
+        }
+
+        @Test void systemCollectionKeepsMatchingTenant() throws Exception {
+            golden("create_system_matching_tenant", json(tenantA(post("/api/ui-menus")), """
+                    {"data":{"type":"ui-menus","attributes":{"name":"New","tenantId":"tenant-a"}}}
+                    """));
+        }
+
+        @Test void userCollectionRefusesForeignTenant() throws Exception {
+            golden("create_user_foreign_tenant", json(tenantA(post("/api/accounts")), """
+                    {"data":{"type":"accounts","attributes":{"name":"Other","slug":"other","tenantId":"tenant-b"}}}
                     """));
         }
 
@@ -588,6 +600,18 @@ class DynamicCollectionRouterGoldenTest {
         @Test void putReadOnly() throws Exception {
             golden("put_read_only", json(tenantA(put("/api/audit-logs/log-1")), """
                     {"data":{"attributes":{"action":"x"}}}
+                    """));
+        }
+
+        @Test void patchSystemCollectionRefusesForeignTenant() throws Exception {
+            golden("patch_system_foreign_tenant", json(tenantA(patch("/api/ui-menus/menu-1")), """
+                    {"data":{"attributes":{"name":"Renamed","tenantId":"tenant-b"}}}
+                    """));
+        }
+
+        @Test void putUserCollectionRefusesForeignTenant() throws Exception {
+            golden("put_user_foreign_tenant", json(tenantA(put("/api/accounts/acc-1")), """
+                    {"data":{"type":"accounts","id":"acc-1","attributes":{"name":"Acme 2","tenantId":"tenant-b"}}}
                     """));
         }
 
@@ -701,6 +725,18 @@ class DynamicCollectionRouterGoldenTest {
                      "relationships":{"employer":{"data":{"type":"companies","id":"co-2"}},
                                       "extra":{"data":{"type":"x","id":"x-1"}}}}}
                     """)));
+        }
+
+        @Test void createRefusesForeignTenant() throws Exception {
+            golden("child_create_foreign_tenant", json(tenantA(post("/api/accounts/acc-1/contacts")), """
+                    {"data":{"type":"contacts","attributes":{"firstName":"Dee","tenantId":"tenant-b"}}}
+                    """));
+        }
+
+        @Test void putRefusesForeignTenant() throws Exception {
+            golden("child_put_foreign_tenant", json(tenantA(put("/api/accounts/acc-1/contacts/con-1")), """
+                    {"data":{"attributes":{"firstName":"Annie","tenantId":"tenant-b"}}}
+                    """));
         }
 
         @Test void createValidationError() throws Exception {
@@ -1209,6 +1245,6 @@ class DynamicCollectionRouterGoldenTest {
         }
     }
 
-    private static final long EXPECTED_GOLDEN_COUNT = 114;
+    private static final long EXPECTED_GOLDEN_COUNT = 120;
 
 }

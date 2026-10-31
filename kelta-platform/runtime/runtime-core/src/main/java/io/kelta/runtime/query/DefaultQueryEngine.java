@@ -268,6 +268,8 @@ public class DefaultQueryEngine implements QueryEngine {
             throw new ReadOnlyCollectionException(definition.name());
         }
 
+        rejectForeignTenantId(definition, data);
+
         // Create mutable copy. A server-only value is the platform's to set (a before-save hook
         // may add one below); one supplied by the caller is dropped.
         Map<String, Object> recordData = definition.withoutServerOnlyFields(data);
@@ -343,6 +345,8 @@ public class DefaultQueryEngine implements QueryEngine {
         if (definition.readOnly()) {
             throw new ReadOnlyCollectionException(definition.name());
         }
+
+        rejectForeignTenantId(definition, data);
 
         // Check if record exists
         Optional<Map<String, Object>> existing = storageAdapter.getById(definition, id);
@@ -866,19 +870,43 @@ public class DefaultQueryEngine implements QueryEngine {
     }
 
     /**
-     * Extracts the tenant ID from record data, falling back to TenantContext,
-     * then defaulting to "default".
+     * The tenant a write's hooks run for and its record-changed event names: the bound
+     * {@link TenantContext} tenant whenever one is bound — never a {@code tenantId} carried by
+     * the payload, the stored row or a hook's result. Only a platform path that binds no tenant
+     * (Flyway, bootstrap) falls back to the data's {@code tenantId}, then to {@code "default"}.
+     *
+     * <p>A payload naming another tenant than the bound one never gets this far:
+     * {@link #rejectForeignTenantId} refuses it at the top of {@code create}/{@code update}.
      */
     private String extractTenantId(Map<String, Object> data) {
-        Object tenantId = data.get("tenantId");
-        if (tenantId != null) {
-            return tenantId.toString();
-        }
         String contextTenantId = TenantContext.get();
         if (contextTenantId != null && !contextTenantId.isBlank()) {
             return contextTenantId;
         }
+        Object tenantId = data.get("tenantId");
+        if (tenantId != null) {
+            return tenantId.toString();
+        }
         return "default";
+    }
+
+    /**
+     * Refuses a create or update payload whose {@code tenantId} names a tenant other than the
+     * bound {@link TenantContext} tenant, on every collection. The record's tenant is the
+     * request's — the router stamps it, RLS enforces it — so a different value is never a
+     * second opinion to choose between: it is a caller error (an API body) or a programming
+     * error (an internal writer bound to the wrong tenant), and the write stops before any hook,
+     * validation or storage call sees it. A matching value, an absent one and an unbound
+     * platform path pass.
+     */
+    private static void rejectForeignTenantId(CollectionDefinition definition, Map<String, Object> data) {
+        String bound = TenantContext.get();
+        Object supplied = data.get("tenantId");
+        if (bound == null || bound.isBlank() || supplied == null || bound.equals(String.valueOf(supplied))) {
+            return;
+        }
+        throw new ValidationException(ValidationResult.failure(
+                List.of(FieldError.foreignTenantId(definition.name()))));
     }
 
     /**

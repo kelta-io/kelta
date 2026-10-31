@@ -1,0 +1,1 @@
+- 2026-10-31 fix(runtime): the record write path now refuses a body tenantId that differs from the request's tenant (router create/PUT/PATCH, sub-resources, /api/operations add and update, and the query engine), hooks and record events always run for the bound tenant, and collections.systemCollection is server-controlled on create and update (write-path-tenant-scope)

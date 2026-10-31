@@ -35,7 +35,9 @@ import java.util.regex.Pattern;
  *   <li>audit stamp from {@code X-User-Id}, resolved to a platform-user UUID
  *       ({@code createdBy}+{@code updatedBy} on create, {@code updatedBy} on update);</li>
  *   <li>geo stamp ({@code createdGeo}/{@code updatedGeo}) for {@code captureGeo} collections;</li>
- *   <li>create: {@code tenantId} for tenant-scoped system collections;
+ *   <li>create/update: a body {@code tenantId} naming a tenant other than {@code X-Tenant-ID} →
+ *       {@code 400 systemMaintained} on {@code tenantId}, nothing written (every collection);
+ *       then create: {@code tenantId} for tenant-scoped system collections;
  *       update/delete: the {@code If-Match} optimistic-lock check;</li>
  *   <li>the storage call (which runs before-save hooks, validation and the record-changed event);</li>
  *   <li>system-collection cache eviction — after the write, and only when it took effect;</li>
@@ -110,8 +112,11 @@ final class RecordWritePipeline {
         }
         GeoStamping.stamp(data, definition, GeoHeaders.parse(request), true);
 
-        // Inject tenant ID for tenant-scoped system collections
-        RecordTenantScope.injectTenantId(data, definition, request.getHeader("X-Tenant-ID"));
+        // A body tenantId naming another tenant is refused (any collection); then the
+        // request's tenant is stamped on tenant-scoped system collections.
+        String tenantId = request.getHeader("X-Tenant-ID");
+        RecordTenantScope.rejectForeignTenantId(data, definition, tenantId);
+        RecordTenantScope.injectTenantId(data, definition, tenantId);
 
         Map<String, Object> created = queryEngine.create(definition, data);
 
@@ -141,6 +146,9 @@ final class RecordWritePipeline {
             data.put("updatedBy", userId);
         }
         GeoStamping.stamp(data, definition, GeoHeaders.parse(request), false);
+
+        // A body tenantId naming another tenant is refused (any collection), as on create.
+        RecordTenantScope.rejectForeignTenantId(data, definition, request.getHeader("X-Tenant-ID"));
 
         // Optimistic locking: reject a stale If-Match before mutating (slice 5).
         enforceIfMatch(definition, id, request);
