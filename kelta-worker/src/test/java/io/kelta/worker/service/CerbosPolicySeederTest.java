@@ -39,6 +39,7 @@ class CerbosPolicySeederTest {
     @SuppressWarnings("unchecked")
     void setUp() {
         syncService = mock(CerbosPolicySyncService.class);
+        when(syncService.isAdminApiConfigured()).thenReturn(true);
         redisTemplate = mock(StringRedisTemplate.class);
         valueOps = mock(ValueOperations.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
@@ -318,6 +319,27 @@ class CerbosPolicySeederTest {
             verify(redisTemplate, never()).hasKey(anyString());
             verify(syncService).syncAllTenants();
             verify(valueOps, never()).set(anyString(), anyString(), any(Duration.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("Without a Cerbos Admin API password")
+    class AdminPasswordMissing {
+
+        @Test
+        @DisplayName("skips the seed without taking the lock or writing the done-marker")
+        void skipsWithoutMarker() {
+            when(syncService.isAdminApiConfigured()).thenReturn(false);
+            seeder = newSeeder(buildAt("2026-10-31T00:00:00Z"), false);
+
+            seeder.seedPolicies();
+
+            verify(syncService, never()).seedBasePolicies();
+            verify(syncService, never()).syncAllTenants();
+            verify(valueOps, never()).setIfAbsent(anyString(), anyString(), any(Duration.class));
+            verify(valueOps, never()).set(anyString(), anyString(), any(Duration.class));
+            assertThat(meterRegistry.counter("cerbos.policy.seed.skipped", "reason", "admin-password-missing").count())
+                    .isEqualTo(1.0);
         }
     }
 }

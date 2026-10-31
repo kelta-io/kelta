@@ -24,6 +24,19 @@ and later replicas of the same image skip, provided `GET /admin/policies` still 
 (`kelta.worker.cerbos.seed.force`) forces a full seed. Runtime permission changes never rely on this
 path — they sync through the profile/permission hooks and `CerbosPolicySyncCoalescer`.
 
+**Admin API credentials — no built-in default password.** `kelta.worker.cerbos.admin-username`
+(`KELTA_WORKER_CERBOS_ADMIN_USERNAME`, default `cerbos`) and `kelta.worker.cerbos.admin-password`
+(`KELTA_WORKER_CERBOS_ADMIN_PASSWORD`, blank by default) are declared in the worker's
+`application.yml`. With a blank password `CerbosPolicySyncService` logs one ERROR at startup and
+every push path (tenant sync, base seed, all-tenant sync) logs an ERROR and returns without calling
+the Admin API; the seeder skips without writing its done-marker
+(`cerbos.policy.seed.skipped{reason=admin-password-missing}`), so the next start with a password
+seeds. The worker keeps running and its gRPC authorization checks keep working against the policies
+Cerbos already holds. **Deploy ordering: set `KELTA_WORKER_CERBOS_ADMIN_PASSWORD` to the Cerbos
+server's Admin API password before deploying a worker with this change, or permission changes stop
+reaching Cerbos.** The dev/CI/harness Cerbos (`docker/cerbos/config.yaml`) has no Admin API and
+loads static policies from disk, so those stacks set no password and the ERROR there is expected.
+
 ### Superset (embedded analytics)
 
 On only when `SUPERSET_URL` (`kelta.superset.url`) is non-blank (`SupersetConfig.SupersetUrlConfigured`,

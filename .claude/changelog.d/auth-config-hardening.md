@@ -1,0 +1,1 @@
+- 2026-10-31 fix(security): Direct login now refuses accounts that require MFA; AI config writes now require MANAGE_TENANTS and accept only known keys; the AI token limit matches chat paths the way the handler mappings do; the Cerbos admin password has no built-in default — set KELTA_WORKER_CERBOS_ADMIN_PASSWORD before deploying (auth-config-hardening)

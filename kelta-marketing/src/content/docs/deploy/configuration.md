@@ -56,6 +56,7 @@ no default (the service fails to start, or the feature stays off). Defaults that
 | `SPRING_DATA_REDIS_HOST` / `PORT` | local | Redis |
 | `NATS_URL` | local | Event bus |
 | `CERBOS_HOST`, `CERBOS_GRPC_PORT`, `CERBOS_CB_THRESHOLD`, `CERBOS_CB_COOLDOWN_SECONDS`, `CERBOS_SEED_FORCE` | —, `3593`, `3`, `10`, `false` | PDP, its fail-closed circuit breaker, force a full policy seed on start |
+| `KELTA_WORKER_CERBOS_ADMIN_PASSWORD`, `KELTA_WORKER_CERBOS_ADMIN_USERNAME` | —, `cerbos` | Cerbos Admin API credentials the worker pushes authorization policies with. The password has no built-in default: **set it before you deploy**, or the worker logs an ERROR and pushes no policies, so permission changes do not take effect (checks keep using the policies Cerbos already holds) |
 | `EXTERNAL_BASE_URL` | `http://localhost:8080` | Public API base used in links (tracking, mailbox) |
 | `SCHEDULER_ENABLED`, `SCHEDULER_POLL_INTERVAL_MS` | `true`, `60000` | Scheduled-job executor |
 | `REQUEST_LOGGING_ENABLED` | `true` | Tenant request log |
@@ -89,7 +90,7 @@ no default (the service fails to start, or the feature stays off). Defaults that
 | `UI_BASE_URL` | `http://localhost:5173` | Where to send users after login |
 | `COOKIE_DOMAIN` | — | Session cookie domain |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | |
-| `DIRECT_LOGIN_ENABLED` | `false` | Password grant for bootstrap/tests — keep `false` in production |
+| `DIRECT_LOGIN_ENABLED` | `false` | Password grant for bootstrap/tests — keep `false` in production. Accounts that require MFA are refused; they sign in through the browser |
 | `KELTA_BOOTSTRAP_ADMIN_PASSWORD` | — | Initial password for the platform admin `admin@kelta.local`, applied once on the first boot that finds the database's seeded password, with a forced change at first sign-in. Never logged. Unset: a random password is generated and printed once in a WARN banner in the kelta-auth log. No effect once the password has been replaced |
 | `SUPERSET_CLIENT_ID` / `CLIENT_SECRET` / `REDIRECT_URI` | — | OAuth client for embedded BI |
 | `KELTA_AUTH_RATE_LIMIT_IP_PATHS` | `/portal/api/signup=5,/portal/api/login/request=10,/portal/api/challenge=30,/portal/login=10` | Per-IP budgets on public portal paths |

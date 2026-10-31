@@ -83,7 +83,7 @@ describe('the committed index', () => {
     assert.ok(table.systemCollections.has('picklist-values'));
     assert.deepEqual(
       table.filterWriteRules.map((r) => r.routeId).sort(),
-      ['modules', 'tenants'],
+      ['ai', 'modules', 'tenants'],
       'the static-route write rules hard-coded in RouteAuthorizationFilter',
     );
   });
@@ -295,6 +295,10 @@ describe('gateway table parsers', () => {
                     "static-ai", "/api/ai/**", aiServiceUrl, "ai"));`;
   const AUTHZ = `
             if ("static-tenants".equals(collectionId) && StaticCollectionCheck.isWrite(method)) {
+                return cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")
+            if ("static-ai".equals(collectionId)
+                    && matchedPath.startsWith("/api/ai/config")
+                    && StaticCollectionCheck.isWrite(method)) {
                 return cerbosService.checkSystemPermission(principal, "MANAGE_TENANTS")`;
   const YML = `
       public-paths: /api/ui-pages,/api/tenants
@@ -309,7 +313,10 @@ describe('gateway table parsers', () => {
     const checks = parseCollectionChecks(ROUTES);
     assert.equal(checks.get('users')?.includeReads, true);
     assert.ok(checks.get('flows')?.exempt?.test('/api/flows/abc/execute'));
-    assert.deepEqual(parseFilterWriteRules(AUTHZ), [{ routeId: 'tenants', pathPrefix: null, permission: 'MANAGE_TENANTS' }]);
+    assert.deepEqual(parseFilterWriteRules(AUTHZ), [
+      { routeId: 'tenants', pathPrefix: null, permission: 'MANAGE_TENANTS' },
+      { routeId: 'ai', pathPrefix: '/api/ai/config', permission: 'MANAGE_TENANTS' },
+    ]);
     assert.deepEqual(parseYamlList(YML, 'unauthenticated-paths'), ['/otel', '/api/webhooks']);
   });
 
