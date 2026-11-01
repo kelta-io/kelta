@@ -48,6 +48,7 @@ public class DataExportService {
     private final Optional<S3StorageService> s3StorageService;
     private final PlatformEventPublisher eventPublisher;
     private final RecordMaskingService recordMaskingService;
+    private final TenantSlugResolver tenantSlugResolver;
 
     public DataExportService(DataExportRepository exportRepository,
                              QueryEngine queryEngine,
@@ -56,7 +57,8 @@ public class DataExportService {
                              ObjectMapper objectMapper,
                              Optional<S3StorageService> s3StorageService,
                              PlatformEventPublisher eventPublisher,
-                             RecordMaskingService recordMaskingService) {
+                             RecordMaskingService recordMaskingService,
+                             TenantSlugResolver tenantSlugResolver) {
         this.exportRepository = exportRepository;
         this.queryEngine = queryEngine;
         this.collectionRegistry = collectionRegistry;
@@ -65,6 +67,7 @@ public class DataExportService {
         this.s3StorageService = s3StorageService;
         this.eventPublisher = eventPublisher;
         this.recordMaskingService = recordMaskingService;
+        this.tenantSlugResolver = tenantSlugResolver;
     }
 
     /**
@@ -137,7 +140,10 @@ public class DataExportService {
         exportRepository.markInProgress(exportId);
 
         try {
-            TenantContextUtils.withTenant(tenantId, () -> {
+            // The slug too, not just the id: a tenant's own collections live in the schema its
+            // slug names, and this runs off the request thread with nothing bound.
+            String tenantSlug = tenantSlugResolver.resolveSlug(tenantId).orElse(null);
+            TenantContextUtils.withTenant(tenantId, tenantSlug, () -> {
                 // Resolve target collections
                 List<CollectionInfo> collections = resolveCollections(tenantId, exportScope, collectionIdsJson);
                 if (collections.isEmpty()) {

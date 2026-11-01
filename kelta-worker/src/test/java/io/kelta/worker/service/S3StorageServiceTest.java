@@ -7,12 +7,18 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.http.AbortableInputStream;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
+import java.io.ByteArrayInputStream;
 import java.net.URI;
 import java.net.URL;
 import java.time.Duration;
@@ -115,6 +121,28 @@ class S3StorageServiceTest {
         assertEquals("test-bucket", capturedRequest.putObjectRequest().bucket());
         assertEquals(storageKey, capturedRequest.putObjectRequest().key());
         assertEquals(contentType, capturedRequest.putObjectRequest().contentType());
+    }
+
+    @Test
+    void streamObjectRange_carriesTheStoresContentRange() throws Exception {
+        S3Client s3Client = org.mockito.Mockito.mock(S3Client.class);
+        service.setS3Client(s3Client);
+        GetObjectResponse metadata = GetObjectResponse.builder()
+                .contentType("text/plain")
+                .contentLength(10L)
+                .contentRange("bytes 0-9/1234")
+                .build();
+        when(s3Client.getObject(any(GetObjectRequest.class))).thenReturn(new ResponseInputStream<>(
+                metadata, AbortableInputStream.create(new ByteArrayInputStream(new byte[10]))));
+
+        try (S3StorageService.StorageObject object = service.streamObjectRange("t/c/r/file.txt", "bytes=0-9")) {
+            assertEquals("bytes 0-9/1234", object.contentRange());
+            assertEquals(10L, object.contentLength());
+        }
+
+        ArgumentCaptor<GetObjectRequest> captor = ArgumentCaptor.forClass(GetObjectRequest.class);
+        verify(s3Client).getObject(captor.capture());
+        assertEquals("bytes=0-9", captor.getValue().range());
     }
 
     @Test

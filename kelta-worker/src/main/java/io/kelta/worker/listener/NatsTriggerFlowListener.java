@@ -5,6 +5,7 @@ import io.kelta.runtime.flow.FlowEngine;
 import io.kelta.worker.service.FlowActorResolver;
 import io.kelta.runtime.flow.InitialStateBuilder;
 import io.kelta.worker.service.TenantSlugResolver;
+import io.kelta.worker.service.WorkerBootstrapService;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,6 +48,7 @@ public class NatsTriggerFlowListener {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final TenantSlugResolver tenantSlugResolver;
+    private final WorkerBootstrapService bootstrap;
 
     /** Cache: tenantId → active NATS_TRIGGERED flow configs. */
     private final ConcurrentHashMap<String, List<NatsFlowConfig>> configCache =
@@ -65,13 +67,15 @@ public class NatsTriggerFlowListener {
                                    JdbcTemplate jdbcTemplate,
                                    ObjectMapper objectMapper,
                                    TenantSlugResolver tenantSlugResolver,
-                                   FlowActorResolver flowActorResolver) {
+                                   FlowActorResolver flowActorResolver,
+                                   WorkerBootstrapService bootstrap) {
         this.flowEngine = flowEngine;
         this.flowActorResolver = flowActorResolver;
         this.initialStateBuilder = initialStateBuilder;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.tenantSlugResolver = tenantSlugResolver;
+        this.bootstrap = bootstrap;
     }
 
     /**
@@ -97,6 +101,10 @@ public class NatsTriggerFlowListener {
         String topic = remainder.substring(dot + 1);
 
         Map<String, Object> payload = parsePayload(message);
+
+        // A pod that just started may get here before its collections are registered; a flow
+        // run against an unregistered collection fails for good ("Target collection not found").
+        bootstrap.ensureBootstrapped();
 
         String tenantSlug = tenantSlugResolver.resolveSlug(tenantId).orElse(null);
         if (tenantSlug == null) {

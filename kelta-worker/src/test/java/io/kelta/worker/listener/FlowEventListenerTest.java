@@ -12,6 +12,7 @@ import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.runtime.workflow.ActorSource;
 import io.kelta.worker.service.TenantSlugResolver;
+import io.kelta.worker.service.WorkerBootstrapService;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -40,6 +41,7 @@ class FlowEventListenerTest {
     private TenantSlugResolver tenantSlugResolver;
     private CollectionRegistry collectionRegistry;
     private QueryEngine queryEngine;
+    private WorkerBootstrapService bootstrap;
     private FlowEventListener listener;
 
     @BeforeEach
@@ -53,10 +55,27 @@ class FlowEventListenerTest {
         when(tenantSlugResolver.resolveSlug(anyString())).thenReturn(Optional.of("acme-corp"));
         collectionRegistry = mock(CollectionRegistry.class);
         queryEngine = mock(QueryEngine.class);
+        bootstrap = mock(WorkerBootstrapService.class);
         listener = new FlowEventListener(flowEngine, triggerEvaluator, initialStateBuilder,
                 jdbcTemplate, objectMapper, tenantSlugResolver,
                 changerResolver(),
-                collectionRegistry, queryEngine);
+                collectionRegistry, queryEngine, bootstrap);
+    }
+
+    @Test
+    @DisplayName("waits for the pod's collections to be registered before evaluating triggers")
+    @SuppressWarnings("unchecked")
+    void bootstrapsBeforeEvaluatingTriggers() throws Exception {
+        stubJdbcWithTriggerConfig("""
+            {"events": ["CREATED"], "collection": "orders"}
+            """);
+        when(triggerEvaluator.matchesRecordTrigger(any(), any())).thenReturn(false);
+
+        listener.handleRecordChanged(buildRecordChangedMessage("tenant-1", "orders", ChangeType.CREATED));
+
+        var order = inOrder(bootstrap, jdbcTemplate);
+        order.verify(bootstrap).ensureBootstrapped();
+        order.verify(jdbcTemplate).query(anyString(), any(RowMapper.class), eq("tenant-1"));
     }
 
     @Nested

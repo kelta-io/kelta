@@ -46,6 +46,8 @@ public class WorkerBootstrapService {
     private final JdbcTemplate jdbcTemplate;
     private final CollectionLifecycleManager lifecycleManager;
     private final boolean applySchema;
+    /** Set once every active collection has been registered; see {@link #ensureBootstrapped}. */
+    private volatile boolean bootstrapped;
 
     public WorkerBootstrapService(WorkerProperties workerProperties,
                                    JdbcTemplate jdbcTemplate,
@@ -67,12 +69,32 @@ public class WorkerBootstrapService {
                 workerProperties.getId(), applySchema);
 
         try {
-            initializeAllCollections();
+            ensureBootstrapped();
             log.info("Worker '{}' successfully bootstrapped all collections",
                     workerProperties.getId());
         } catch (Exception e) {
             log.error("Failed to bootstrap collections from database. " +
                     "Worker will start with no collections loaded.", e);
+        }
+    }
+
+    /**
+     * Registers every active collection now if no bootstrap has finished yet. A record-event
+     * consumer may see a message before {@code ApplicationReadyEvent}'s bootstrap completes (NATS
+     * subscriptions start in the same event, and a restarted pod is handed its unacknowledged
+     * backlog at once), so it calls this first: a tenant collection that is not registered yet
+     * would otherwise read as "not found" and fail that work for good. No tenant may be bound:
+     * the query reads every tenant's collections.
+     */
+    public void ensureBootstrapped() {
+        if (bootstrapped) {
+            return;
+        }
+        synchronized (this) {
+            if (!bootstrapped) {
+                initializeAllCollections();
+                bootstrapped = true;
+            }
         }
     }
 

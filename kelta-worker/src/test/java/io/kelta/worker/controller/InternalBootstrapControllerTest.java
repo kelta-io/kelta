@@ -126,6 +126,24 @@ class InternalBootstrapControllerTest {
         }
 
         @Test
+        @DisplayName("A tenant without an explicit apiCallsPerDay gets its tier's default")
+        void tierDefaultWithoutExplicitApiCalls() {
+            when(repository.findActiveCollections()).thenReturn(List.of());
+            when(repository.findTenantLimits()).thenReturn(List.of(
+                    tenantLimitsRow("t-ent", "ENTERPRISE", "{}"),
+                    tenantLimitsRow("t-free", "FREE", null),
+                    tenantLimitsRow("t-own", "ENTERPRISE", "{\"apiCallsPerDay\": 5000}")
+            ));
+
+            ResponseEntity<Map<String, Integer>> response = controller.getGovernorLimitsMap();
+
+            assertThat(response.getBody())
+                    .containsEntry("t-ent", 1_000_000)
+                    .containsEntry("t-free", 10_000)
+                    .containsEntry("t-own", 5000);
+        }
+
+        @Test
         @DisplayName("Should handle malformed limits JSON gracefully")
         void handlesMalformedLimitsJson() {
             when(repository.findActiveCollections()).thenReturn(List.of());
@@ -552,8 +570,13 @@ class InternalBootstrapControllerTest {
     }
 
     private Map<String, Object> tenantLimitsRow(String id, String limitsJson) {
+        return tenantLimitsRow(id, null, limitsJson);
+    }
+
+    private Map<String, Object> tenantLimitsRow(String id, String edition, String limitsJson) {
         Map<String, Object> row = new HashMap<>();
         row.put("id", id);
+        row.put("edition", edition);
         row.put("limits", limitsJson);
         return row;
     }

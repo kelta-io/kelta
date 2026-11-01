@@ -116,4 +116,32 @@ class WorkerBootstrapServiceTest {
 
         verify(lifecycleManager, never()).initializeCollection(anyString(), anyBoolean());
     }
+
+    @Test
+    @DisplayName("a consumer ahead of the ready event bootstraps once; the event then skips it")
+    void ensureBootstrappedRunsOnce() {
+        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(
+                Map.of("id", "col-1", "name", "accounts")
+        ));
+
+        service.ensureBootstrapped();
+        service.ensureBootstrapped();
+        service.onApplicationReady();
+
+        verify(jdbcTemplate, times(1)).queryForList(anyString());
+        verify(lifecycleManager, times(1)).initializeCollection("col-1", false);
+    }
+
+    @Test
+    @DisplayName("a failed bootstrap is tried again by the next consumer")
+    void failedBootstrapIsRetried() {
+        when(jdbcTemplate.queryForList(anyString()))
+                .thenThrow(new RuntimeException("Connection refused"))
+                .thenReturn(List.of(Map.of("id", "col-1", "name", "accounts")));
+
+        service.onApplicationReady();
+        service.ensureBootstrapped();
+
+        verify(lifecycleManager).initializeCollection("col-1", false);
+    }
 }
