@@ -757,10 +757,15 @@ describe('OIDCProvidersPage', () => {
         expect(screen.getByText('Google')).toBeInTheDocument()
       })
 
+      // No toast carried over from an earlier test: the one asserted below comes from this click.
+      expect(screen.queryByText(/temporarily unavailable/i)).not.toBeInTheDocument()
+
       await user.click(screen.getByTestId('test-button-0'))
 
       await waitFor(() => {
-        expect(screen.getByText(/temporarily unavailable/i)).toBeInTheDocument()
+        expect(
+          screen.getByText('Connection failed: Test connection is temporarily unavailable')
+        ).toBeInTheDocument()
       })
     })
 
