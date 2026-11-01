@@ -149,14 +149,14 @@ inbound routing by `email_from_address`, and kelta-auth slug→id lookups (`Tena
   `NVD_API_KEY` the NVD API rejects). `dependency-audit-java` now scans each service's shipped
   classpath — a Maven-resolved CycloneDX SBOM — and the OpenTelemetry Java agent version pinned in
   the service Dockerfiles (fails closed if it cannot read one), with OSV-Scanner, no API key, as a delta gate against `ci/java-audit-baseline.json`
-  (`ci-cd.md`). Baseline when it landed: **5** advisories, all with known fixes —
-  **the OpenTelemetry agent 2.25.0 in the kelta-ai and kelta-mcp images (1 critical: RMI
-  deserialization RCE, GHSA-xw7x-h9fj-p2c7, exploitable only with a reachable RMI/JMX port;
-  fixed in 2.26.1)**, `bcprov-jdk18on` 1.84 in kelta-auth (1 critical + 1 high, fixed in
-  1.85) and `httpcore5`/`httpcore5-h2` 5.3.6, managed by Spring Boot, in kelta-auth and
-  kelta-worker (2 high, fixed in 5.4.3). Burn them down — the agent with a Dockerfile URL bump,
-  the others with version overrides plus the auth SAML/federation and worker HTTP-client
-  tests — then `--update`. Not covered: base images, the JRE and OS packages. The dormant dependency-check
+  (`ci-cd.md`). Baseline when it landed: **5** advisories, all with known fixes. The
+  OpenTelemetry agent 2.25.0 in the kelta-ai and kelta-mcp images (1 critical: RMI
+  deserialization RCE, GHSA-xw7x-h9fj-p2c7, exploitable only with a reachable RMI/JMX port) is
+  **burned down** — bumped to 2.33.1 (2026-10-31), which also clears its RMI DoS and
+  JDBC-password-in-span advisories. **4** remain: `bcprov-jdk18on` 1.84 in kelta-auth (1 critical
+  + 1 high, fixed in 1.85) and `httpcore5`/`httpcore5-h2` 5.3.6, managed by Spring Boot, in
+  kelta-auth and kelta-worker (2 high, fixed in 5.4.3). Burn them down with version overrides
+  plus the auth SAML/federation and worker HTTP-client tests, then `--update`. Not covered: base images, the JRE and OS packages. The dormant dependency-check
   plugin (`kelta-platform/pom.xml` `<pluginManagement>`) and the untouched
   `dependency-check-suppressions.xml` template can be deleted.
 - **Rule** (third occurrence of a configured-but-never-run tool): when adding any checker, verify

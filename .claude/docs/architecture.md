@@ -3064,10 +3064,10 @@ kubectl describe pod -n kelta <pod-name>
 ## Cross-Cutting Concerns
 
 - **Logging**: SLF4J + Logback with Logstash JSON encoder, structured parameterized logging
-- **Tracing**: OpenTelemetry Java Agent v2.25.0 → Tempo (production, LGTM stack) / Jaeger (local dev)
+- **Tracing**: Spring Boot OpenTelemetry starter (all services), plus the OpenTelemetry Java Agent v2.33.1 in kelta-ai and kelta-mcp → Tempo (production, LGTM stack) / Jaeger (local dev)
 - **Metrics**: Spring Boot OpenTelemetry starter → Mimir (production) / OTLP HTTP (local dev)
 - **Auth**: JWT validation at gateway, Cerbos for fine-grained authorization
-- **Multi-tenancy**: TenantContext (ThreadLocal), per-tenant PostgreSQL schemas, tenant-aware NATS events
+- **Multi-tenancy**: TenantContext (ScopedValue), per-tenant PostgreSQL schemas, tenant-aware NATS events
 
 ## Automation (external)
 

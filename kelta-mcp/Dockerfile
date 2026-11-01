@@ -89,7 +89,7 @@ RUN mvn clean package -DskipTests -B && \
 # network egress from the Maven build, and far more disk headroom than the
 # minimal JRE runtime stage.
 RUN curl -fL -o opentelemetry-javaagent.jar \
-    https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.25.0/opentelemetry-javaagent.jar && \
+    https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.33.1/opentelemetry-javaagent.jar && \
     test -s opentelemetry-javaagent.jar
 
 # =============================================================================

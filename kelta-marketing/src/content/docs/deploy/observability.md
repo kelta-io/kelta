@@ -7,8 +7,8 @@ order: 60
 
 ## Instrumentation
 
-Every Java service is instrumented with OpenTelemetry (the Java agent is bundled in the images and the Spring
-Boot starter is on the classpath) and logs JSON lines (Logstash encoder). Spans carry `kelta.tenant.id`,
+Every Java service is instrumented with OpenTelemetry (the Spring Boot starter is on every service's
+classpath, and the AI and MCP images also run the OpenTelemetry Java agent) and logs JSON lines (Logstash encoder). Spans carry `kelta.tenant.id`,
 `kelta.user.id` and `kelta.correlation.id`; the same correlation id is the `requestId` in API responses.
 
 ## Export
