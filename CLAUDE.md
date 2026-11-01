@@ -130,6 +130,8 @@ kelta-modules/  External modules — separate HTTP services a tenant installs BY
 kelta-cli-downloads  nginx image serving self-update CLI binaries + manifest (downloads.kelta.io)
 kelta-test-harness  Cross-service integration tests (Testcontainers full mini-stack)
 e2e-tests       Playwright end-to-end tests
+load-tests      k6 load tests (record API mix, smoke/load/stress/soak) — run by hand against a
+                stack; never in CI and never against production (`load-tests/README.md`)
 ```
 
 Each backend service has its own `CLAUDE.md` (`kelta-{ai,auth,gateway,mcp,worker}/CLAUDE.md`),
@@ -310,6 +312,7 @@ runtime/runtime-messaging-nats -am -B
 | Frontend lint/type/test | `/test-frontend` · or in `kelta-web`/`kelta-ui/app`: `npm run lint && npm run typecheck && npm run test:run`. For `kelta-ui/app`, **build the `kelta-web` packages first** (`cd kelta-web && npm run build`) — its `@kelta/*` types resolve through their built `dist/*.d.ts`, so a stale `dist` yields phantom "has no exported member" errors (`concerns.md` → Fragile Areas) |
 | Single Java test | `mvn test -f kelta-<svc>/pom.xml -Dtest=ClassName` |
 | Run full local stack | `make up` (then `make seed`) — see `README.md` |
+| Load test (k6, against a running stack) | `cd load-tests && LOAD_BASE_URL=… LOAD_TENANT=… LOAD_API_TOKEN=klt_… k6 run records.js` — settings use `LOAD_*`, never `K6_*` (`load-tests/README.md`) |
 | Local stack, low-memory box | `make up-jvm` — JVM images instead of GraalVM native. `make up` builds 3 native images concurrently and needs ~24 GB allocated to Docker, else `cannot allocate memory` |
 
 Java tests: surefire runs `*Test`/`*Tests`/`*Properties` in parallel; failsafe runs

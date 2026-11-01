@@ -196,6 +196,8 @@ describe('frontend and other test jobs', () => {
     ['test-dora', 'scripts/dora/lib.mjs'],
     ['test-ci-scripts', 'ci/path-filters.test.ts'],
     ['test-ci-scripts', '.github/path-filters.yml'],
+    // ci/load-tests.test.ts imports the k6 suite's planning helpers.
+    ['test-ci-scripts', 'load-tests/lib/plan.js'],
     // The Java dependency audit resolves every service's shipped classpath: a pom change anywhere
     // in it, the shared Maven settings, or its own script/baseline must re-run it.
     ['dependency-audit-java', 'kelta-worker/pom.xml'],
