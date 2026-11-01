@@ -571,6 +571,9 @@ public class PhysicalTableStorageAdapter implements StorageAdapter {
 
         // Update user-defined fields
         for (FieldDefinition field : definition.fields()) {
+            if (!field.type().hasPhysicalColumn()) {
+                continue; // Skip FORMULA, ROLLUP_SUMMARY, as create does
+            }
             if (data.containsKey(field.name())) {
                 String columnName = getColumnName(definition, field);
                 if (handledAsSystemColumn(definition, columnName)) {

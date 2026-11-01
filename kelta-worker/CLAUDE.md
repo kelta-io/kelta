@@ -86,6 +86,11 @@ stops the rollout. Two rules follow:
   defaults to applying DDL; only `WorkerBootstrapService` passes `false`. A collection created
   after deploy has no Job to lean on and needs its table from the NATS `collection.changed` path.
 
+A NATS consumer that needs a tenant's collections calls `WorkerBootstrapService.ensureBootstrapped()`
+before it looks one up: subscriptions start on the same `ApplicationReadyEvent` as the bootstrap, so
+a restarted pod's backlog can arrive before its collections are registered, and an unregistered
+collection reads as "not found" (`FlowEventListener`, `NatsTriggerFlowListener`, `SearchIndexListener`).
+
 ### Error Handling
 - `ScimException` → SCIM endpoints (400, 404, 409 with scimType)
 - `EmailDeliveryException` → Email send failures

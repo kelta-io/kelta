@@ -18,6 +18,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Enumeration;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -103,7 +106,14 @@ public class ScimAuthenticationFilter extends OncePerRequestFilter {
         }
     }
 
-    private static class ScimTenantRequestWrapper extends jakarta.servlet.http.HttpServletRequestWrapper {
+    /**
+     * Presents the SCIM client's tenant as the request's only {@code X-Tenant-ID}, through every
+     * header accessor: Spring resolves {@code @RequestHeader} through {@link #getHeaders}, so
+     * overriding {@link #getHeader} alone left the controllers without the header (or with any
+     * value the caller sent).
+     */
+    static class ScimTenantRequestWrapper extends jakarta.servlet.http.HttpServletRequestWrapper {
+        private static final String TENANT_HEADER = "X-Tenant-ID";
         private final String tenantId;
 
         ScimTenantRequestWrapper(HttpServletRequest request, String tenantId) {
@@ -113,10 +123,30 @@ public class ScimAuthenticationFilter extends OncePerRequestFilter {
 
         @Override
         public String getHeader(String name) {
-            if ("X-Tenant-ID".equalsIgnoreCase(name)) {
+            if (TENANT_HEADER.equalsIgnoreCase(name)) {
                 return tenantId;
             }
             return super.getHeader(name);
+        }
+
+        @Override
+        public Enumeration<String> getHeaders(String name) {
+            if (TENANT_HEADER.equalsIgnoreCase(name)) {
+                return Collections.enumeration(List.of(tenantId));
+            }
+            return super.getHeaders(name);
+        }
+
+        @Override
+        public Enumeration<String> getHeaderNames() {
+            List<String> names = new ArrayList<>();
+            names.add(TENANT_HEADER);
+            for (String name : Collections.list(super.getHeaderNames())) {
+                if (!TENANT_HEADER.equalsIgnoreCase(name)) {
+                    names.add(name);
+                }
+            }
+            return Collections.enumeration(names);
         }
     }
 }

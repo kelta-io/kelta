@@ -1066,6 +1066,34 @@ class PhysicalTableStorageAdapterTest {
         }
 
         @Test
+        @DisplayName("an update carrying computed FORMULA and ROLLUP_SUMMARY values writes no column for them")
+        void updateSkipsComputedFieldColumns() {
+            CollectionDefinition collection = collectionWithComputedFields();
+            adapter.initializeCollection(collection);
+
+            Map<String, Object> data = new HashMap<>();
+            data.put("id", "epic-3");
+            data.put("code", "EPIC-3");
+            data.put("createdAt", Instant.now());
+            data.put("updatedAt", Instant.now());
+            adapter.create(collection, data);
+
+            // The formula hook merges the computed value into the write, as it does on create.
+            Map<String, Object> update = new HashMap<>();
+            update.put("code", "EPIC-3B");
+            update.put("total", 42);
+            update.put("taskCount", 7);
+            update.put("updatedAt", Instant.now());
+
+            Optional<Map<String, Object>> updated = assertDoesNotThrow(
+                () -> adapter.update(collection, "epic-3", update),
+                "an update must not reference a column that a computed field does not have");
+
+            assertTrue(updated.isPresent());
+            assertEquals("EPIC-3B", adapter.getById(collection, "epic-3").orElseThrow().get("code"));
+        }
+
+        @Test
         @DisplayName("an undeclared field name in fields[] keeps today's resolveColumnName behavior (still attempted)")
         void undeclaredFieldNameStillAttemptsColumnLookup() {
             CollectionDefinition collection = collectionWithComputedFields();

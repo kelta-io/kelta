@@ -11,6 +11,7 @@ import io.kelta.worker.service.FlowActorResolver;
 import io.kelta.runtime.flow.FlowTriggerEvaluator;
 import io.kelta.runtime.flow.InitialStateBuilder;
 import io.kelta.worker.service.TenantSlugResolver;
+import io.kelta.worker.service.WorkerBootstrapService;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -55,6 +56,7 @@ public class FlowEventListener {
     private final TenantSlugResolver tenantSlugResolver;
     private final CollectionRegistry collectionRegistry;
     private final QueryEngine queryEngine;
+    private final WorkerBootstrapService bootstrap;
 
     /**
      * Cache: tenantId → list of active flow trigger configs.
@@ -79,7 +81,8 @@ public class FlowEventListener {
                               TenantSlugResolver tenantSlugResolver,
                               FlowActorResolver flowActorResolver,
                               CollectionRegistry collectionRegistry,
-                              QueryEngine queryEngine) {
+                              QueryEngine queryEngine,
+                              WorkerBootstrapService bootstrap) {
         this.flowEngine = flowEngine;
         this.flowActorResolver = flowActorResolver;
         this.triggerEvaluator = triggerEvaluator;
@@ -89,6 +92,7 @@ public class FlowEventListener {
         this.tenantSlugResolver = tenantSlugResolver;
         this.collectionRegistry = collectionRegistry;
         this.queryEngine = queryEngine;
+        this.bootstrap = bootstrap;
     }
 
     /**
@@ -123,6 +127,10 @@ public class FlowEventListener {
 
             log.debug("Flow listener received record change: collection={}, recordId={}, changeType={}",
                     payload.getCollectionName(), payload.getRecordId(), payload.getChangeType());
+
+            // A pod that just started may get here before its collections are registered; a flow
+            // run against an unregistered collection fails for good ("Target collection not found").
+            bootstrap.ensureBootstrapped();
 
             final String boundUserId = userId;
             String tenantSlug = tenantSlugResolver.resolveSlug(tenantId).orElse(null);

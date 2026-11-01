@@ -29,12 +29,18 @@ import reactor.core.publisher.Mono;
  * authentication entirely and continue the filter chain, which —
  * combined with {@code anyExchange().permitAll()} — lets the request
  * proceed with the principal that the global PAT filter already set.
+ *
+ * <p>The same goes for a SCIM client's token on {@code /scim/**}: it is an opaque
+ * secret the worker's SCIM filter checks against {@code scim_client}, not a JWT, and
+ * the gateway treats {@code /scim} as an unauthenticated path. Parsing it as a JWT
+ * would refuse every SCIM request before it is routed.
  */
 public final class PatAwareBearerTokenConverter implements ServerAuthenticationConverter {
 
     static final String PAT_PREFIX = "klt_";
     static final String AUTHORIZATION = "Authorization";
     static final String BEARER_PREFIX = "Bearer ";
+    static final String SCIM_PATH_PREFIX = "/scim/";
 
     private final ServerAuthenticationConverter delegate;
 
@@ -52,6 +58,9 @@ public final class PatAwareBearerTokenConverter implements ServerAuthenticationC
         if (header != null && header.startsWith(BEARER_PREFIX)) {
             String token = header.substring(BEARER_PREFIX.length());
             if (token.startsWith(PAT_PREFIX)) {
+                return Mono.empty();
+            }
+            if (exchange.getRequest().getPath().value().startsWith(SCIM_PATH_PREFIX)) {
                 return Mono.empty();
             }
         }
