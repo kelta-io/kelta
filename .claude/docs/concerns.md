@@ -1291,6 +1291,13 @@ the rolling update replaces it, and that image reads every JAR column on every m
   in `kelta-ui/app`, no per-keystroke typing, and no real-timer windows in assertions (resolve a
   test-owned deferred instead — `testing.md` → Component Testing). Still open: give the frontend
   job its own runner or serialize it against the native builds.
+  Not every red run is contention: PLT-911 (`OIDCProvidersPage` "error message from connection
+  test", 10 s timeout on main at the msw 3 bump, which was not the cause) was a **test-isolation**
+  bug. sonner 2.0.8 keeps its toast store at module level and replays still-active toasts (4 s
+  default duration) to each newly mounted `<Toaster />`, so the sibling test's identical toast
+  reappeared in the next test. That made 2 matches (`getByText` throws), then 0 once both expired
+  together, and depending on timing the test passed on the stale toast. `src/test/testUtils.tsx`
+  now calls `toast.dismiss()` in a global `afterEach`.
 - **`kelta-ui/app` lint and `format:check` are gated only by `verify.sh`, not CI** (open).
   `test-frontend` runs knip, typecheck and tests for `kelta-ui/app` but never `npm run lint` or
   `format:check`, so main drifted red on both until PLT-854 cleared it so its verify could pass:

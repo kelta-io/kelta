@@ -13,11 +13,21 @@ import React from 'react'
 import { BrowserRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from '../context/I18nContext'
-import { Toaster } from 'sonner'
+import { Toaster, toast } from 'sonner'
 import { ApiProvider } from '../context/ApiContext'
 import { AuthProvider } from '../context/AuthContext'
 import { PluginProvider } from '../context/PluginContext'
-import { vi } from 'vitest'
+import { afterEach, vi } from 'vitest'
+
+// sonner keeps its toast store at module level and replays every still-active toast to each
+// newly mounted <Toaster />. A toast a test left on screen (default duration 4 s, longer than
+// most tests) would otherwise reappear in the next test's wrapper, so a toast assertion could
+// pass on the previous test's toast, or match two toasts until both expire together (PLT-911).
+// This module is imported by vitest.setup.ts, so the hook applies to every test file; files that
+// vi.mock('sonner') with a stub lacking dismiss() have no real store to clear.
+afterEach(() => {
+  toast.dismiss?.()
+})
 
 /**
  * Mock bootstrap config response
