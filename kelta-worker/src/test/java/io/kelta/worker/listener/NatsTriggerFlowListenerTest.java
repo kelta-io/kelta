@@ -4,6 +4,7 @@ import io.kelta.runtime.flow.FlowEngine;
 import io.kelta.runtime.flow.InitialStateBuilder;
 import io.kelta.runtime.workflow.ActorSource;
 import io.kelta.worker.service.TenantSlugResolver;
+import io.kelta.worker.service.WorkerBootstrapService;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -49,6 +50,9 @@ class NatsTriggerFlowListenerTest {
     @Mock
     private TenantSlugResolver tenantSlugResolver;
 
+    @Mock
+    private WorkerBootstrapService bootstrap;
+
     private NatsTriggerFlowListener listener;
 
     @BeforeEach
@@ -56,7 +60,7 @@ class NatsTriggerFlowListenerTest {
         ObjectMapper objectMapper = new ObjectMapper();
         listener = new NatsTriggerFlowListener(flowEngine, new InitialStateBuilder(),
                 jdbcTemplate, objectMapper, tenantSlugResolver,
-                runAsResolver());
+                runAsResolver(), bootstrap);
         lenient().when(tenantSlugResolver.resolveSlug(TENANT)).thenReturn(Optional.of("acme"));
     }
 

@@ -11,7 +11,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
@@ -34,6 +36,7 @@ class WorkerBootstrapServiceTest {
     @BeforeEach
     void setUp() {
         when(workerProperties.getId()).thenReturn("worker-1");
+        lenient().when(lifecycleManager.getActiveCollections()).thenReturn(Set.of("col-1", "col-2"));
         // Production default: pods register collections but do not apply DDL — the migrate
         // Job owns that, once, before the rollout.
         service = new WorkerBootstrapService(workerProperties, jdbcTemplate, lifecycleManager, false);
@@ -49,8 +52,8 @@ class WorkerBootstrapServiceTest {
 
         service.onApplicationReady();
 
-        verify(lifecycleManager).initializeCollection("col-1", false);
-        verify(lifecycleManager).initializeCollection("col-2", false);
+        verify(lifecycleManager).initializeCollectionOrThrow("col-1", false);
+        verify(lifecycleManager).initializeCollectionOrThrow("col-2", false);
     }
 
     @Test
@@ -60,7 +63,7 @@ class WorkerBootstrapServiceTest {
 
         service.onApplicationReady();
 
-        verify(lifecycleManager, never()).initializeCollection(anyString(), anyBoolean());
+        verify(lifecycleManager, never()).initializeCollectionOrThrow(anyString(), anyBoolean());
     }
 
     @Test
@@ -70,12 +73,12 @@ class WorkerBootstrapServiceTest {
                 Map.of("id", "col-1", "name", "accounts"),
                 Map.of("id", "col-2", "name", "contacts")
         ));
-        doThrow(new RuntimeException("init failed")).when(lifecycleManager).initializeCollection("col-1", false);
+        doThrow(new RuntimeException("init failed")).when(lifecycleManager).initializeCollectionOrThrow("col-1", false);
 
         service.onApplicationReady();
 
-        verify(lifecycleManager).initializeCollection("col-1", false);
-        verify(lifecycleManager).initializeCollection("col-2", false);
+        verify(lifecycleManager).initializeCollectionOrThrow("col-1", false);
+        verify(lifecycleManager).initializeCollectionOrThrow("col-2", false);
     }
 
     @Test
@@ -88,7 +91,7 @@ class WorkerBootstrapServiceTest {
 
         service.onApplicationReady();
 
-        verify(lifecycleManager, never()).initializeCollection(anyString(), anyBoolean());
+        verify(lifecycleManager, never()).initializeCollectionOrThrow(anyString(), anyBoolean());
     }
 
     @Test
@@ -103,7 +106,7 @@ class WorkerBootstrapServiceTest {
 
         schemaApplying.onApplicationReady();
 
-        verify(lifecycleManager).initializeCollection("col-1", true);
+        verify(lifecycleManager).initializeCollectionOrThrow("col-1", true);
     }
 
     @Test
@@ -114,6 +117,71 @@ class WorkerBootstrapServiceTest {
 
         service.onApplicationReady();
 
-        verify(lifecycleManager, never()).initializeCollection(anyString(), anyBoolean());
+        verify(lifecycleManager, never()).initializeCollectionOrThrow(anyString(), anyBoolean());
     }
+
+    @Test
+    @DisplayName("a consumer ahead of the ready event bootstraps once; the event then skips it")
+    void ensureBootstrappedRunsOnce() {
+        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(
+                Map.of("id", "col-1", "name", "accounts")
+        ));
+
+        service.ensureBootstrapped();
+        service.ensureBootstrapped();
+        service.onApplicationReady();
+
+        verify(jdbcTemplate, times(1)).queryForList(anyString());
+        verify(lifecycleManager, times(1)).initializeCollectionOrThrow("col-1", false);
+    }
+
+    @Test
+    @DisplayName("a failed bootstrap is tried again by the next consumer")
+    void failedBootstrapIsRetried() {
+        when(jdbcTemplate.queryForList(anyString()))
+                .thenThrow(new RuntimeException("Connection refused"))
+                .thenReturn(List.of(Map.of("id", "col-1", "name", "accounts")));
+
+        service.onApplicationReady();
+        service.ensureBootstrapped();
+
+        verify(lifecycleManager).initializeCollectionOrThrow("col-1", false);
+    }
+    @Test
+    @DisplayName("a partial early bootstrap does not prevent the ready event from retrying")
+    void partialEarlyBootstrapIsRetriedAtReady() {
+        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(
+                Map.of("id", "col-1", "name", "accounts"),
+                Map.of("id", "col-2", "name", "contacts")
+        ));
+        doThrow(new RuntimeException("Transient definition read failure"))
+                .doNothing().when(lifecycleManager).initializeCollectionOrThrow("col-1", false);
+
+        assertThrows(IllegalStateException.class, service::ensureBootstrapped);
+        // The good collection is still registered even though its peer failed.
+        verify(lifecycleManager).initializeCollectionOrThrow("col-2", false);
+        service.onApplicationReady();
+        service.ensureBootstrapped();
+
+        verify(jdbcTemplate, times(2)).queryForList(anyString());
+        verify(lifecycleManager, times(2)).initializeCollectionOrThrow("col-1", false);
+        verify(lifecycleManager, times(2)).initializeCollectionOrThrow("col-2", false);
+    }
+
+    @Test
+    @DisplayName("a loader that returns without registering a collection cannot latch success")
+    void missingRegistrationIsRetried() {
+        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(
+                Map.of("id", "col-1", "name", "accounts")
+        ));
+        when(lifecycleManager.getActiveCollections()).thenReturn(Set.of(), Set.of("col-1"));
+
+        assertThrows(IllegalStateException.class, service::ensureBootstrapped);
+        service.onApplicationReady();
+        service.ensureBootstrapped();
+
+        verify(jdbcTemplate, times(2)).queryForList(anyString());
+        verify(lifecycleManager, times(2)).initializeCollectionOrThrow("col-1", false);
+    }
+
 }

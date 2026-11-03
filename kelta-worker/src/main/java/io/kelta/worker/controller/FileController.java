@@ -117,7 +117,11 @@ public class FileController {
             if (obj.contentLength() > 0) {
                 response.setContentLengthLong(obj.contentLength());
             }
-            response.setHeader("Content-Range", rangeHeader);
+            // The store's Content-Range names the bytes served and the total size
+            // (RFC 9110 §14.4); the request's Range header is not a valid value for it.
+            if (obj.contentRange() != null) {
+                response.setHeader("Content-Range", obj.contentRange());
+            }
             response.setHeader("Accept-Ranges", "bytes");
             response.setHeader("Cache-Control", "private, max-age=3600");
 

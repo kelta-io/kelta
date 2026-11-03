@@ -1,12 +1,15 @@
 package io.kelta.worker.listener;
 
 import io.kelta.runtime.model.CollectionDefinition;
+import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.event.ChangeType;
 import io.kelta.runtime.event.RecordChangedPayload;
 import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.service.CollectionLifecycleManager;
 import io.kelta.worker.service.SearchIndexService;
+import io.kelta.worker.service.TenantSlugResolver;
+import io.kelta.worker.service.WorkerBootstrapService;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -27,6 +30,7 @@ class SearchIndexListenerTest {
     private ObjectMapper objectMapper;
     private QueryEngine queryEngine;
     private CollectionDefinition userCollection;
+    private WorkerBootstrapService bootstrap;
     private SearchIndexListener listener;
 
     @BeforeEach
@@ -36,13 +40,18 @@ class SearchIndexListenerTest {
         collectionRegistry = mock(CollectionRegistry.class);
         objectMapper = new ObjectMapper();
         queryEngine = mock(QueryEngine.class);
+        TenantSlugResolver tenantSlugResolver = mock(TenantSlugResolver.class);
+        when(tenantSlugResolver.resolveSlug("tenant-1")).thenReturn(Optional.of("acme"));
+        bootstrap = mock(WorkerBootstrapService.class);
         listener = new SearchIndexListener(searchIndexService, lifecycleManager,
-                collectionRegistry, objectMapper, queryEngine);
+                collectionRegistry, objectMapper, queryEngine, tenantSlugResolver, bootstrap);
 
-        // User collections return a non-system definition
+        // A tenant's own collection is registered under its tenant, as ConcurrentCollectionRegistry
+        // keys it: looked up with no tenant bound (or another one) it is unknown.
         userCollection = mock(CollectionDefinition.class);
         when(userCollection.systemCollection()).thenReturn(false);
-        when(collectionRegistry.get("products")).thenReturn(userCollection);
+        when(collectionRegistry.get("products")).thenAnswer(invocation ->
+                "tenant-1".equals(TenantContext.get()) ? userCollection : null);
 
         // System collections return a system definition
         CollectionDefinition systemCollection = mock(CollectionDefinition.class);
@@ -67,6 +76,19 @@ class SearchIndexListenerTest {
             verify(searchIndexService).indexRecord(
                     eq("tenant-1"), eq("col-1"), eq("products"), eq("rec-1"),
                     argThat(data -> "Widget A".equals(data.get("name"))));
+        }
+
+        @Test
+        @DisplayName("waits for the pod's collections to be registered before looking one up")
+        void bootstrapsBeforeTheRegistryLookup() throws Exception {
+            when(lifecycleManager.getCollectionIdByName("products")).thenReturn("col-1");
+
+            listener.handleRecordChanged(buildMessage("tenant-1", "products", "rec-1", ChangeType.CREATED,
+                    Map.of("name", "Widget A")));
+
+            var order = inOrder(bootstrap, collectionRegistry);
+            order.verify(bootstrap).ensureBootstrapped();
+            order.verify(collectionRegistry).get("products");
         }
 
         @Test
@@ -124,8 +146,11 @@ class SearchIndexListenerTest {
         @DisplayName("should index the re-read record when the event payload was omitted")
         void shouldReReadWhenPayloadOmitted() throws Exception {
             when(lifecycleManager.getCollectionIdByName("products")).thenReturn("col-1");
-            when(queryEngine.getById(userCollection, "rec-1"))
-                    .thenReturn(Optional.of(Map.of("id", "rec-1", "name", "Re-read")));
+            // The re-read runs with the tenant's slug bound: its tables live in the slug's schema.
+            when(queryEngine.getById(userCollection, "rec-1")).thenAnswer(invocation ->
+                    "acme".equals(TenantContext.getSlug())
+                            ? Optional.of(Map.of("id", "rec-1", "name", "Re-read"))
+                            : Optional.empty());
 
             listener.handleRecordChanged(buildSlimMessage(ChangeType.UPDATED));
 

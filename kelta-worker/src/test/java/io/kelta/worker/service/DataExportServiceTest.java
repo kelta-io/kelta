@@ -1,5 +1,6 @@
 package io.kelta.worker.service;
 
+import io.kelta.runtime.context.TenantContext;
 import io.kelta.runtime.event.PlatformEventPublisher;
 import io.kelta.runtime.model.CollectionDefinition;
 import io.kelta.runtime.model.FieldDefinition;
@@ -12,6 +13,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -26,6 +28,7 @@ class DataExportServiceTest {
     private JdbcTemplate jdbcTemplate;
     private ObjectMapper objectMapper;
     private PlatformEventPublisher eventPublisher;
+    private TenantSlugResolver tenantSlugResolver;
     private DataExportService service;
 
     @BeforeEach
@@ -36,11 +39,13 @@ class DataExportServiceTest {
         jdbcTemplate = mock(JdbcTemplate.class);
         objectMapper = JsonMapper.builder().build();
         eventPublisher = mock(PlatformEventPublisher.class);
+        tenantSlugResolver = mock(TenantSlugResolver.class);
+        when(tenantSlugResolver.resolveSlug("t1")).thenReturn(Optional.of("acme"));
 
         service = new DataExportService(
                 exportRepository, queryEngine, collectionRegistry,
                 jdbcTemplate, objectMapper, Optional.empty(), eventPublisher,
-                mock(RecordMaskingService.class));
+                mock(RecordMaskingService.class), tenantSlugResolver);
     }
 
     @Test
@@ -118,13 +123,19 @@ class DataExportServiceTest {
         );
         PaginationMetadata metadata = new PaginationMetadata(2, 1, 1000, 1);
         QueryResult queryResult = new QueryResult(records, metadata);
-        when(queryEngine.executeQuery(eq(definition), any(QueryRequest.class))).thenReturn(queryResult);
+        // The tenant's records are read with its slug bound: its tables live in the slug's schema.
+        AtomicReference<String> slugAtQuery = new AtomicReference<>();
+        when(queryEngine.executeQuery(eq(definition), any(QueryRequest.class))).thenAnswer(invocation -> {
+            slugAtQuery.set(TenantContext.getSlug());
+            return queryResult;
+        });
 
         service.executeExport("exp-1", "t1");
 
         // Verify status transitions
         verify(exportRepository).markInProgress("exp-1");
         verify(exportRepository).markCompleted(eq("exp-1"), eq(2), eq(2), isNull(), anyLong());
+        assertThat(slugAtQuery.get()).isEqualTo("acme");
     }
 
     @SuppressWarnings("unchecked")

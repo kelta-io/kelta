@@ -904,15 +904,23 @@ tokens isolate access), single hostNetwork replica (`Recreate` → brief outage 
 
 ## Tech Debt
 
-**A tier change does not reach the gateway's rate limit.** The gateway takes `apiCallsPerDay`
-from the `tenant.limits` override only (`InternalBootstrapController.loadGovernorLimits` over
-`SELECT id, limits FROM tenant`), falling back to 100,000 — it never reads `tenant.edition`. And
-`PUT /api/governor-limits/tier` publishes `feature.changed`, not the `tenants` record event that
-makes the gateway refresh. So moving a tenant to ENTERPRISE or UNLIMITED shows the higher
-`apiCallsLimit` in `GET /api/governor-limits` while the gateway keeps enforcing the
-PROFESSIONAL-sized window. Workaround: set `apiCallsPerDay` in the override with
-`PUT /api/governor-limits`. Fix: resolve tier defaults in the gateway's limit load and publish the
-tenant event from the tier endpoint (found while building `load-tests/`, 2026-10-31).
+**A tier change does not reach the gateway's rate limit until it reloads the tenant.** The
+gateway's limit load (`InternalBootstrapController.loadGovernorLimits`) takes `apiCallsPerDay`
+from the `tenant.limits` override, else the tier default of `tenant.edition` (`TenantTierQuotas`).
+But `PUT /api/governor-limits/tier` publishes `feature.changed`, not the `tenants` record event
+that makes the gateway refresh, so after a tier change the gateway keeps enforcing the old window
+while `GET /api/governor-limits` already shows the new `apiCallsLimit`. Workaround: set
+`apiCallsPerDay` in the override with `PUT /api/governor-limits`. Fix: publish the tenant event
+from the tier endpoint (found while building `load-tests/`, 2026-10-31; the limit load ignored the
+tier until the same day).
+
+**A record event can be lost when a worker stops.** `DefaultQueryEngine.publishRecordEvent`
+publishes after the write commits (`architecture.md` → Record-changed events follow the
+transaction) and there is no outbox: a worker that stops between the commit and the publish loses
+the event, so record-triggered flows, the search index, module events, webhooks and realtime never
+see that write. Seen in an acceptance run that killed the worker during a burst of writes
+(2026-10-31). Fix: a transactional outbox (an event row written in the write's transaction, relayed
+to NATS and marked sent).
 
 **No collection rename.** A collection's `name` is the physical table name, its `/api/<name>`
 path and gateway route, and the value of lookup `reference_target`, menu paths and search-index
@@ -1548,6 +1556,13 @@ One line each; full write-ups are in git history.
 - 2026-10-24 (#1933) — PLT-689: deactivating or deleting a user left its PATs live and there was no admin revoke; `UserSessionRevocationHook` revokes them, and `GET /api/admin/users/{id}/tokens` / `DELETE /api/admin/users/{id}/tokens/{tokenId}` (`MANAGE_USERS`, audited `PAT_ADMIN_REVOKED`) list and revoke a user's tokens (Redis residual above). `UserSessionRevocationHookTest`, `AdminPersonalAccessTokenControllerTest`.
 
 **Bugs**
+- 2026-10-31 (platform-acceptance) — a record-event consumer could run before the pod had registered its tenants' collections: NATS subscriptions start on the same `ApplicationReadyEvent` as `WorkerBootstrapService`, and a restarted pod is handed its unacknowledged backlog at once, so those flow runs failed for good ("Target collection not found") and the search index skipped the record. The flow, NATS-trigger and search-index consumers now call `WorkerBootstrapService.ensureBootstrapped()` first (the `ExternalModuleRegistry.ensureInitialized()` idea). `WorkerBootstrapServiceTest`, `FlowEventListenerTest`, `SearchIndexListenerTest`.
+- 2026-10-31 (platform-acceptance) — full-text search indexed no tenant record: `SearchIndexListener` asked the registry whether the collection was a system one before binding the event's tenant, and tenant collections are registered under their tenant, so each read as unknown and was skipped as a system collection. It now binds the tenant and its slug first. `SearchIndexListenerTest`.
+- 2026-10-31 (platform-acceptance) — an update to a record of a collection with a FORMULA or ROLLUP_SUMMARY field failed (`column ... does not exist`): the storage adapter's UPDATE, unlike its INSERT, wrote fields without a physical column. `PhysicalTableStorageAdapterTest`.
+- 2026-10-31 (platform-acceptance) — a ranged `GET /api/files/{key}` answered 206 with the request's `Range` value as `Content-Range`; it now carries the object store's `bytes <first>-<last>/<size>`. `S3StorageServiceTest`.
+- 2026-10-31 (platform-acceptance) — every data export of a user collection ended FAILED (`relation ... does not exist`): the background export bound the tenant id but not its slug, which names the per-tenant schema. `DataExportServiceTest`.
+- 2026-10-31 (platform-acceptance) — SCIM client tokens never reached the worker: the gateway decoded every non-PAT bearer token as a JWT and answered 401 on `/scim/v2/**`; it now leaves `/scim/` bearer tokens to the worker's SCIM token check (`PatAwareBearerTokenConverter`). Past the gateway, Users/Groups answered 500 (`X-Tenant-ID` not present); `ScimAuthenticationFilter` now supplies the tenant header to every header accessor. `PatAwareBearerTokenConverterTest`, `ScimAuthenticationFilterTest`.
+- 2026-10-31 (platform-acceptance) — the gateway enforced the 100,000-a-day fallback for a tenant with no explicit `apiCallsPerDay`, whatever its tier; the limit load now falls back to the tier default (open half: Tech Debt → A tier change). `InternalBootstrapControllerTest`.
 - 2026-10-31 (scheduler-atomic-claim) — scheduled jobs of every type could run twice for one slot: `findDueJobs` relied on `FOR UPDATE SKIP LOCKED` in autocommit (no lock past the statement) and `next_run_at` advanced only after the run, so worker pods whose polls landed within milliseconds of each other each ran every due job (seen in production: two pods ran the same four flows each poll for 30 minutes, and a monthly flow ran twice on two tenants). Each pod now claims a slot before running it with a conditional `UPDATE` that moves `next_run_at` off the slot it read (`ScheduledJobRepository.claim`); recording the outcome no longer writes `next_run_at`. `ScheduledJobClaimIntegrationTest`, `ScheduledJobExecutorServiceTest$Claiming`. Same pattern still open in bulk jobs (Fragile Areas → Claiming rows across worker pods).
 - KLT-745 (2026-10-24) — a collection turning `active=false` kept its gateway route until the next bootstrap (`CollectionChangedPayload.active` was a primitive, so hooks that never set it sent `false`); the flag is now a nullable `Boolean` omitted when unset, `CollectionConfigEventPublisher` no longer defaults it to `true`, and `ConfigEventListener` removes the route on UPDATED with `active:false`. `ConfigEventListenerTest` (`shouldRemoveRouteWhenCollectionDeactivated`, `deactivationRemovesRouteFromRegistry`, `routeStaysRegisteredWhenUpdatedEventCarriesNoActiveKey`), `CollectionChangedPayloadTest$ActiveJson`, `CollectionConfigEventPublisherTest` (`deactivatedCollectionPublishesActiveFalse`, `otherPublishersSendNoActiveKey`).
 - KLT-700 / KLT-740 (2026-10-24) — the router divergences `DynamicCollectionRouterGoldenTest` had pinned as-is are fixed (KLT-700): the read-only `403` carries `code` + `meta.requestId`, a cached system-collection get-by-id and the child get-by-id send `ETag`, and child update/delete enforce `If-Match`. `POST /api/operations` now geo-stamps `captureGeo` collections like the router (KLT-740, shared `GeoStamping`), its last behavioural divergence. `RouterGoldenErrorShapeTest`, `AtomicOperationExecutorTest`, `AtomicOperationsControllerTest`. (#1876, #1894)

@@ -2,6 +2,7 @@ package io.kelta.worker.controller;
 
 import io.kelta.runtime.context.TenantContext;
 import io.kelta.worker.repository.BootstrapRepository;
+import io.kelta.worker.service.TenantTierQuotas;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -524,7 +525,8 @@ public class InternalBootstrapController {
             String tenantId = (String) row.get("id");
             Object limitsObj = row.get("limits");
 
-            int apiCallsPerDay = 100_000; // default
+            // No explicit override: the tenant's tier default, as GET /api/governor-limits reports it.
+            int apiCallsPerDay = tierApiCallsPerDay((String) row.get("edition"));
             if (limitsObj instanceof String limitsStr && !limitsStr.isBlank()) {
                 try {
                     Map<String, Object> limits = objectMapper.readValue(limitsStr,
@@ -568,6 +570,12 @@ public class InternalBootstrapController {
         }
 
         return governorLimits;
+    }
+
+    private static int tierApiCallsPerDay(String edition) {
+        Object value = TenantTierQuotas.defaultsFor(TenantTierQuotas.Tier.fromEdition(edition))
+                .get(TenantTierQuotas.KEY_API_CALLS_PER_DAY);
+        return value instanceof Number num ? num.intValue() : 100_000;
     }
 
     /**

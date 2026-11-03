@@ -1,6 +1,7 @@
 package io.kelta.worker.scim.filter;
 
 import tools.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -9,6 +10,7 @@ import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -109,6 +111,31 @@ class ScimAuthenticationFilterTest {
         filter.doFilter(request, response, chain);
 
         assertThat(response.getStatus()).isEqualTo(401);
+    }
+
+    @Test
+    @DisplayName("every header accessor sees the token's tenant, not one the caller sent")
+    void tenantHeaderThroughEveryAccessor() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/scim/v2/Users");
+        request.addHeader("Authorization", "Bearer valid-token-123");
+        request.addHeader("X-Tenant-ID", "caller-chosen");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        String tokenHash = ScimAuthenticationFilter.hashToken("valid-token-123");
+        when(jdbcTemplate.queryForList(contains("scim_client"), eq(tokenHash)))
+                .thenReturn(List.of(Map.of("tenant_id", "t1", "name", "Okta")));
+
+        filter.doFilter(request, response, chain);
+
+        HttpServletRequest forwarded = (HttpServletRequest) chain.getRequest();
+        assertThat(forwarded.getHeader("X-Tenant-ID")).isEqualTo("t1");
+        // Spring's @RequestHeader reads getHeaders.
+        assertThat(Collections.list(forwarded.getHeaders("x-tenant-id"))).containsExactly("t1");
+        List<String> names = Collections.list(forwarded.getHeaderNames());
+        assertThat(names.stream().filter("X-Tenant-ID"::equalsIgnoreCase)).hasSize(1);
+        assertThat(names).contains("Authorization");
+        assertThat(forwarded.getHeader("Authorization")).isEqualTo("Bearer valid-token-123");
     }
 
     @Test

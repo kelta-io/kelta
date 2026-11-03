@@ -8,6 +8,8 @@ import io.kelta.runtime.query.QueryEngine;
 import io.kelta.runtime.registry.CollectionRegistry;
 import io.kelta.worker.service.CollectionLifecycleManager;
 import io.kelta.worker.service.SearchIndexService;
+import io.kelta.worker.service.TenantSlugResolver;
+import io.kelta.worker.service.WorkerBootstrapService;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,17 +42,23 @@ public class SearchIndexListener {
     private final CollectionRegistry collectionRegistry;
     private final ObjectMapper objectMapper;
     private final QueryEngine queryEngine;
+    private final TenantSlugResolver tenantSlugResolver;
+    private final WorkerBootstrapService bootstrap;
 
     public SearchIndexListener(SearchIndexService searchIndexService,
                                 CollectionLifecycleManager lifecycleManager,
                                 CollectionRegistry collectionRegistry,
                                 ObjectMapper objectMapper,
-                                QueryEngine queryEngine) {
+                                QueryEngine queryEngine,
+                                TenantSlugResolver tenantSlugResolver,
+                                WorkerBootstrapService bootstrap) {
         this.searchIndexService = searchIndexService;
         this.lifecycleManager = lifecycleManager;
         this.collectionRegistry = collectionRegistry;
         this.objectMapper = objectMapper;
         this.queryEngine = queryEngine;
+        this.tenantSlugResolver = tenantSlugResolver;
+        this.bootstrap = bootstrap;
     }
 
     /**
@@ -81,16 +89,22 @@ public class SearchIndexListener {
                 return;
             }
 
-            // Skip system collection changes (fields, collections, etc.)
-            if (isSystemCollection(collectionName)) {
-                return;
-            }
-
             final String boundCollection = collectionName;
             final String boundRecord = recordId;
             final ChangeType boundChange = changeType;
             final RecordChangedPayload boundPayload = payload;
-            TenantContext.runWithTenant(tenantId, () -> {
+            // A pod that just started may get here before its collections are registered, and an
+            // unregistered collection reads as a system one, so the record would go unindexed.
+            bootstrap.ensureBootstrapped();
+            // Bound before the registry lookup: a tenant's own collections are registered under
+            // its tenant, so looked up unbound they read as unknown, and so as system ones. The
+            // slug too, for the re-read of an omitted payload from the tenant's schema.
+            String tenantSlug = tenantSlugResolver.resolveSlug(tenantId).orElse(null);
+            TenantContext.runWithTenant(tenantId, tenantSlug, () -> {
+                // Skip system collection changes (fields, collections, etc.)
+                if (isSystemCollection(boundCollection)) {
+                    return;
+                }
                 switch (boundChange) {
                     case CREATED, UPDATED -> {
                         Map<String, Object> boundData = recordData(boundPayload);

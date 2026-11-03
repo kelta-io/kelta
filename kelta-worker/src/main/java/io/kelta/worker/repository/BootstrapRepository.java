@@ -27,7 +27,7 @@ public class BootstrapRepository {
             """;
 
     private static final String SELECT_TENANT_LIMITS = """
-            SELECT id, limits FROM tenant
+            SELECT id, edition, limits FROM tenant
             WHERE status NOT IN ('DECOMMISSIONED', 'SUSPENDED')
             """;
 

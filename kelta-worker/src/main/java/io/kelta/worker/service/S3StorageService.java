@@ -84,13 +84,21 @@ public class S3StorageService {
 
     /**
      * Holds a streamed S3 object with metadata. Must be closed after use.
+     *
+     * <p>{@code contentRange} is the store's {@code Content-Range} for a ranged read
+     * ({@code bytes <first>-<last>/<size>}), null for a whole-object read.
      */
     public record StorageObject(
             InputStream content,
             String contentType,
             long contentLength,
-            String fileName
+            String fileName,
+            String contentRange
     ) implements Closeable {
+        public StorageObject(InputStream content, String contentType, long contentLength, String fileName) {
+            this(content, contentType, contentLength, fileName, null);
+        }
+
         @Override
         public void close() throws IOException {
             if (content != null) {
@@ -218,7 +226,8 @@ public class S3StorageService {
                 ? metadata.contentLength()
                 : -1;
 
-        return new StorageObject(response, contentType, contentLength, extractFileName(storageKey));
+        return new StorageObject(response, contentType, contentLength, extractFileName(storageKey),
+                metadata.contentRange());
     }
 
     /**

@@ -78,6 +78,9 @@ Cross-cutting (off main path): `ObservabilityContextFilter (-90)`, `HttpBodyCapt
 resolution is done in the worker by `JsonApiIncludeResolver` (runtime-core `router` package), not a
 numbered filter; read-side record authorization and FLS of included resources are enforced in the
 worker (`CerbosRecordAuthorizationAdvice`, `CerbosFieldSecurityAdvice`), not the gateway.
+Bearer tokens on `/scim/**` are SCIM client tokens: the gateway's resource-server token converter
+(`PatAwareBearerTokenConverter`) leaves them undecoded (like a `klt_` PAT) and the worker's
+`ScimAuthenticationFilter` checks them; `/scim` is an unauthenticated gateway path.
 
 **System-collection response cache.** GETs of the hot metadata collections in
 `SystemCollectionResponseCacheFilter.CACHEABLE_COLLECTIONS` (ui-pages/menus, collections, fields,

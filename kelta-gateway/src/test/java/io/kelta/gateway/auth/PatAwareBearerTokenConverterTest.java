@@ -39,6 +39,35 @@ class PatAwareBearerTokenConverterTest {
     }
 
     @Test
+    void returnsEmptyForAScimClientTokenOnAScimPath() {
+        PatAwareBearerTokenConverter converter = new PatAwareBearerTokenConverter(
+                exchange -> Mono.error(new AssertionError("delegate should not run for a SCIM token")));
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.add("Authorization", "Bearer 3f9c2a7e5b1d4c8a9e0f6b2d7a1c5e3f");
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/scim/v2/Users").headers(headers).build());
+
+        StepVerifier.create(converter.convert(exchange))
+                .verifyComplete();
+    }
+
+    @Test
+    void delegatesForANonPatTokenOutsideScim() {
+        Authentication stub = new StubAuth();
+        PatAwareBearerTokenConverter converter = new PatAwareBearerTokenConverter(exchange -> Mono.just(stub));
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.add("Authorization", "Bearer 3f9c2a7e5b1d4c8a9e0f6b2d7a1c5e3f");
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/acme/api/scim-like").headers(headers).build());
+
+        StepVerifier.create(converter.convert(exchange))
+                .expectNext(stub)
+                .verifyComplete();
+    }
+
+    @Test
     void delegatesWhenAuthorizationHeaderAbsent() {
         Authentication stub = new StubAuth();
         ServerAuthenticationConverter delegate = exchange -> Mono.just(stub);
