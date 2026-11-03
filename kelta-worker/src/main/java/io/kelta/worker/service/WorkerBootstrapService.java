@@ -9,8 +9,10 @@ import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Bootstraps the worker by loading all active collections from the database on startup.
@@ -107,18 +109,32 @@ public class WorkerBootstrapService {
 
         log.info("Found {} active collections to initialize", collections.size());
 
+        Set<String> expected = new HashSet<>();
+        IllegalStateException failure = new IllegalStateException("Not all active collections were bootstrapped");
+        boolean failed = false;
         for (Map<String, Object> collection : collections) {
             String collectionId = (String) collection.get("id");
             String collectionName = (String) collection.get("name");
 
             if (collectionId != null) {
+                expected.add(collectionId);
                 try {
-                    lifecycleManager.initializeCollection(collectionId, applySchema);
+                    lifecycleManager.initializeCollectionOrThrow(collectionId, applySchema);
                 } catch (Exception e) {
+                    failed = true;
+                    failure.addSuppressed(e);
                     log.warn("Failed to initialize collection '{}' (id={}): {}",
                             collectionName, collectionId, e.getMessage());
                 }
             }
+        }
+        // The throwing loader can return without registering a row that disappeared or has
+        // invalid metadata. Do not latch success for that partial result either.
+        if (!expected.isEmpty() && !lifecycleManager.getActiveCollections().containsAll(expected)) {
+            failed = true;
+        }
+        if (failed) {
+            throw failure;
         }
     }
 }

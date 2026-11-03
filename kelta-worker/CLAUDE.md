@@ -90,6 +90,9 @@ A NATS consumer that needs a tenant's collections calls `WorkerBootstrapService.
 before it looks one up: subscriptions start on the same `ApplicationReadyEvent` as the bootstrap, so
 a restarted pod's backlog can arrive before its collections are registered, and an unregistered
 collection reads as "not found" (`FlowEventListener`, `NatsTriggerFlowListener`, `SearchIndexListener`).
+Bootstrap success is latched only after every active collection registers. Partial failures
+continue through the remaining collections, then propagate so the next consumer or ready
+event retries; the lifecycle manager's failure-swallowing initializer is unsuitable here.
 
 ### Error Handling
 - `ScimException` → SCIM endpoints (400, 404, 409 with scimType)
