@@ -22,7 +22,7 @@
         <java.version>25</java.version>
         <spring-cloud.version>2025.1.4</spring-cloud.version>
         <protobuf.version>4.36.2</protobuf.version>
-        <guava.version>33.7.2-jre</guava.version>
+        <guava.version>33.8.0-jre</guava.version>
         <!-- Same version as the other modules (2.0.3+ = Docker Engine 29 support); see testing.md. -->
         <testcontainers.version>2.0.5</testcontainers.version>
         <graalvm-sdk.version>25.0.5</graalvm-sdk.version>
