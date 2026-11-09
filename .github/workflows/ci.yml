@@ -711,11 +711,26 @@ jobs:
           # The label is when this job loaded the image. ci/docker-reclaim.sh ages labelled
           # images by it, not by `Created`, which a cache-served build inherits from the
           # original build and so can already be past the prune age the moment it is loaded.
-          docker buildx bake --builder kelta-ci \
-            -f docker-compose.yml -f docker-compose.build.yml \
-            -f docker-compose.ci.yml -f docker-compose.ci-build.yml \
-            --load --set "*.labels.io.kelta.ci.loaded-at=$(date +%s)" \
-            kelta-auth kelta-worker kelta-gateway kelta-ui kelta-mcp cerbos
+          set -o pipefail
+          bake() {
+            docker buildx bake --builder kelta-ci \
+              -f docker-compose.yml -f docker-compose.build.yml \
+              -f docker-compose.ci.yml -f docker-compose.ci-build.yml \
+              --load --set "*.labels.io.kelta.ci.loaded-at=$(date +%s)" \
+              kelta-auth kelta-worker kelta-gateway kelta-ui kelta-mcp cerbos
+          }
+          bake 2>&1 | tee "$RUNNER_TEMP/bake.log" && exit 0
+          # One retry, for one signature only. Maven records a dependency the mirror did not
+          # have yet as "not found" in the local repository, and the persistent builder keeps
+          # that repository in its ~/.m2 cache mounts — so every later build on the node fails
+          # in ~1s with "This failure was cached in the local repository" until the record
+          # ages out (a day), even once the mirror serves it. Dropping the builder's cache
+          # mounts (not its layers) makes the rebuild ask the mirror again. Any other failure,
+          # or a second one, fails the step as before.
+          grep -q 'This failure was cached in the local repository' "$RUNNER_TEMP/bake.log" || exit 1
+          echo "::warning title=Maven negative cache::A cached Maven resolution failure broke the image build; pruning the kelta-ci builder's cache mounts and rebuilding once."
+          docker buildx prune --builder kelta-ci --force --all --filter type=exec.cachemount
+          bake
 
       - name: Start stack
         run: |
@@ -1140,11 +1155,20 @@ jobs:
 
       - name: Build service images (JVM, persistent builder cache)
         run: |
-          docker buildx bake --builder kelta-ci \
-            -f docker-compose.yml -f docker-compose.build.yml \
-            -f docker-compose.ci.yml -f docker-compose.ci-build.yml \
-            --load --set "*.labels.io.kelta.ci.loaded-at=$(date +%s)" \
-            kelta-auth kelta-worker kelta-gateway kelta-ui cerbos
+          set -o pipefail
+          bake() {
+            docker buildx bake --builder kelta-ci \
+              -f docker-compose.yml -f docker-compose.build.yml \
+              -f docker-compose.ci.yml -f docker-compose.ci-build.yml \
+              --load --set "*.labels.io.kelta.ci.loaded-at=$(date +%s)" \
+              kelta-auth kelta-worker kelta-gateway kelta-ui cerbos
+          }
+          bake 2>&1 | tee "$RUNNER_TEMP/bake.log" && exit 0
+          # One retry on a cached Maven "not found" only — see the e2e job's step.
+          grep -q 'This failure was cached in the local repository' "$RUNNER_TEMP/bake.log" || exit 1
+          echo "::warning title=Maven negative cache::A cached Maven resolution failure broke the image build; pruning the kelta-ci builder's cache mounts and rebuilding once."
+          docker buildx prune --builder kelta-ci --force --all --filter type=exec.cachemount
+          bake
 
       - name: Start stack
         timeout-minutes: 8
@@ -1286,11 +1310,20 @@ jobs:
 
       - name: Build service images (JVM, persistent builder cache)
         run: |
-          docker buildx bake --builder kelta-ci \
-            -f docker-compose.yml -f docker-compose.build.yml \
-            -f docker-compose.ci.yml -f docker-compose.ci-build.yml \
-            --load --set "*.labels.io.kelta.ci.loaded-at=$(date +%s)" \
-            kelta-auth kelta-worker kelta-gateway kelta-ui kelta-mcp cerbos
+          set -o pipefail
+          bake() {
+            docker buildx bake --builder kelta-ci \
+              -f docker-compose.yml -f docker-compose.build.yml \
+              -f docker-compose.ci.yml -f docker-compose.ci-build.yml \
+              --load --set "*.labels.io.kelta.ci.loaded-at=$(date +%s)" \
+              kelta-auth kelta-worker kelta-gateway kelta-ui kelta-mcp cerbos
+          }
+          bake 2>&1 | tee "$RUNNER_TEMP/bake.log" && exit 0
+          # One retry on a cached Maven "not found" only — see the e2e job's step.
+          grep -q 'This failure was cached in the local repository' "$RUNNER_TEMP/bake.log" || exit 1
+          echo "::warning title=Maven negative cache::A cached Maven resolution failure broke the image build; pruning the kelta-ci builder's cache mounts and rebuilding once."
+          docker buildx prune --builder kelta-ci --force --all --filter type=exec.cachemount
+          bake
 
       - name: Start stack
         timeout-minutes: 8
