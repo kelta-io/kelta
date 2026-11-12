@@ -55,7 +55,13 @@
     "zod": "^4.6.7"
   },
   "overrides": {
-    "follow-redirects": "^1.16.2"
+    "follow-redirects": "^1.16.2",
+    "@microsoft/api-extractor": {
+      "minimatch": "^11.0.1"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.1"
+    }
   },
   "engines": {
     "node": ">=20.19.0"
