@@ -32,7 +32,7 @@ concurrency:
 jobs:
   collect:
     name: Collect + publish
-    runs-on: k8s-runner
+    runs-on: kelta-small
     timeout-minutes: 30
     env:
       LOKI_URL: http://loki.observability.svc.cluster.local:3100

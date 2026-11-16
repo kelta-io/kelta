@@ -13,6 +13,6 @@ jobs:
           - service: gateway
             runner: ubuntu-latest
           - service: worker
-            runner: k8s-runner-integration
+            runner: kelta-large
     steps:
       - run: echo test

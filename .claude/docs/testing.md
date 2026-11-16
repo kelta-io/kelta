@@ -26,7 +26,7 @@ runtime-core — e.g. `RowLevelSecurityIntegrationTest`) run under plain surefir
 harness profile, and are `@Testcontainers(disabledWithoutDocker = true)`: without a usable Docker
 they are **skipped**, not failed. In CI that is caught by `scripts/ci/assert-integration-tests-ran.sh`,
 which fails the job when an `*IntegrationTest` suite skipped every test; CI also sets
-`TESTCONTAINERS_RYUK_DISABLED=true`, since Ryuk is unreachable on the k8s-runner's shared daemon and
+`TESTCONTAINERS_RYUK_DISABLED=true`, since Ryuk is unreachable on the runners' shared node daemon and
 Testcontainers otherwise reports Docker as unavailable. (Docker Engine 29+ needs Testcontainers
 2.0.3+; every module is on 2.0.5.) kelta-gateway is different: its pom excludes `*IntegrationTest`
 from surefire and runs them through failsafe under `-Pintegration-tests`, which CI's `test-java`
@@ -685,7 +685,7 @@ must be checked *across* a version change rather than on one build:
 section actually works and stays fast, rather than trusting docs to stay in sync with the
 compose file by hand. It builds no Kelta image: it pulls the release `.env.example` pins
 (`ghcr.io/kelta-io/*:${KELTA_VERSION}`, base `docker-compose.yml` + `docker-compose.ci.yml` — the
-port-safe overlay the `e2e` job also uses, for the shared k8s-runner daemon), then wraps
+port-safe overlay the `e2e` job also uses, for the runners' shared node daemon), then wraps
 `ci/quickstart-run.sh` (`docker compose up -d --wait`; read the platform admin's first-boot
 password from `docker compose logs kelta-auth` the way `quickstart.md` tells a new user to — no
 `KELTA_BOOTSTRAP_ADMIN_PASSWORD` here, on purpose; complete the forced change with
@@ -693,7 +693,7 @@ password from `docker compose logs kelta-auth` the way `quickstart.md` tells a n
 into a `curlimages/curl` sibling container on the compose network — via `kelta-auth`'s
 `/auth/direct-login` and a `POST` to `/api/collections`, `ci/quickstart-check.sh`)
 in `timeout 300`. The check script goes in over **stdin, not a bind mount** — Docker on
-`k8s-runner-integration` is remote and can't see the runner's filesystem (same reason
+the runners' node Docker is remote and can't see the runner's filesystem (same reason
 `docker-compose.ci.yml` bakes cerbos config into an image instead of mounting it). Only the wall
 clock from `docker compose up` to that API call succeeding counts against the budget — the image
 pull happens first and isn't timed. Gated on the `quickstart` path filter (`.github/path-filters.yml`):

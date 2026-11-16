@@ -62,7 +62,7 @@ jobs:
   changes:
     name: Detect Changes
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: k8s-runner
+    runs-on: kelta-small
     outputs:
       runtime: ${{ steps.filter.outputs.runtime }}
       gateway: ${{ steps.filter.outputs.gateway }}
@@ -134,10 +134,11 @@ jobs:
     needs: changes
     # Services with Testcontainers ITs (worker: RowLevelSecurityIntegrationTest; ai and auth:
     # TenantBindingIntegrationTest; auth: BaselineAdminPasswordIntegrationTest; gateway: its
-    # @SpringBootTest suites over GatewayContainers) run on k8s-runner-integration, like the harness job: its
-    # Docker publishes container ports where the job can reach them. On k8s-runner the container
-    # starts but getHost():getMappedPort() is "Connection refused" — those suites used to be
-    # skipped instead. Services without Testcontainers stay on the lighter k8s-runner.
+    # @SpringBootTest suites over GatewayContainers) run on kelta-large, like the harness job: their
+    # containers start in the node's Docker, outside the pod, and the large size's requests reserve
+    # node room for them. Every size sets TESTCONTAINERS_HOST_OVERRIDE to the node IP; without it
+    # getHost():getMappedPort() was "Connection refused" and those suites used to be skipped.
+    # Services without Testcontainers run on kelta-medium.
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -147,20 +148,20 @@ jobs:
             changed: ${{ (needs.changes.outputs.gateway == 'true' || needs.changes.outputs.maven_build == 'true') && 'true' || 'false' }}
             # Its @SpringBootTest integration suites (real Redis + NATS via Testcontainers) run
             # through failsafe, which the pom enables only under -Pintegration-tests.
-            runner: k8s-runner-integration
+            runner: kelta-large
             mvn_args: -Pintegration-tests
           - service: worker
             changed: ${{ (needs.changes.outputs.worker == 'true' || needs.changes.outputs.maven_build == 'true') && 'true' || 'false' }}
-            runner: k8s-runner-integration
+            runner: kelta-large
           - service: auth
             changed: ${{ (needs.changes.outputs.auth == 'true' || needs.changes.outputs.maven_build == 'true') && 'true' || 'false' }}
-            runner: k8s-runner-integration
+            runner: kelta-large
           - service: ai
             changed: ${{ (needs.changes.outputs.ai == 'true' || needs.changes.outputs.maven_build == 'true') && 'true' || 'false' }}
-            runner: k8s-runner-integration
+            runner: kelta-large
           - service: mcp
             changed: ${{ (needs.changes.outputs.mcp == 'true' || needs.changes.outputs.maven_build == 'true') && 'true' || 'false' }}
-            runner: k8s-runner
+            runner: kelta-medium
     # The integration filter, not any_java: integration-tests needs this job, so a harness-only
     # change must not skip it. Its matrix entries still skip per service via matrix.changed.
     if: (needs.changes.outputs.integration == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -266,7 +267,7 @@ jobs:
   test-runtime:
     name: Test Runtime Modules
     needs: changes
-    runs-on: k8s-runner-integration   # Testcontainers ITs — see test-java
+    runs-on: kelta-large   # Testcontainers ITs — see test-java
     if: (needs.changes.outputs.runtime == 'true' || needs.changes.outputs.maven_build == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - name: Checkout code
@@ -328,7 +329,7 @@ jobs:
   test-rust-modules:
     name: Test Rust Modules
     needs: changes
-    runs-on: k8s-runner
+    runs-on: kelta-medium
     timeout-minutes: 30
     if: (needs.changes.outputs.rust_modules == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     steps:
@@ -360,7 +361,7 @@ jobs:
     name: Test Frontend
     needs: changes
     if: (needs.changes.outputs.web == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.sdk_docs == 'true' || needs.changes.outputs.cli_docs == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: k8s-runner
+    runs-on: kelta-medium
     defaults:
       run:
         working-directory: kelta-web
@@ -478,7 +479,7 @@ jobs:
     name: Integration Tests
     needs: [changes, test-java]
     if: (needs.changes.outputs.integration == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: k8s-runner-integration
+    runs-on: kelta-large
     # 25, not 20: a cold kelta-billing image build (release, thin LTO) adds a few minutes
     # when the kelta-ci builder has no cached dependency layer.
     timeout-minutes: 25
@@ -622,7 +623,7 @@ jobs:
       (needs.changes.outputs.e2e == 'true' || needs.changes.outputs.workflows == 'true'
       || (github.event_name == 'workflow_dispatch' && inputs.update_snapshots_ref != ''))
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: k8s-runner-integration
+    runs-on: kelta-large
     timeout-minutes: 45
     # Both shards always finish, so a red run reports every failing spec, as the
     # single job did.
@@ -758,7 +759,7 @@ jobs:
 
       - name: Build Playwright runner image (tests + CLI baked in)
         # Bake e2e-tests + node_modules into a runner image. Bind-mounting the
-        # workspace doesn't work with the k8s-runner-integration remote Docker
+        # workspace doesn't work with the self-hosted runners' remote Docker
         # daemon (the daemon host can't see the runner's filesystem).
         #
         # Build context is the repo root (not e2e-tests) so the image can also carry
@@ -943,7 +944,7 @@ jobs:
     name: Quickstart Smoke Test
     needs: changes
     if: (needs.changes.outputs.quickstart == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: k8s-runner-integration
+    runs-on: kelta-large
     timeout-minutes: 20
     concurrency:
       group: quickstart-${{ github.head_ref || github.ref }}
@@ -1113,7 +1114,7 @@ jobs:
       (needs.changes.outputs.templates == 'true' || needs.changes.outputs.workflows == 'true'
       || github.event_name == 'schedule')
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: k8s-runner-integration
+    runs-on: kelta-large
     timeout-minutes: 50
     concurrency:
       group: templates-${{ github.head_ref || github.ref }}
@@ -1266,7 +1267,7 @@ jobs:
       (needs.changes.outputs.mcp_replay == 'true' || needs.changes.outputs.workflows == 'true'
       || github.event_name == 'schedule')
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: k8s-runner-integration
+    runs-on: kelta-large
     timeout-minutes: 45
     concurrency:
       group: mcp-replay-${{ github.head_ref || github.ref }}
@@ -1436,7 +1437,7 @@ jobs:
     name: Upgrade last release to HEAD
     needs: changes
     if: (needs.changes.outputs.upgrade == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: k8s-runner-integration
+    runs-on: kelta-large
     timeout-minutes: 35
     concurrency:
       group: upgrade-${{ github.head_ref || github.ref }}
@@ -1635,7 +1636,7 @@ jobs:
   worker-image-is-jvm:
     name: Worker image is JVM
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: k8s-runner
+    runs-on: kelta-medium
     steps:
       - uses: actions/checkout@v7
       - name: Assert the worker builds from Dockerfile.jvm
@@ -1677,7 +1678,7 @@ jobs:
   dependency-audit:
     name: Dependency Audit (npm)
     needs: changes
-    runs-on: k8s-runner
+    runs-on: kelta-small
     if: (needs.changes.outputs.web == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - name: Checkout code
@@ -1706,7 +1707,7 @@ jobs:
   dependency-audit-java:
     name: Dependency Audit (Java)
     needs: changes
-    runs-on: k8s-runner
+    runs-on: kelta-medium
     timeout-minutes: 30
     if: >-
       (needs.changes.outputs.any_java == 'true' || needs.changes.outputs.java_audit == 'true'
@@ -1805,7 +1806,7 @@ jobs:
   lint-workflows:
     name: Lint Workflows
     needs: changes
-    runs-on: k8s-runner
+    runs-on: kelta-small
     if: (needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - name: Checkout code
@@ -1850,7 +1851,7 @@ jobs:
   test-ci-scripts:
     name: Test CI Scripts
     needs: changes
-    runs-on: k8s-runner
+    runs-on: kelta-small
     if: (needs.changes.outputs.ci_scripts == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     timeout-minutes: 10
     steps:
@@ -1929,7 +1930,7 @@ jobs:
   test-marketing:
     name: Test Marketing Site
     needs: changes
-    runs-on: k8s-runner
+    runs-on: kelta-medium
     if: (needs.changes.outputs.marketing == 'true' || needs.changes.outputs.workflows == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     defaults:
       run:
@@ -1959,7 +1960,7 @@ jobs:
   test-dora:
     name: DORA collector tests
     needs: changes
-    runs-on: k8s-runner
+    runs-on: kelta-small
     if: (needs.changes.outputs.dora == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - name: Checkout code
@@ -1978,7 +1979,7 @@ jobs:
     name: Quality Gate
     needs: [changes, test-java, test-runtime, test-rust-modules, test-frontend, test-marketing, integration-tests, e2e, quickstart, templates, mcp-replay, upgrade, worker-image-is-jvm, dependency-audit, dependency-audit-java, lint-workflows, test-ci-scripts, test-dora]
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: k8s-runner
+    runs-on: kelta-small
     steps:
       - name: Check job results
         run: |
