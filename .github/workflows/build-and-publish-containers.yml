@@ -631,10 +631,30 @@ jobs:
         run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
 
       - name: Install kustomize
+        env:
+          KUSTOMIZE_URL: https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz
+          # From the v5.4.3 release's checksums.txt.
+          KUSTOMIZE_SHA256: 3669470b454d865c8184d6bce78df05e977c9aea31c30df3c669317d43bcc7a7
         run: |
+          set -euo pipefail
           if ! command -v kustomize >/dev/null 2>&1; then
-            curl -fsSL "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" \
-              | bash -s -- 5.4.3 /usr/local/bin
+            tmp="$RUNNER_TEMP/kustomize.tar.gz"
+            delays=(5 10 20 40)
+            for attempt in 1 2 3 4 5; do
+              rc=0
+              curl -fsSL -o "$tmp" "$KUSTOMIZE_URL" || rc=$?
+              if [ "$rc" -eq 0 ] && echo "$KUSTOMIZE_SHA256  $tmp" | sha256sum -c --quiet -; then
+                break
+              fi
+              rm -f "$tmp"
+              echo "::warning::kustomize download attempt $attempt/5 failed (curl exit $rc; exit 0 means checksum mismatch)"
+              if [ "$attempt" -eq 5 ]; then
+                echo "::error::kustomize download failed after 5 attempts: $KUSTOMIZE_URL"
+                exit 1
+              fi
+              sleep "${delays[$((attempt - 1))]}"
+            done
+            tar -xzf "$tmp" -C /usr/local/bin kustomize
           fi
           kustomize version
 

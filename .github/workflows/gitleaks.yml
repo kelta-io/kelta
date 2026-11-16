@@ -16,10 +16,28 @@ jobs:
           fetch-depth: 0
 
       - name: Install gitleaks
+        env:
+          GITLEAKS_URL: https://github.com/gitleaks/gitleaks/releases/download/v8.19.0/gitleaks_8.19.0_linux_x64.tar.gz
+          # The linux_x64 line of the v8.19.0 release's gitleaks_8.19.0_checksums.txt.
+          GITLEAKS_SHA256: b7ac0aa997f6cee6e12b006a1ce5aae9f62357fa952a9b9c3449f0549798d7f9
         run: |
+          set -euo pipefail
           tmp="$RUNNER_TEMP/gitleaks.tar.gz"
-          curl -fsSL --retry 3 --retry-connrefused --retry-delay 5 -o "$tmp" \
-            https://github.com/gitleaks/gitleaks/releases/download/v8.19.0/gitleaks_8.19.0_linux_x64.tar.gz
+          delays=(5 10 20 40)
+          for attempt in 1 2 3 4 5; do
+            rc=0
+            curl -fsSL -o "$tmp" "$GITLEAKS_URL" || rc=$?
+            if [ "$rc" -eq 0 ] && echo "$GITLEAKS_SHA256  $tmp" | sha256sum -c --quiet -; then
+              break
+            fi
+            rm -f "$tmp"
+            echo "::warning::gitleaks download attempt $attempt/5 failed (curl exit $rc; exit 0 means checksum mismatch)"
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::gitleaks download failed after 5 attempts: $GITLEAKS_URL"
+              exit 1
+            fi
+            sleep "${delays[$((attempt - 1))]}"
+          done
           tar -xzf "$tmp" -C /usr/local/bin gitleaks
           gitleaks version
 
