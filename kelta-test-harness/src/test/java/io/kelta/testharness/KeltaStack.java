@@ -178,7 +178,7 @@ public final class KeltaStack {
 
     @SuppressWarnings({"resource", "unchecked"})
     public static final GenericContainer<?> CERBOS =
-            new GenericContainer<>(DockerImageName.parse("ghcr.io/cerbos/cerbos:0.40.0"))
+            new GenericContainer<>(DockerImageName.parse("ghcr.io/cerbos/cerbos:0.42.0"))
                     .withNetworkAliases("cerbos")
                     .withNetwork(NETWORK)
                     .withCommand("server", "--config=/config/config.yaml")
