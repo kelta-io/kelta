@@ -86,6 +86,43 @@ name a table or column, sit inside a longer literal (write `'%' || ${$.input.q} 
 or `{ "to": "…", "templateId": "<email template id>" }` to use a tenant email template. Sent through the tenant's
 SMTP configuration ([Messaging](/docs/platform/messaging/)).
 
+Two optional keys change the message headers:
+
+- `transactional` (boolean, default `true`): mail the recipient must receive, such as a receipt or a password
+  notice. It gets no unsubscribe headers and is sent even to an address on the tenant's suppression list. With
+  `false` the step skips a suppressed recipient (output `status` is `SUPPRESSED`, which is not a failure) and adds
+  the RFC 8058 one-click headers `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click`.
+  Any value other than a boolean fails the step.
+- `replyTo`: one plain address (`support@example.com`, no display name or list), sent as `Reply-To`. Placeholders
+  are allowed; a value that does not resolve to a single address fails the step.
+
+The step has no key for the sender. `From` is the tenant's `fromAddress` / `fromName`
+([Messaging](/docs/platform/messaging/)), else the platform's `EMAIL_FROM_ADDRESS` / `EMAIL_FROM_NAME`. When a
+tenant `fromAddress` is relayed through the platform SMTP server (the tenant set a From but no SMTP host of its
+own), the message also carries `Sender: <platform from-address>`. `Message-ID` is generated on the domain of
+the `From` address. Every flow email carries `Auto-Submitted: auto-generated`.
+
+A non-transactional email whose tenant sets `fromAddress` but relays through the platform SMTP server:
+
+```text
+From: Example Alerts <alerts@mail.example.com>
+Sender: noreply@platform.example
+Reply-To: support@example.com
+Auto-Submitted: auto-generated
+List-Unsubscribe: <https://<platform host>/api/track/email-unsubscribe?t=<signed token>>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+```
+
+The unsubscribe URL is the worker's tracking base URL (`CAMPAIGN_TRACKING_BASE_URL`, else `EXTERNAL_BASE_URL`)
+followed by `/api/track/email-unsubscribe?t=` and a signed token naming the tenant and the recipient address.
+Only this HTTPS form is sent, never a `mailto:` one. The route needs no login:
+`POST /api/track/email-unsubscribe?t=…` is the one-click unsubscribe (repeating it changes nothing), and
+`GET /api/track/email-unsubscribe?t=…` shows a confirmation page whose button sends that `POST`. A `GET` on its own
+never unsubscribes, because mail scanners fetch every link in a message. An unsubscribe adds the address to the
+tenant's suppression list (reason `UNSUBSCRIBE`), so later non-transactional emails to it are skipped. To handle
+unsubscribes in your own flow instead, for example to update a preference field, see the one-click unsubscribe
+webhook recipe in [Triggers](/docs/automation/triggers/).
+
 ### `OUTBOUND_MESSAGE`
 
 ```json
