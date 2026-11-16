@@ -52,7 +52,7 @@ describe('the real workflows', () => {
 describe('fixtures', () => {
   it('fail a self-hosted job without the guard, naming workflow and job', () => {
     assert.deepEqual(fixture('self-hosted-unguarded.yml'), [
-      'self-hosted-unguarded.yml: job build runs on a self-hosted runner (runs-on: k8s-runner) on a pull request without the fork guard in its if:',
+      'self-hosted-unguarded.yml: job build runs on a self-hosted runner (runs-on: kelta-small) on a pull request without the fork guard in its if:',
     ]);
   });
 
@@ -114,6 +114,6 @@ describe('hasForkGuard', () => {
 
 describe('selfHostedLabels', () => {
   it('reads the actionlint labels plus self-hosted', () => {
-    assert.deepEqual(LABELS, ['self-hosted', 'k8s-runner', 'k8s-runner-integration']);
+    assert.deepEqual(LABELS, ['self-hosted', 'kelta-small', 'kelta-medium', 'kelta-large']);
   });
 });

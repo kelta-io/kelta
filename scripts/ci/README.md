@@ -67,7 +67,7 @@ schema. Pool drift is bounded by per-schema cleanup, not per-instance reset.
 - Network reachability to the pool DNS:
   `kelta-ci-db-N.kelta-ci-db.kelta-ci-db.svc.cluster.local`
 
-The `k8s-runner-integration` pool already has `kubectl` and runs inside the
+The self-hosted runners (`kelta-small`, `kelta-medium`, `kelta-large`) already have `kubectl` and runs inside the
 cluster, so DNS works directly. For external runners add a sidecar that
 exposes the pool via NodePort or LoadBalancer.
 

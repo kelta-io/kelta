@@ -164,7 +164,7 @@ inbound routing by `email_from_address`, and kelta-auth slug→id lookups (`Tena
 
 ### Fork pull requests skip the self-hosted CI (PLT-851)
 
-Every `ci.yml` job runs on a self-hosted pool (`k8s-runner`, `k8s-runner-integration`) inside the
+Every `ci.yml` job runs on a self-hosted homelab size (`kelta-small`, `kelta-medium`, `kelta-large`) inside the
 cluster, and kelta-io/kelta is public: a fork's PR code on those pods is arbitrary code in the
 cluster. So every `ci.yml` job's `if:` is, or ANDs in, `github.event_name != 'pull_request' ||
 github.event.pull_request.head.repo.full_name == github.repository` (`quality-gate`'s `always()`

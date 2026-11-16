@@ -4,7 +4,7 @@
 #
 # JVM, not native: a native image bakes Netty's clock origin in at build time (kelta#1627),
 # and an image built on one machine is meant to run on any other. Separate from
-# build-and-publish-containers.yml, which builds the homelab deploy on k8s-runner — release
+# build-and-publish-containers.yml, which builds the homelab deploy on the self-hosted kelta-medium runners — release
 # builds run on GitHub-hosted runners and pull only public sources (Docker Hub, Maven
 # Central), never the homelab Harbor/Nexus caches.
 #

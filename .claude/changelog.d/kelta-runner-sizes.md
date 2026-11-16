@@ -1,0 +1,1 @@
+- 2026-11-16 chore(ci): run every self-hosted job on the shared kelta-io runner sizes kelta-small, kelta-medium and kelta-large instead of k8s-runner and k8s-runner-integration (kelta-runner-sizes)

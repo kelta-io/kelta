@@ -77,7 +77,7 @@ jobs:
   # ===========================================================================
   changes:
     name: Detect Changes
-    runs-on: k8s-runner
+    runs-on: kelta-small
     permissions:
       contents: read
       actions: read
@@ -168,7 +168,7 @@ jobs:
     name: Test ${{ matrix.service }}
     needs: changes
     if: needs.changes.outputs.any_java == 'true' || needs.changes.outputs.workflows == 'true'
-    runs-on: k8s-runner
+    runs-on: kelta-medium
     strategy:
       fail-fast: false
       matrix:
@@ -248,7 +248,7 @@ jobs:
     name: Test Runtime Modules
     needs: changes
     if: needs.changes.outputs.runtime == 'true' || needs.changes.outputs.workflows == 'true'
-    runs-on: k8s-runner
+    runs-on: kelta-medium
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -299,7 +299,7 @@ jobs:
     name: Test Frontend
     needs: changes
     if: needs.changes.outputs.web == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.workflows == 'true'
-    runs-on: k8s-runner
+    runs-on: kelta-medium
     defaults:
       run:
         working-directory: kelta-web
@@ -365,7 +365,7 @@ jobs:
     # `if: always()` lets us run after test-java/test-runtime/test-frontend skip;
     # the per-step `matrix.changed` check still gates each image.
     if: always() && !cancelled() && needs.test-java.result != 'failure' && needs.test-runtime.result != 'failure' && needs.test-frontend.result != 'failure'
-    runs-on: k8s-runner
+    runs-on: kelta-medium
     strategy:
       fail-fast: false
       matrix:
@@ -528,7 +528,7 @@ jobs:
     name: Build & Push kelta-billing
     needs: changes
     if: needs.changes.outputs.rust_modules == 'true' || needs.changes.outputs.workflows == 'true'
-    runs-on: k8s-runner
+    runs-on: kelta-medium
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -612,7 +612,7 @@ jobs:
       && needs.build-and-push-modules.result != 'failure'
       && github.ref == 'refs/heads/main'
       && (github.event_name != 'workflow_dispatch' || inputs.deploy)
-    runs-on: k8s-runner
+    runs-on: kelta-small
     steps:
       - name: Checkout ArgoCD repo
         uses: actions/checkout@v7
@@ -805,7 +805,7 @@ jobs:
     name: Smoke Test
     needs: [changes, deploy]
     if: needs.deploy.result == 'success'
-    runs-on: k8s-runner
+    runs-on: kelta-small
     # 15, not 10 (PLT-559): the cli-downloads step's caps now sum to ~11m (manifest poll 5m +
     # rollout 3m + old-pod wait 2m + 2 bounded retries ~1m). A cap that is hit fails the step
     # anyway; this keeps a slow-but-succeeding run from being cut off by the job timeout.
@@ -1172,7 +1172,7 @@ jobs:
     name: Verify kelta-billing module
     needs: [changes, deploy]
     if: needs.deploy.result == 'success' && needs.changes.outputs.rust_modules == 'true'
-    runs-on: k8s-runner
+    runs-on: kelta-small
     # The image wait (5m) + rollout (3m) + manifest probe (1m) caps, plus kubectl overhead.
     timeout-minutes: 12
     steps:
@@ -1263,10 +1263,10 @@ jobs:
     name: E2E Tests
     needs: smoke-test
     if: needs.smoke-test.result == 'success'
-    runs-on: k8s-runner
+    runs-on: kelta-small
     timeout-minutes: 25
     # Playwright runs inside mcr.microsoft.com/playwright:v<version>-noble, never on the host:
-    # k8s-runner (.github/runner/Dockerfile) has focal apt sources, so Playwright's host
+    # the self-hosted runner image (.github/runner/Dockerfile) has focal apt sources, so Playwright's host
     # dependency install cannot get the noble system libs a current Chromium needs
     # (ci-cd.md → e2e-test; guarded by ci/e2e-test-job.test.ts).
     steps:
