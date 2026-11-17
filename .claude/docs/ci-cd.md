@@ -447,7 +447,7 @@ Maven root); GitHub Actions majors share one PR. Maven and npm majors have a 7-d
 planned tasks: a Spring Boot patch bump broke tenant creation, PLT-767) and allows only patch
 bumps for `org.graalvm.*:*` (the polyglot/js runtime tracks the GraalVM JDK line). The npm entry has an `opentelemetry-js` group,
 listed first, so every `@opentelemetry/*` package (all update types) moves in one PR: the 0.x
-instrumentation packages pin the stable core they were built with. Playwright npm bumps (`@playwright/test`, `playwright`, `playwright-core`) are not ignored: the `e2e` job derives its `mcr.microsoft.com/playwright` runner image tag from `e2e-tests/package-lock.json`, so the browsers move with the package (kelta#1984 failed when the tag was hard-coded). A `FROM`
+instrumentation packages pin the stable core they were built with. The npm entry also ignores `typescript` `>= 6.1.0` until typescript-eslint widens its `typescript <6.1.0` peer range (the 7.0 bump failed `npm ci` with ERESOLVE, kelta#2153). Playwright npm bumps (`@playwright/test`, `playwright`, `playwright-core`) are not ignored: the `e2e` job derives its `mcr.microsoft.com/playwright` runner image tag from `e2e-tests/package-lock.json`, so the browsers move with the package (kelta#1984 failed when the tag was hard-coded). A `FROM`
 whose image comes from a build `ARG` (`FROM ${GRAALVM_IMAGE}`, `FROM ${BASE_REGISTRY}/...`)
 cannot be resolved by Dependabot and is not updated. Dependabot PRs run the normal `ci.yml`
 and are merged by a human, like any other PR. Security updates (Dependabot alerts) are a

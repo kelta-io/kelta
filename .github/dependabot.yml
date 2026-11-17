@@ -73,6 +73,13 @@ updates:
       - dependency-name: "@eslint/js"
         update-types:
           - "version-update:semver-major"
+      # TypeScript >= 6.1 waits for typescript-eslint: @typescript-eslint/eslint-plugin 8.73.0
+      # (latest, 2026-11-17) peers on typescript ">=4.8.4 <6.1.0", so the 7.0.2 bump fails
+      # `npm ci` with ERESOLVE in kelta-web and kelta-ui/app (kelta#2153, PLT-983). Remove this
+      # entry when typescript-eslint widens that peer range.
+      - dependency-name: "typescript"
+        versions:
+          - ">= 6.1.0"
     labels:
       - dependencies
     groups:
