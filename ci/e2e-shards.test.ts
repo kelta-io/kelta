@@ -59,8 +59,10 @@ describe('ci.yml e2e job shards', () => {
     assert.match(stepBlock(JOB, 'Upload e2e artifacts').match(/\n {10}name: ([^\n]+)/)![1], SHARD);
   });
 
-  it('regenerates visual baselines in shard 1 only', () => {
-    assert.match(stepBlock(JOB, 'Regenerate visual baselines'), /\n {10}matrix\.shard == 1\n {10}&& \(/);
+  // Shard 2 is the lightest of the three (PLT-986); both once-per-run steps sit in it.
+  it('regenerates visual baselines and runs the MCP smoke in shard 2 only', () => {
+    assert.match(stepBlock(JOB, 'Regenerate visual baselines'), /\n {10}matrix\.shard == 2\n {10}&& \(/);
+    assert.match(stepBlock(JOB, 'MCP smoke'), /\n {8}if: matrix\.shard == 2\n/);
   });
 
   it('stays a quality-gate dependency', () => {
