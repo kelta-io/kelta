@@ -80,6 +80,13 @@ updates:
       - dependency-name: "typescript"
         versions:
           - ">= 6.1.0"
+      # TypeScript 6.0 waits for kelta-web: its tsconfig.json and packages/*/tsconfig.json set
+      # `baseUrl`, which 6.0 rejects with TS5101, so the 6.0.3 bump fails kelta-web `Type check`
+      # (kelta#2178, PLT-1003, 2026-11). kelta-ui/app already took 6.0.3 by dropping `baseUrl`.
+      # Remove this entry when kelta-web drops `baseUrl` from its tsconfigs.
+      - dependency-name: "typescript"
+        versions:
+          - "6.0.x"
     labels:
       - dependencies
     groups:
