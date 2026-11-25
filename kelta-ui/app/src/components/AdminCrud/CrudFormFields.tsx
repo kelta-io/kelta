@@ -6,7 +6,14 @@
  */
 
 import React from 'react'
-import { get, useFormContext, useWatch, type FieldPath, type FieldValues } from 'react-hook-form'
+import {
+  get,
+  useFormContext,
+  useWatch,
+  type FieldError,
+  type FieldPath,
+  type FieldValues,
+} from 'react-hook-form'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { CRUD_FIELD_LABEL_CLASS, useCrudFormState } from './crudFormState'
@@ -108,7 +115,7 @@ export function CrudTextField<TValues extends FieldValues = FieldValues>({
     formState: { errors },
   } = useFormContext<TValues>()
   const { isSubmitting } = useCrudFormState()
-  const error = get(errors, name)?.message as string | undefined
+  const error = get<typeof errors, FieldError | undefined>(errors, name)?.message
   const controlProps = {
     id,
     placeholder,
@@ -193,7 +200,7 @@ export function CrudSelectField<TValues extends FieldValues = FieldValues>({
     formState: { errors },
   } = useFormContext<TValues>()
   const { isSubmitting } = useCrudFormState()
-  const error = get(errors, name)?.message as string | undefined
+  const error = get<typeof errors, FieldError | undefined>(errors, name)?.message
   // Controlled from the form value: an uncontrolled <select> keeps showing the placeholder when
   // its options arrive after the dialog opened (e.g. a collection list still loading), even
   // though the form holds — and submits — the stored value.

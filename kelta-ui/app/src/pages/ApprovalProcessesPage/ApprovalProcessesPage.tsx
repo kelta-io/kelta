@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef } from 'react'
 import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { get, useFormContext, useWatch } from 'react-hook-form'
+import { get, useFormContext, useWatch, type FieldError } from 'react-hook-form'
 import { z } from 'zod'
 import { Braces } from 'lucide-react'
 import { useI18n } from '../../context/I18nContext'
@@ -124,7 +124,7 @@ function EntryCriteriaField(): React.ReactElement {
   const [pickerOpen, setPickerOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const { ref: registerRef, ...registration } = register('entryCriteria')
-  const error = get(errors, 'entryCriteria')?.message as string | undefined
+  const error = get<typeof errors, FieldError | undefined>(errors, 'entryCriteria')?.message
 
   const handleInsert = useCallback(
     (token: string) => {
